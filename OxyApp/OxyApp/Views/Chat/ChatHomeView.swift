@@ -98,7 +98,7 @@ struct ChatHomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 BrandWordmark(height: 12)
                 Text("Conversations")
-                    .font(.appBody(15, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appInk)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -114,13 +114,13 @@ struct ChatHomeView: View {
                 HStack(spacing: 10) {
                     AppIcon(sf: "square.and.pencil", size: 15)
                     Text("New conversation")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.appBody(AppText.body, weight: .medium))
                     Spacer()
                 }
                 .foregroundStyle(Color.appInk)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 13)
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+                .padding(.vertical, 14)
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
             .buttonStyle(.appScale(0.97))
             .padding(.horizontal, 16)
@@ -130,7 +130,7 @@ struct ChatHomeView: View {
                 AppIcon(sf: "magnifyingglass", size: 15)
                     .foregroundStyle(Color.appMuted)
                 TextField("Search", text: $searchQuery)
-                    .font(.system(size: 14))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appInk)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -148,15 +148,15 @@ struct ChatHomeView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.vertical, 12)
             .background(Color.appSurface)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 8)
 
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+            Rectangle().fill(Color.appHairline).frame(height: AppBorder.hairline)
 
             // List
             sidebarList
@@ -249,7 +249,7 @@ struct ChatHomeView: View {
             AppIcon(sf: icon, size: 34)
                 .foregroundStyle(Color.appMuted)
             Text(text)
-                .font(.system(size: 14))
+                .font(.appBody(AppText.body))
                 .foregroundStyle(Color.appMuted)
             Spacer()
         }
@@ -465,9 +465,9 @@ private struct SidebarSkeleton: View {
         VStack(spacing: 0) {
             ForEach(Array(widths.enumerated()), id: \.offset) { _, w in
                 HStack(spacing: 0) {
-                    OxySkeletonCard(height: 13, cornerRadius: 3).frame(width: w)
+                    OxySkeletonCard(height: 13, cornerRadius: AppRadius.sm / 2).frame(width: w)
                     Spacer(minLength: 12)
-                    OxySkeletonCard(height: 11, cornerRadius: 3).frame(width: 28)
+                    OxySkeletonCard(height: 11, cornerRadius: AppRadius.sm / 2).frame(width: 28)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -485,15 +485,15 @@ private struct SidebarRow: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(title)
-                .font(.appBody(14, weight: .light))
+                .font(.appBody(AppText.body, weight: .regular))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 12)
             Text(trailing)
-                .font(.appMono(11))
+                .font(.appMono(AppText.micro))
                 .monospacedDigit()
-                .foregroundStyle(Color.appMuted.opacity(0.7))
+                .foregroundStyle(Color.appMuted)
                 .fixedSize()
         }
         .padding(.horizontal, 16)
@@ -509,9 +509,9 @@ private struct SidebarSectionHeader: View {
     var body: some View {
         HStack {
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .regular))
+                .font(.appBody(AppText.micro, weight: .regular))
                 .tracking(2.8)
-                .foregroundStyle(Color.appMuted.opacity(0.8))
+                .foregroundStyle(Color.appMuted)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -526,25 +526,25 @@ private struct SidebarSearchResultRow: View {
     let result: SearchResult
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(result.role == "user" ? "You" : "Millie")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.appBody(AppText.micro, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
                 Spacer()
                 if let date = result.formattedDate {
                     Text(date)
-                        .font(.system(size: 11))
+                        .font(.appBody(AppText.micro))
                         .foregroundStyle(Color.appMuted)
                 }
             }
             Text(result.content)
-                .font(.system(size: 14))
+                .font(.appBody(AppText.body))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(2)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }

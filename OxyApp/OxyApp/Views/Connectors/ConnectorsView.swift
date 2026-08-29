@@ -102,7 +102,7 @@ struct ConnectorsView: View {
         HStack(spacing: 14) {
             AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol(connector.id))
                 .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(connector.name)
@@ -159,7 +159,7 @@ struct ConnectorsView: View {
                 }
             } label: {
                 Text("Reconnect")
-                    .font(.appBody(14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appAccent)
             }
             .disabled(!connector.implemented)
@@ -169,11 +169,11 @@ struct ConnectorsView: View {
                 handleConnectorAction(connector)
             } label: {
                 Text("Connect")
-                    .font(.appBody(14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.appFillSubtle))
             }
             .disabled(!connector.implemented)
             .buttonStyle(.appScale(0.97))
@@ -332,23 +332,23 @@ private struct AppIconView: View {
                 }
             } else if let emoji = firstEmoji(from: candidates) {
                 Text(emoji)
-                    .font(.system(size: 20))
+                    .font(.appBody(AppText.title))
             } else {
                 brandFallback
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
     }
 
     private var brandFallback: some View {
         let brand = brandStyle
         return ZStack {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                 .fill(brand.background)
             if let text = brand.text {
                 Text(text)
-                    .font(.system(size: brand.fontSize, weight: .bold))
+                    .font(.appBody(brand.fontSize, weight: .bold))
                     .foregroundStyle(brand.foreground)
                     .minimumScaleFactor(0.55)
                     .lineLimit(1)

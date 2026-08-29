@@ -9,7 +9,7 @@ struct LoadingIndicator: View {
             ProgressView()
                 .tint(tint)
             Text(label)
-                .font(.system(size: 12, weight: .light))
+                .font(.appBody(AppText.caption, weight: .regular))
                 .foregroundStyle(Color.appMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -57,11 +57,11 @@ struct ChatView: View {
                     HStack(spacing: 8) {
                             AppIcon(sf: "wifi.slash", size: 14)
                             Text("No internet connection")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.appBody(AppText.caption, weight: .medium))
                         }
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(Color.appOnAccent)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
+                        .padding(.vertical, AppSpacing.sm)
                         .background(Color.appWarning)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -71,10 +71,10 @@ struct ChatView: View {
                             AppIcon(sf: "clock.arrow.circlepath", size: 14)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Viewing history")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.appBody(AppText.caption, weight: .semibold))
                                 if let label = viewModel.historySnapshotLabel {
                                     Text(label)
-                                        .font(.system(size: 11))
+                                        .font(.appBody(AppText.micro))
                                 }
                             }
                             Spacer()
@@ -83,12 +83,12 @@ struct ChatView: View {
                                     await viewModel.returnToCurrentChat(userId: appState.userId)
                                 }
                             }
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.appBody(AppText.caption, weight: .semibold))
                         }
                         .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.appMuted.opacity(0.1))
+                        .background(Color.appHairline)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -483,7 +483,7 @@ struct ChatView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                        .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                 )
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
@@ -496,11 +496,11 @@ struct ChatView: View {
     private func attachSheetRow(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 16, weight: .regular))
+                .font(.appBody(AppText.callout, weight: .regular))
                 .foregroundStyle(Color.appInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 17)
+                .padding(.vertical, 18)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.98))
@@ -836,7 +836,7 @@ private struct ActionReviewSheet: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.appTitle(20, weight: .semibold))
+                        .font(.appTitle(AppText.title, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                 }
                 Spacer()
@@ -847,40 +847,40 @@ private struct ActionReviewSheet: View {
                     .appEyebrow()
                     .foregroundStyle(isPayment ? Color.appAccent.opacity(0.9) : Color.appMuted)
                 Text(detail)
-                    .font(.appBody(15))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appInk)
                     .lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)
-            .background(Color.appSurface.opacity(0.82))
+            .background(Color.appSurface)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                    .stroke(isPayment ? Color.appAccent.opacity(0.28) : Color.appHairline, lineWidth: 0.75)
+                    .stroke(isPayment ? Color.appAccent.opacity(0.28) : Color.appHairline, lineWidth: AppBorder.hairline)
             )
 
             if isPayment {
                 Text("Double-check the total and address on the site if anything looks off.")
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.appMuted)
             }
 
             HStack(spacing: 12) {
                 Button(action: onCancel) {
                     Text("Cancel")
-                        .font(.appBody(15, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                 }
                 .buttonStyle(.appScale)
                 .foregroundStyle(Color.appMuted)
                 .background(Color.appSurface2)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
 
                 Button(action: onConfirm) {
                     Text(confirmLabel)
-                        .font(.appBody(15, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.appOnAccent)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -888,7 +888,7 @@ private struct ActionReviewSheet: View {
                 .buttonStyle(.appScale)
                 .foregroundStyle(Color.appOnAccent)
                 .background(isPayment ? Color.appAccent : Color.appAccent)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
             }
         }
         .padding(.horizontal, 20)
@@ -1046,8 +1046,8 @@ private struct WelcomeCard: View {
                     .animation(.appSpring.delay(0.06), value: appeared)
 
                 Text(greeting)
-                    .font(.appEditorial(31))
-                    .appHeroTracking(31)
+                    .font(.appDisplay(AppText.display, weight: .semibold))
+                    .appHeroTracking(AppText.display)
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1060,8 +1060,8 @@ private struct WelcomeCard: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Suggestions")
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(Color.appInk.opacity(0.72))
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                     .padding(.horizontal, 24)
 
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
@@ -1071,17 +1071,17 @@ private struct WelcomeCard: View {
                                 .foregroundStyle(Color.appMuted)
                                 .frame(width: 18, alignment: .center)
                             Text(label)
-                                .font(.appBody(15.5, weight: .medium))
+                                .font(.appBody(AppText.body, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             AppIcon(sf: "arrow.up.right", size: 11)
-                                .foregroundStyle(Color.appMuted.opacity(0.5))
+                                .foregroundStyle(Color.appMuted)
                         }
                         .padding(.horizontal, 24)
-                        .padding(.vertical, 15)
+                        .padding(.vertical, 16)
                         .contentShape(Rectangle())
                         .overlay(alignment: .bottom) {
-                            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+                            Rectangle().fill(Color.appHairline).frame(height: AppBorder.hairline)
                         }
                     }
                     .buttonStyle(.appScale(0.97))
@@ -1157,24 +1157,24 @@ private struct ChatInputBar: View {
                             .resizable()
                             .scaledToFill()
                             .frame(width: 38, height: 38)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                             )
                     } else {
                         AppIcon(sf: attachmentIsImage ? "photo.fill" : "doc.fill", size: 17)
                             .foregroundStyle(Color.appMuted)
                             .frame(width: 38, height: 38)
-                            .appGlass(RoundedRectangle(cornerRadius: 8))
+                            .appGlass(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.appBody(AppText.footnote, weight: .medium))
                             .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
-                            .font(.system(size: 11))
+                            .font(.appBody(AppText.micro))
                             .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
@@ -1190,7 +1190,7 @@ private struct ChatInputBar: View {
                 .padding(.vertical, 10)
                 .background(Color.appSurface)
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
             }
@@ -1198,7 +1198,7 @@ private struct ChatInputBar: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Button(action: onAttach) {
                     AppIcon(sf: "plus", size: 19)
-                        .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
+                        .foregroundStyle(isVoiceActive ? Color.appMuted : Color.appMuted)
                         .frame(width: 34, height: 34)
                         .appGlass(Circle(), interactive: true)
                 }
@@ -1230,7 +1230,7 @@ private struct ChatInputBar: View {
                     .background {
                         Circle().fill(buttonFill)
                         if !canSend && !isRecording {
-                            Circle().strokeBorder(Color.appHairline, lineWidth: 0.5)
+                            Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                         }
                     }
                 }
@@ -1249,7 +1249,7 @@ private struct ChatInputBar: View {
 
     private var textField: some View {
         TextField(incognito ? "Private — not saved" : "Message", text: $text, axis: .vertical)
-            .font(.system(size: 14.5, weight: .regular))
+            .font(.appBody(AppText.body, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .lineLimit(1...6)
@@ -1257,9 +1257,9 @@ private struct ChatInputBar: View {
             .disabled(isSending)
             .opacity(isSending ? 0.72 : 1)
             .onSubmit { if canSend { onSend() } }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(Color.appSurface2.opacity(0.72))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.appSurface2)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
@@ -1296,11 +1296,11 @@ private struct ChatInputBar: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(isPreparingVoice ? "Transcribing" : "Listening")
-                    .font(.appBody(13, weight: .medium))
+                    .font(.appBody(AppText.footnote, weight: .medium))
                     .foregroundStyle(Color.appInk)
                 if !voiceTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isPreparingVoice {
                     Text(voiceTranscript)
-                        .font(.appBody(12))
+                        .font(.appBody(AppText.caption))
                         .foregroundStyle(Color.appMuted)
                         .lineLimit(1)
                 }
@@ -1313,7 +1313,7 @@ private struct ChatInputBar: View {
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                .strokeBorder(isRecording ? Color.appDanger.opacity(0.22) : Color.appHairline, lineWidth: 0.75)
+                .strokeBorder(isRecording ? Color.appDanger.opacity(0.22) : Color.appHairline, lineWidth: AppBorder.hairline)
         )
     }
 
@@ -1334,7 +1334,7 @@ private struct ChatInputBar: View {
     private var buttonForeground: Color {
         if canSend { return Color.appOnAccent }
         if isRecording { return Color.appInk }
-        return canAct ? Color.appMuted : Color.appMuted.opacity(0.5)
+        return canAct ? Color.appMuted : Color.appFaint
     }
 
     private var canAct: Bool {
@@ -1375,7 +1375,7 @@ private struct ActivityCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(visibleSteps) { step in
                 ActivityStepRow(step: step, pulse: pulse && !reduceMotion)
             }
@@ -1383,11 +1383,11 @@ private struct ActivityCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface.opacity(0.62))
+        .background(Color.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -1409,7 +1409,7 @@ private struct ActivityStepRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
             glyph
                 .frame(width: 14, height: 16)
             Text(step.title)
@@ -1427,7 +1427,7 @@ private struct ActivityStepRow: View {
         switch step.state {
         case .pending:
             Circle()
-                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
+                .strokeBorder(Color.appFaint, lineWidth: AppBorder.strong)
                 .frame(width: 7, height: 7)
         case .active:
             Circle()
@@ -1437,13 +1437,13 @@ private struct ActivityStepRow: View {
                 .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
         case .complete:
             AppIcon(sf: "checkmark", size: 11)
-                .foregroundStyle(Color.appMuted.opacity(0.7))
+                .foregroundStyle(Color.appMuted)
         case .failed:
             AppIcon(sf: "exclamationmark", size: 11)
                 .foregroundStyle(Color.appDanger)
         case .neutral:
             Circle()
-                .fill(Color.appMuted.opacity(0.5))
+                .fill(Color.appFaint)
                 .frame(width: 6, height: 6)
         }
     }
@@ -1457,23 +1457,23 @@ struct PendantOverlay: View {
     var notice: String? = nil
 
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 12) {
             if let notice {
                 AppIcon(sf: "exclamationmark.circle.fill", size: 15)
                     .foregroundStyle(Color.appWarning)
                 Text(notice)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.appBody(AppText.body, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
             } else if state == .listening {
                 PendantWaveform(active: true)
                 Text("Listening")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(.primary)
                 if let t = transcript, !t.isEmpty {
                     Text("·").foregroundStyle(.tertiary)
                     Text(t)
-                        .font(.system(size: 14))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1485,18 +1485,18 @@ struct PendantOverlay: View {
                     .symbolEffect(.variableColor.iterative, isActive: true)
                 if let t = transcript, !t.isEmpty {
                     Text(t)
-                        .font(.system(size: 14))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(Color.appInk)
                         .lineLimit(1)
                 } else {
                     Text("Transcribing…")
-                        .font(.system(size: 14))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(Color.appMuted)
                 }
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
         .appGlass(Capsule())
         .animation(.appFast, value: state)
     }

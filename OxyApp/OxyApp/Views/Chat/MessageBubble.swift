@@ -132,7 +132,7 @@ struct MessageBubble: View {
                         }
                         if message.queuedForActiveTask {
                             Text("Queued for this task")
-                                .font(.appBody(11.5, weight: .medium))
+                                .font(.appBody(AppText.micro, weight: .medium))
                                 .foregroundStyle(Color.appMuted)
                                 .padding(.trailing, 2)
                         }
@@ -147,7 +147,7 @@ struct MessageBubble: View {
                         Button("Show on display") {
                             showDisplaySheet = true
                         }
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.appBody(AppText.caption, weight: .semibold))
                         .foregroundStyle(Color.appAccent)
                         .padding(.top, 3)
                         .sheet(isPresented: $showDisplaySheet) {
@@ -173,7 +173,7 @@ struct MessageBubble: View {
             // Agent work: rich handoff cards keep their surface; everything else
             // collapses into one quiet receipt line per turn.
             if !richActions.isEmpty || !receiptActions.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(richActions) { action in
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
@@ -200,16 +200,16 @@ struct MessageBubble: View {
                             HStack(spacing: 8) {
                                 AppIcon(sf: "arrow.clockwise", size: 14)
                                 Text(recovery.recoveryAction?.label ?? "Keep going")
-                                    .font(.appBody(13, weight: .semibold))
+                                    .font(.appBody(AppText.footnote, weight: .semibold))
                             }
                             .foregroundStyle(Color.appAccent)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Color.appSurface.opacity(0.84))
+                            .background(Color.appSurface)
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                             )
                         }
                         .buttonStyle(.plain)
@@ -223,16 +223,16 @@ struct MessageBubble: View {
                             HStack(spacing: 8) {
                                 AppIcon(sf: "person.crop.circle", size: 14)
                                 Text(reauth.recoveryAction?.label ?? "Sign in")
-                                    .font(.appBody(13, weight: .semibold))
+                                    .font(.appBody(AppText.footnote, weight: .semibold))
                             }
                             .foregroundStyle(Color.appAccent)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Color.appSurface.opacity(0.84))
+                            .background(Color.appSurface)
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                             )
                         }
                         .buttonStyle(.plain)
@@ -251,15 +251,15 @@ struct MessageBubble: View {
                             showMissingInformationSheet = true
                         } label: {
                             Text(information.recoveryAction?.label ?? "Add details")
-                                .font(.appBody(13, weight: .semibold))
+                                .font(.appBody(AppText.footnote, weight: .semibold))
                                 .foregroundStyle(Color.appAccent)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(Color.appSurface.opacity(0.84))
+                                .background(Color.appSurface)
                                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                                        .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                                 )
                         }
                         .buttonStyle(.plain)
@@ -279,11 +279,11 @@ struct MessageBubble: View {
                     HStack(spacing: 8) {
                         ForEach(appointmentChoices, id: \.command) { choice in
                             Button(choice.label) { onActionCommand?(choice.command) }
-                                .font(.appBody(13, weight: .medium))
+                                .font(.appBody(AppText.footnote, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
-                                .background(Color.appSurface.opacity(0.84))
+                                .padding(.vertical, 10)
+                                .background(Color.appSurface)
                                 .clipShape(Capsule())
                                 .buttonStyle(.appScale)
                         }
@@ -302,9 +302,9 @@ struct MessageBubble: View {
             // Timestamp — group-end only, very quiet
             if showsTimestamp {
                 Text(message.timestamp, style: .time)
-                    .font(.appBody(10))
+                    .font(.appBody(AppText.micro))
                     .monospacedDigit()
-                    .foregroundStyle(Color.appMuted.opacity(0.72))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
                     .padding(.top, 2)
             }
@@ -344,11 +344,11 @@ private struct DisplayRenderSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Choose a paired display")
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
 
                 Text("This sends the reply as a short readable update.")
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.mgSecondary)
 
                 if isLoading {
@@ -357,17 +357,17 @@ private struct DisplayRenderSheet: View {
                 } else if displays.isEmpty, let errorMessage {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(errorMessage)
-                            .font(.appBody(14))
+                            .font(.appBody(AppText.body))
                             .foregroundStyle(Color.mgDestructive)
                         Button("Try again") {
                             Task { await loadDisplays() }
                         }
-                        .font(.appBody(13, weight: .semibold))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
                         .foregroundStyle(Color.appAccent)
                     }
                 } else if displays.isEmpty {
                     Text("No displays paired. Pair one in Settings.")
-                        .font(.appBody(14))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(Color.mgSecondary)
                 } else {
                     VStack(spacing: 0) {
@@ -380,10 +380,10 @@ private struct DisplayRenderSheet: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(display.name)
-                                            .font(.system(size: 15, weight: .semibold))
+                                            .font(.appBody(AppText.body, weight: .semibold))
                                             .foregroundStyle(Color.mgHeading)
                                         Text("Paired")
-                                            .font(.appBody(12))
+                                            .font(.appBody(AppText.caption))
                                             .foregroundStyle(Color.mgSecondary)
                                     }
                                     Spacer()
@@ -391,7 +391,7 @@ private struct DisplayRenderSheet: View {
                                         ProgressView()
                                     } else {
                                         Text("Show")
-                                            .font(.appBody(13, weight: .semibold))
+                                            .font(.appBody(AppText.footnote, weight: .semibold))
                                             .foregroundStyle(Color.appAccent)
                                     }
                                 }
@@ -411,7 +411,7 @@ private struct DisplayRenderSheet: View {
 
                 if !displays.isEmpty, let errorMessage {
                     Text(errorMessage)
-                        .font(.appBody(12))
+                        .font(.appBody(AppText.caption))
                         .foregroundStyle(Color.mgDestructive)
                 }
 
@@ -540,7 +540,7 @@ private struct AssistantAnswerView: View {
                 case .paragraph(let text):
                     Text(.chatMarkdown(text))
                         .font(.appBody(compact ? 14.5 : 15.5))
-                        .foregroundStyle(Color.appInk.opacity(isStreaming ? 0.9 : 0.96))
+                        .foregroundStyle(Color.appInk)
                         .lineSpacing(compact ? 4 : 5.5)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -562,7 +562,7 @@ private struct AssistantAnswerView: View {
                 case .divider:
                     Rectangle()
                         .fill(Color.appHairline)
-                        .frame(height: 0.5)
+                        .frame(height: AppBorder.hairline)
                         .padding(.vertical, compact ? 4 : 6)
 
                 case .codeBlock(let code):
@@ -583,14 +583,14 @@ private struct AssistantListRow: View {
     let compact: Bool
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(marker)
                 .font(.appBody(compact ? 12 : 13, weight: .medium))
                 .foregroundStyle(Color.appAccent.opacity(0.86))
                 .frame(width: marker == "•" ? 14 : 18, alignment: .trailing)
             Text(.chatMarkdown(text))
                 .font(.appBody(compact ? 14.5 : 15.5))
-                .foregroundStyle(Color.appInk.opacity(0.94))
+                .foregroundStyle(Color.appInk)
                 .lineSpacing(compact ? 4 : 5)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -717,7 +717,7 @@ private struct AssistantTableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(row.enumerated()), id: \.offset) { column, value in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(header(for: column))
@@ -726,7 +726,7 @@ private struct AssistantTableView: View {
                                 .frame(width: compact ? 82 : 96, alignment: .leading)
                             Text(.chatMarkdown(value))
                                 .font(.appBody(compact ? 13.5 : 14.5))
-                                .foregroundStyle(Color.appInk.opacity(0.95))
+                                .foregroundStyle(Color.appInk)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -734,11 +734,11 @@ private struct AssistantTableView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .background(Color.appSurface.opacity(0.72))
+                .background(Color.appSurface)
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                        .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                 )
             }
         }
@@ -768,7 +768,7 @@ private struct AssistantCodeBlock: View {
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
         )
     }
 }
@@ -782,24 +782,24 @@ private struct FailedTurnView: View {
             AppIcon(sf: "exclamationmark.circle", size: 15)
                 .foregroundStyle(Color.appWarning)
             Text(message)
-                .font(.appBody(13.5))
-                .foregroundStyle(Color.appInk.opacity(0.95))
+                .font(.appBody(AppText.footnote))
+                .foregroundStyle(Color.appInk)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if let onRetry {
                 Button("Retry", action: onRetry)
-                    .font(.appBody(13, weight: .semibold))
+                    .font(.appBody(AppText.footnote, weight: .semibold))
                     .foregroundStyle(Color.appAccent)
                     .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.appSurface.opacity(0.78))
+        .background(Color.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
         )
     }
 }
@@ -829,7 +829,7 @@ private struct SubjectImageRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                         )
                     }
                 }
@@ -922,9 +922,9 @@ private struct DirectionsResultCard: View {
                 state: action.isCompleted ? .success : (action.isFailure ? .failure : .neutral)
             )
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.appBody(15, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
 
@@ -945,7 +945,7 @@ private struct DirectionsResultCard: View {
             }
 
             if !isDriving, !legs.isEmpty {
-                VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(legs.prefix(5)) { leg in
                         JourneyLegRow(leg: leg)
                     }
@@ -953,59 +953,59 @@ private struct DirectionsResultCard: View {
                 .padding(.top, 2)
             } else if let summary = action.cardText?.strippingMarkdown, !summary.isEmpty {
                 Text(summary)
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.appMuted)
                     .lineLimit(3)
             }
 
             HStack(spacing: 8) {
                 if mapsUrl != nil {
-                    directionButton("Open in Maps", systemImage: "map", urlString: mapsUrl)
+                    directionButton("Open in Maps", glyph: "map", urlString: mapsUrl)
                 }
                 if !isDriving, !legs.isEmpty {
-                    directionButton("View journey", systemImage: "list.bullet", urlString: mapsUrl ?? fareUrl)
+                    directionButton("View journey", glyph: "list.bullet", urlString: mapsUrl ?? fareUrl)
                 }
                 if !isDriving, fareUrl != nil {
-                    directionButton(price == nil ? "Check fares" : "Buy ticket", systemImage: "ticket", urlString: fareUrl)
+                    directionButton(price == nil ? "Check fares" : "Buy ticket", glyph: "ticket", urlString: fareUrl)
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface.opacity(0.9))
+        .background(Color.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .appEyebrow()
-                .foregroundStyle(Color.appMuted.opacity(0.8))
+                .foregroundStyle(Color.appMuted)
             Text(value)
-                .font(.appBody(12.5, weight: .medium))
-                .foregroundStyle(Color.appInk.opacity(0.94))
+                .font(.appBody(AppText.caption, weight: .medium))
+                .foregroundStyle(Color.appInk)
                 .lineLimit(1)
         }
     }
 
-    private func directionButton(_ label: String, systemImage: String, urlString: String?) -> some View {
+    private func directionButton(_ label: String, glyph: String, urlString: String?) -> some View {
         Button {
             guard let urlString, let url = URL(string: urlString) else { return }
             UIApplication.shared.open(url)
         } label: {
-            HStack(spacing: 5) {
-                AppIcon(sf: systemImage, size: 13)
+            HStack(spacing: 6) {
+                AppIcon(sf: glyph, size: 13)
                 Text(label)
-                    .font(.appBody(12.5, weight: .semibold))
+                    .font(.appBody(AppText.caption, weight: .semibold))
                     .lineLimit(1)
             }
             .foregroundStyle(Color.appTitanium)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
             )
         }
         .buttonStyle(.appScale(0.98))
@@ -1048,18 +1048,18 @@ private struct JourneyLegRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
+        HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color.appMuted.opacity(0.55))
+                .fill(Color.appFaint)
                 .frame(width: 5, height: 5)
-                .padding(.top, 7)
+                .padding(.top, 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(fromTo.isEmpty ? transportLabel : fromTo)
-                    .font(.appBody(13.5, weight: .medium))
-                    .foregroundStyle(Color.appInk.opacity(0.95))
+                    .font(.appBody(AppText.footnote, weight: .medium))
+                    .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                 Text(detail)
-                    .font(.appBody(12.5))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.appMuted)
                     .lineLimit(1)
             }
@@ -1089,14 +1089,14 @@ private struct MessageSourceChips: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(source.title)
-                                .font(.appBody(11))
+                                .font(.appBody(AppText.micro))
                                 .lineLimit(1)
                             AppIcon(sf: "arrow.up.right", size: 10)
                         }
                         .foregroundStyle(Color.appTitanium)
-                        .padding(.horizontal, 9)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .overlay(Rectangle().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                        .overlay(Rectangle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
                     }
                     .buttonStyle(.appScale)
                 }
@@ -1127,7 +1127,7 @@ private struct ToolStatusGlyph: View {
                     .foregroundStyle(Color.appDanger)
             case .neutral:
                 Circle()
-                    .fill(Color.appMuted.opacity(0.5))
+                    .fill(Color.appFaint)
                     .frame(width: 6, height: 6)
             }
         }
@@ -1203,7 +1203,7 @@ struct UberHandoffCard: View {
                         AppIcon(sf: "car", size: 14)
                             .foregroundStyle(Color.appMuted)
                         Text("Ride to \(destination)")
-                            .font(.appBody(14.5, weight: .medium))
+                            .font(.appBody(AppText.body, weight: .medium))
                             .foregroundStyle(Color.appInk)
                             .lineLimit(2)
                         Spacer(minLength: 8)
@@ -1212,11 +1212,11 @@ struct UberHandoffCard: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Uber · \(etaPhrase)")
-                            .font(.appBody(13))
+                            .font(.appBody(AppText.footnote))
                             .foregroundStyle(Color.appMuted)
                         if estimate != "—" {
                             Text("\(estimate) estimated")
-                                .font(.appBody(13))
+                                .font(.appBody(AppText.footnote))
                                 .foregroundStyle(Color.appMuted)
                         }
                     }
@@ -1269,7 +1269,7 @@ struct TravelResultCard: View {
 
             if let text = action.text, !text.isEmpty {
                 Text(text.strippingMarkdown)
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(action.isFailure ? Color.appMuted : Color.appInk)
                     .lineLimit(6)
             }
@@ -1280,7 +1280,7 @@ struct TravelResultCard: View {
         // Rounded card silhouette to match every other card in the message stream
         // (UberHandoffCard/ActionCard/pendingCard) — was the lone sharp-edged Rectangle.
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
     }
 }
 

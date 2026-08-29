@@ -70,7 +70,7 @@ struct MemoryView: View {
                                         AppIcon("plus", size: 14)
                                             .foregroundStyle(Color.mgSecondary)
                                         Text("Remember something…")
-                                            .font(.appBody(15))
+                                            .font(.appBody(AppText.body))
                                             .foregroundStyle(Color.mgSecondary)
                                         Spacer(minLength: 0)
                                     }
@@ -88,7 +88,7 @@ struct MemoryView: View {
                             Spacer()
                             if !items.isEmpty {
                                 Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
-                                    .font(.appBody(13))
+                                    .font(.appBody(AppText.footnote))
                                     .foregroundStyle(Color.mgSecondary)
                                     .contentTransition(.numericText())
                                     .animation(.appStandard, value: items.count)
@@ -108,12 +108,12 @@ struct MemoryView: View {
                             }
                         } else if items.isEmpty {
                             Text("Nothing saved yet.")
-                                .font(.appBody(14))
+                                .font(.appBody(AppText.body))
                                 .foregroundStyle(Color.mgSecondary)
                                 .padding(.vertical, 20)
                         } else if groupedItems.isEmpty {
                             Text("No memories match \"\(search)\".")
-                                .font(.appBody(14))
+                                .font(.appBody(AppText.body))
                                 .foregroundStyle(Color.mgSecondary)
                                 .padding(.vertical, 20)
                         }
@@ -124,7 +124,7 @@ struct MemoryView: View {
 
                     ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
                         Text(group.title)
-                            .font(.appBody(18, weight: .semibold))
+                            .font(.appDisplay(AppText.title, weight: .semibold))
                             .foregroundStyle(Color.mgHeading)
                             .padding(.top, index == 0 ? 16 : 30)
                             .padding(.bottom, 4)
@@ -161,7 +161,7 @@ struct MemoryView: View {
                             showClearAllConfirm = true
                         } label: {
                             Text("Clear all memories")
-                                .font(.system(size: 13, weight: .regular))
+                                .font(.appBody(AppText.footnote, weight: .regular))
                                 .foregroundStyle(Color.mgDestructive)
                                 .padding(.vertical, 18)
                         }
@@ -323,14 +323,14 @@ private struct MemoryRow: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.content)
-                        .font(.appBody(15))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(Color.mgHeading)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     // Quiet provenance cue — "Saved" (typed by hand) vs "Learned"
                     // (picked up from conversation) — never shouted.
                     Text(item.sourceLabel)
-                        .font(.appBody(11))
+                        .font(.appBody(AppText.micro))
                         .foregroundStyle(Color.mgSecondary)
                 }
                 Spacer(minLength: 8)
@@ -358,7 +358,7 @@ private struct MemorySearchField: View {
             AppIcon("search", size: 15)
                 .foregroundStyle(Color.mgSecondary)
             TextField("Search memories…", text: $text)
-                .font(.appBody(14))
+                .font(.appBody(AppText.body))
                 .foregroundStyle(Color.mgHeading)
                 .tint(Color.mgSecondary)
                 .autocorrectionDisabled()
@@ -377,7 +377,7 @@ private struct MemorySearchField: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
         .background(Color.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
     }
@@ -452,7 +452,7 @@ private struct MemoryDropBox: View {
                 // Sans, matching every other heading in the settings family — the lone
                 // Didot here was the one place the mg dialect borrowed the display serif.
                 Text("Add it once. It's kept for later.")
-                    .font(.appBody(17, weight: .semibold))
+                    .font(.appBody(AppText.callout, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 Spacer(minLength: 8)
                 if let onCollapse {
@@ -477,7 +477,7 @@ private struct MemoryDropBox: View {
             HStack {
                 if let message {
                     Text(message)
-                        .font(.appBody(12, weight: .medium))
+                        .font(.appBody(AppText.caption, weight: .medium))
                         .foregroundStyle(message == "Saved." ? Color.mgHeading : Color.mgDestructive)
                 }
                 Spacer()
@@ -489,7 +489,7 @@ private struct MemoryDropBox: View {
                                 .tint(Color.mgSecondary)
                         }
                         Text(isSaving ? "Saving" : "Save")
-                            .font(.appBody(12, weight: .semibold))
+                            .font(.appBody(AppText.caption, weight: .semibold))
                             .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)

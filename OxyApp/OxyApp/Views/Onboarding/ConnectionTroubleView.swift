@@ -19,11 +19,11 @@ struct ConnectionTroubleView: View {
                 Spacer(minLength: 0)
 
                 Text("Device not found")
-                    .font(.appBody(13, weight: .medium))
+                    .font(.appBody(AppText.footnote, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
                 Text("We couldn't reach your home device.")
-                    .font(.appDisplay(30, weight: .regular))
+                    .font(.appDisplay(AppText.display, weight: .regular))
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)
@@ -52,10 +52,10 @@ struct ConnectionTroubleView: View {
     private func checkRow(_ text: String) -> some View {
         HStack(spacing: 14) {
             Text("—")
-                .font(.appMono(13))
+                .font(.appMono(AppText.footnote))
                 .foregroundStyle(Color.appMuted)
             Text(text)
-                .font(.system(size: 15, weight: .regular))
+                .font(.appBody(AppText.body, weight: .regular))
                 .foregroundStyle(Color.appInk)
             Spacer(minLength: 0)
         }

@@ -115,7 +115,7 @@ private struct PendantPairingSection: View {
             VStack(spacing: 0) {
                 HStack {
                     Text("Status")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.mgHeading)
                     Spacer()
                     if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
@@ -126,7 +126,7 @@ private struct PendantPairingSection: View {
                     }
                     // Static sans label — no status dot, no pulse (Milgrain spec).
                     Text(statusDescription)
-                        .font(.appBody(15, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(statusColor)
                         .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                 }
@@ -144,11 +144,11 @@ private struct PendantPairingSection: View {
                     MilgrainDivider()
                     HStack {
                         Text("Device")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(AppText.body, weight: .semibold))
                             .foregroundStyle(Color.mgHeading)
                         Spacer()
                         Text(name)
-                            .font(.system(size: 14, weight: .regular))
+                            .font(.appBody(AppText.body, weight: .regular))
                             .foregroundStyle(Color.mgCaption)
                     }
                     .padding(.vertical, 16)
@@ -158,7 +158,7 @@ private struct PendantPairingSection: View {
                 if let error = pendant.lastError {
                     MilgrainDivider()
                     Text(error)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.appBody(AppText.caption, weight: .regular))
                         .foregroundStyle(Color.mgDestructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 16)
@@ -172,21 +172,21 @@ private struct PendantPairingSection: View {
                         Button("Unpair") {
                             showUnpairConfirm = true
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.mgDestructive)
                         .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
                         Button("Cancel") {
                             pendant.stopScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     } else {
                         Button("Scan for home device") {
                             pendant.startScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.mgHeading)
                         .transition(.opacity)
                     }

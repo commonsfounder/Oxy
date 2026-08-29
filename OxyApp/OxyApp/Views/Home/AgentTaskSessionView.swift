@@ -9,7 +9,6 @@ struct AgentTaskSessionView: View {
     var onComplete: (String) -> Void
     var onOpenChat: (String?) -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
 
     private var ink: Color {
         Color.appInk
@@ -60,15 +59,15 @@ struct AgentTaskSessionView: View {
                 onDismiss()
             } label: {
                 AppIcon("xmark", size: 14)
-                    .foregroundStyle(ink.opacity(0.8))
+                    .foregroundStyle(Color.appMuted)
                     .frame(width: 34, height: 34)
                     .background(Color.appSurface, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
             .buttonStyle(.appScale)
 
             Text(session.title)
-                .font(.appBody(15, weight: .semibold))
+                .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(ink)
                 .lineLimit(1)
 
@@ -76,12 +75,12 @@ struct AgentTaskSessionView: View {
 
             if let progress = session.progressText {
                 Text(progress)
-                    .font(.appBody(13, weight: .semibold))
-                    .foregroundStyle(ink.opacity(0.5))
+                    .font(.appBody(AppText.footnote, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.appSurface, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                    .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
         }
     }
@@ -139,14 +138,14 @@ struct AgentTaskSessionView: View {
                 HStack(spacing: 8) {
                     AppIcon("chat", size: 15)
                     Text("Chat")
-                        .font(.appBody(14, weight: .medium))
+                        .font(.appBody(AppText.body, weight: .medium))
                 }
-                .foregroundStyle(ink.opacity(0.75))
+                .foregroundStyle(Color.appMuted)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 13)
+                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity)
                 .background(Color.appSurface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
             .buttonStyle(.appScale)
 
@@ -178,7 +177,7 @@ struct AgentTaskSessionView: View {
                 .opacity(step.canAdvance && !session.isWorking ? 1 : 0.4)
             }
         }
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 6, y: 2)
+        .shadow(color: .black.opacity(0.10), radius: 10, y: 4)
     }
 
     private func isAssistantAsk(_ ui: StepUI) -> Bool {
@@ -196,11 +195,11 @@ struct AgentTaskSessionView: View {
 
     private func primaryLabel(_ text: String) -> some View {
         Text(text)
-            .font(.appBody(14, weight: .semibold))
-            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 13)
-            .background(ink, in: Capsule())
+            .font(.appBody(AppText.body, weight: .semibold))
+            .foregroundStyle(Color.appOnAccent)
+            .padding(.horizontal, AppSpacing.xl)
+            .padding(.vertical, AppSpacing.md)
+            .background(Color.appAccent, in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
     }
 }

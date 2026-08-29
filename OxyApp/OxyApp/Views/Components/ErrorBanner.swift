@@ -11,7 +11,7 @@ struct ErrorBanner: View {
                 .foregroundStyle(Color.appMuted)
 
             Text(message)
-                .font(Font.appBody(13))
+                .font(Font.appBody(AppText.footnote))
                 .foregroundStyle(Color.appMuted)
                 .lineLimit(2)
 
@@ -20,11 +20,11 @@ struct ErrorBanner: View {
             if let onRetry {
                 Button(action: onRetry) {
                     Text("Retry")
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.appBody(AppText.caption, weight: .semibold))
                         .tracking(0.3)
                         .foregroundStyle(Color.appAccent)
                         // Pad the label to a ~40pt tap target without distorting the row.
-                        .padding(.vertical, 11)
+                        .padding(.vertical, 12)
                         .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                 }
@@ -47,7 +47,7 @@ struct ErrorBanner: View {
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
         )
         .padding(.horizontal, 12)
     }

@@ -10,7 +10,7 @@ struct SetupPendantView: View {
                 Spacer()
 
                 Text("Connecting device")
-                    .font(.appBody(13, weight: .medium))
+                    .font(.appBody(AppText.footnote, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
                 HomeDeviceGlyph()
@@ -18,7 +18,7 @@ struct SetupPendantView: View {
                     .padding(.top, 56)
 
                 Text("Place the device on its charger.")
-                    .font(.appBody(15))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appMuted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
@@ -38,10 +38,10 @@ struct SetupPendantView: View {
 private struct HomeDeviceGlyph: View {
     var body: some View {
         VStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.appTitanium, lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(Color.appTitanium, lineWidth: AppBorder.strong)
                 .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                         .fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.03))
                 )
                 .frame(width: 142, height: 88)
@@ -52,7 +52,7 @@ private struct HomeDeviceGlyph: View {
                         .offset(y: 28)
                 )
             Capsule()
-                .strokeBorder(Color.appTitanium, lineWidth: 1)
+                .strokeBorder(Color.appTitanium, lineWidth: AppBorder.strong)
                 .frame(width: 166, height: 14)
                 .offset(y: -3)
         }

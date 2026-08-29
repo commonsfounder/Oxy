@@ -40,7 +40,7 @@ struct RoutinesListView: View {
                                             AppIcon("plus", size: 14)
                                                 .foregroundStyle(Color.mgSecondary)
                                             Text("Add a routine…")
-                                                .font(.appBody(15))
+                                                .font(.appBody(AppText.body))
                                                 .foregroundStyle(Color.mgSecondary)
                                             Spacer(minLength: 0)
                                         }
@@ -63,7 +63,7 @@ struct RoutinesListView: View {
                                 }
                             } else if routines.isEmpty {
                                 Text("No routines yet.")
-                                    .font(.appBody(14))
+                                    .font(.appBody(AppText.body))
                                     .foregroundStyle(Color.mgSecondary)
                                     .padding(.vertical, 20)
                             }
@@ -135,7 +135,7 @@ struct RoutinesListView: View {
             HStack {
                 if let saveMessage {
                     Text(saveMessage)
-                        .font(.appBody(12, weight: .medium))
+                        .font(.appBody(AppText.caption, weight: .medium))
                         .foregroundStyle(Color.mgDestructive)
                 }
                 Spacer()
@@ -147,7 +147,7 @@ struct RoutinesListView: View {
                     draftRepeat = .off
                 } label: {
                     Text("Cancel")
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.appBody(AppText.caption, weight: .semibold))
                         .foregroundStyle(Color.mgSecondary)
                 }
                 .buttonStyle(.appScale)
@@ -162,7 +162,7 @@ struct RoutinesListView: View {
                                 .tint(Color.mgSecondary)
                         }
                         Text(isSaving ? "Saving" : "Save")
-                            .font(.appBody(12, weight: .semibold))
+                            .font(.appBody(AppText.caption, weight: .semibold))
                             .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
@@ -262,45 +262,45 @@ private struct RoutineRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(routine.name)
-                    .font(.appBody(15))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(routine.isEnabled ? Color.mgHeading : Color.mgSecondary)
                     .lineLimit(1)
                 // An imported routine that isn't running must never read as if it is — the
                 // original is still live wherever it came from.
                 if !routine.isEnabled {
                     Text(routine.isImported ? "Off · imported" : "Off")
-                        .font(.appBody(10, weight: .semibold))
+                        .font(.appBody(AppText.micro, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(Color.mgSecondary)
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Color.mgSecondary.opacity(0.12), in: Capsule())
                 } else if routine.isFailing {
                     Text("Failing")
-                        .font(.appBody(10, weight: .semibold))
+                        .font(.appBody(AppText.micro, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(Color.mgDestructive)
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Color.mgDestructive.opacity(0.12), in: Capsule())
                 } else if let cadenceLabel {
                     Text(cadenceLabel)
-                        .font(.appBody(10, weight: .semibold))
+                        .font(.appBody(AppText.micro, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(Color.mgSecondary)
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Color.mgSecondary.opacity(0.12), in: Capsule())
                 }
             }
             Text(routine.prompt)
-                .font(.appBody(12))
+                .font(.appBody(AppText.caption))
                 .foregroundStyle(Color.mgSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if routine.isFailing, let lastRunError = routine.lastRunError, !lastRunError.isEmpty {
                 Text(lastRunError)
-                    .font(.appBody(11))
+                    .font(.appBody(AppText.micro))
                     .foregroundStyle(Color.mgDestructive)
                     .lineLimit(2)
                     .truncationMode(.tail)

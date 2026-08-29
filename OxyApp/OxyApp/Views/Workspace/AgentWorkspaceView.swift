@@ -26,7 +26,7 @@ struct AgentWorkspaceView: View {
 
                         if isLoading {
                             ForEach(0..<3, id: \.self) { _ in
-                                OxySkeletonCard(height: 92, cornerRadius: 20)
+                                OxySkeletonCard(height: 92, cornerRadius: AppRadius.card)
                             }
                         } else if let snapshot {
                             workspaceHeader(snapshot)
@@ -61,16 +61,16 @@ struct AgentWorkspaceView: View {
                     .background(Color.appAccent.opacity(0.12), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(snapshot.workspace.name)
-                        .font(.appBody(19, weight: .semibold))
+                        .font(.appDisplay(AppText.title, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                     Text(snapshot.files.count == 1 ? "1 file" : "\(snapshot.files.count) files")
-                        .font(.appBody(12))
+                        .font(.appBody(AppText.caption))
                         .foregroundStyle(Color.appMuted)
                 }
                 Spacer(minLength: 0)
             }
             Text(snapshot.capabilities.map { $0.replacingOccurrences(of: "_", with: " ") }.joined(separator: " · ").capitalized)
-                .font(.appBody(12))
+                .font(.appBody(AppText.caption))
                 .foregroundStyle(Color.appMuted)
         }
         .padding(18)
@@ -81,11 +81,11 @@ struct AgentWorkspaceView: View {
     private func filesSection(_ files: [AgentWorkspaceFile]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Files")
-                .font(.appBody(18, weight: .semibold))
+                .font(.appDisplay(AppText.title, weight: .semibold))
                 .foregroundStyle(Color.appInk)
             if files.isEmpty {
-                Text("Your agent workspace is ready.")
-                    .font(.appBody(14))
+                Text("No files yet.")
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appMuted)
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,13 +97,13 @@ struct AgentWorkspaceView: View {
                             AppIcon(file.kind == "folder" ? "dotted" : "doc", size: 15)
                                 .foregroundStyle(Color.appAccent)
                             Text(file.path)
-                                .font(.appBody(14))
+                                .font(.appBody(AppText.body))
                                 .foregroundStyle(Color.appInk)
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             if let size = file.sizeBytes {
                                 Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
-                                    .font(.appBody(11))
+                                    .font(.appBody(AppText.micro))
                                     .foregroundStyle(Color.appMuted)
                             }
                         }
@@ -121,19 +121,19 @@ struct AgentWorkspaceView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Sessions")
-                    .font(.appBody(18, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer()
                 Button("New") {
                     sessionTitle = ""
                     showingSessionComposer = true
                 }
-                .font(.appBody(13, weight: .semibold))
+                .font(.appBody(AppText.footnote, weight: .semibold))
                 .foregroundStyle(Color.appAccent)
             }
             if sessions.isEmpty {
                 Text("Persistent working sessions will appear here.")
-                    .font(.appBody(14))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appMuted)
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,10 +146,10 @@ struct AgentWorkspaceView: View {
                                 .foregroundStyle(Color.appAccent)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(session.title)
-                                    .font(.appBody(14, weight: .medium))
+                                    .font(.appBody(AppText.body, weight: .medium))
                                     .foregroundStyle(Color.appInk)
                                 Text(session.kind.capitalized + " session")
-                                    .font(.appBody(11))
+                                    .font(.appBody(AppText.micro))
                                     .foregroundStyle(Color.appMuted)
                             }
                             Spacer(minLength: 0)

@@ -17,16 +17,16 @@ struct LegalConsentView: View {
                 Spacer(minLength: 0)
 
                 Text("Agreement")
-                    .font(.appBody(13, weight: .medium))
+                    .font(.appBody(AppText.footnote, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
-                Text("Before we begin.")
-                    .font(.appDisplay(36, weight: .regular))
+                Text("Terms and privacy")
+                    .font(.appDisplay(AppText.display, weight: .regular))
                     .foregroundStyle(Color.appInk)
                     .padding(.top, 18)
 
                 Text("Review how your data is handled before continuing.")
-                    .font(.appBody(15))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(Color.appMuted)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,7 +73,7 @@ struct LegalConsentView: View {
                     + Text(emphasis)
                         .foregroundColor(Color.appInk)
                 )
-                .font(.system(size: 14, weight: .regular))
+                .font(.appBody(AppText.body, weight: .regular))
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 20)
@@ -92,7 +92,7 @@ private struct AppCheckbox: View {
             .frame(width: 16, height: 16)
             .overlay(
                 Rectangle()
-                    .strokeBorder(isOn ? Color.clear : Color.appAdaptive(dark: .white, light: .black).opacity(0.3), lineWidth: 1)
+                    .strokeBorder(isOn ? Color.clear : Color.appAdaptive(dark: .white, light: .black).opacity(0.3), lineWidth: AppBorder.strong)
             )
             .animation(.appFast, value: isOn)
     }

@@ -33,12 +33,12 @@ struct AgentWorkView: View {
                             HStack(spacing: 8) {
                                 AppIcon("plus", size: 14)
                                 Text("New request")
-                                    .font(.appBody(13, weight: .semibold))
+                                    .font(.appBody(AppText.footnote, weight: .semibold))
                                 Spacer(minLength: 0)
                                 AppIcon("arrow-right", size: 13)
                             }
                             .foregroundStyle(Color.appInk)
-                            .padding(.horizontal, 15)
+                            .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .background(Color.appAccent.opacity(0.14), in: Capsule())
                         }
@@ -52,7 +52,7 @@ struct AgentWorkView: View {
 
                         if isLoading {
                             ForEach(0..<3, id: \.self) { _ in
-                                OxySkeletonCard(height: 112, cornerRadius: 20)
+                                OxySkeletonCard(height: 112, cornerRadius: AppRadius.card)
                             }
                         } else {
                             if !watches.isEmpty {
@@ -107,7 +107,7 @@ struct AgentWorkView: View {
             AppIcon("dotted", size: 18)
                 .foregroundStyle(Color.appAccent)
             Text("Nothing in progress")
-                .font(.appBody(18, weight: .semibold))
+                .font(.appDisplay(AppText.title, weight: .semibold))
                 .foregroundStyle(Color.appInk)
         }
         .padding(.top, 24)
@@ -118,7 +118,7 @@ struct AgentWorkView: View {
         if !tasks.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title)
-                    .font(.appBody(18, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 ForEach(tasks) { task in
                     AgentTaskRow(
@@ -136,11 +136,11 @@ struct AgentWorkView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Watching")
-                    .font(.appBody(18, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer(minLength: 0)
                 Text("\(watches.count)")
-                    .font(.appBody(12, weight: .semibold))
+                    .font(.appBody(AppText.caption, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
             }
 
@@ -229,18 +229,18 @@ private struct AgentWatchRow: View {
                 .frame(width: 36, height: 36)
                 .background(Color.appAccent.opacity(0.12), in: Circle())
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(watch.title)
-                    .font(.appBody(16, weight: .semibold))
+                    .font(.appBody(AppText.callout, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(watch.cadenceLabel)
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.appMuted)
                 if let nextCheckLabel = watch.nextCheckLabel {
                     Text(nextCheckLabel)
-                        .font(.appBody(11))
-                        .foregroundStyle(Color.appMuted.opacity(0.82))
+                        .font(.appBody(AppText.micro))
+                        .foregroundStyle(Color.appMuted)
                 }
             }
 
@@ -257,7 +257,7 @@ private struct AgentWatchRow: View {
             }
             .foregroundStyle(Color.appMuted)
             .frame(width: 30, height: 30)
-            .background(Color.appInk.opacity(0.06), in: Circle())
+            .background(Color.appHairline, in: Circle())
             .buttonStyle(.appScale)
             .disabled(isCancelling)
             .accessibilityLabel("Stop watching \(watch.title)")
@@ -289,19 +289,19 @@ private struct AgentGoalComposerView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("What needs doing?")
-                                .font(.appBody(16, weight: .semibold))
+                                .font(.appBody(AppText.callout, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                             TextField("e.g. Book a dentist appointment", text: $goal, axis: .vertical)
-                                .font(.appBody(16))
+                                .font(.appBody(AppText.callout))
                                 .foregroundStyle(Color.appInk)
                                 .lineLimit(3...7)
                                 .padding(14)
-                                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
                         }
 
-                        VStack(alignment: .leading, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 16) {
                             Toggle("Ask before each action", isOn: $guardMode)
-                                .font(.appBody(15, weight: .medium))
+                                .font(.appBody(AppText.body, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                             .tint(Color.appAccent)
 
@@ -326,11 +326,11 @@ private struct AgentGoalComposerView: View {
                             HStack(spacing: 8) {
                                 if isSaving { ProgressView().scaleEffect(0.7).tint(Color.appInk) }
                                 Text(isSaving ? "Starting" : "Start")
-                                    .font(.appBody(14, weight: .semibold))
+                                    .font(.appBody(AppText.body, weight: .semibold))
                             }
                             .foregroundStyle(Color.appInk)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
+                            .padding(.vertical, 14)
                             .background(Color.appAccent.opacity(0.18), in: Capsule())
                         }
                         .buttonStyle(.appScale)
@@ -404,19 +404,19 @@ private struct AgentTaskRow: View {
                     .background(statusColor.opacity(0.12), in: Circle())
 
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 8) {
                         Circle().fill(statusColor).frame(width: 6, height: 6)
                         Text(task.statusLabel)
-                            .font(.appBody(13, weight: .semibold))
+                            .font(.appBody(AppText.footnote, weight: .semibold))
                             .foregroundStyle(statusColor)
                     }
                     Text(task.displayGoal)
-                        .font(.appBody(16, weight: .semibold))
+                        .font(.appBody(AppText.callout, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
                     if let interruptionMessage = task.interruptionMessage, task.status.lowercased() != "completed" {
                         Text(interruptionMessage)
-                            .font(.appBody(12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.mgDestructive)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -428,7 +428,7 @@ private struct AgentTaskRow: View {
             if task.status.lowercased() != "completed" {
                 HStack {
                     Button("Details", action: onOpen)
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.appBody(AppText.caption, weight: .semibold))
                         .foregroundStyle(Color.appMuted)
                         .buttonStyle(.appScale)
                     Spacer(minLength: 0)
@@ -447,17 +447,17 @@ private struct AgentTaskRow: View {
                 .buttonStyle(TaskActionButtonStyle())
         } else if task.status.lowercased() == "running" {
             Text("In progress")
-                .font(.appBody(12, weight: .semibold))
+                .font(.appBody(AppText.caption, weight: .semibold))
                 .foregroundStyle(Color.appMuted)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.vertical, 10)
                 .background(Color.appSurface2, in: Capsule())
         } else {
             Button(action: onRun) {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     if isRunning { ProgressView().scaleEffect(0.65).tint(Color.appInk) }
                     Text(isRunning ? "Starting" : task.resumable ? "Continue" : "Try again")
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.appBody(AppText.caption, weight: .semibold))
                 }
             }
             .buttonStyle(TaskActionButtonStyle())
@@ -471,7 +471,7 @@ private struct TaskActionButtonStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(Color.appInk)
             .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .padding(.vertical, 10)
             .background(Color.appAccent.opacity(configuration.isPressed ? 0.24 : 0.16), in: Capsule())
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
@@ -509,22 +509,22 @@ private struct AgentTaskDetailView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text(task.displayGoal)
-                                .font(.appBody(20, weight: .semibold))
+                                .font(.appDisplay(AppText.title, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text(task.statusLabel)
-                                .font(.appBody(13))
+                                .font(.appBody(AppText.footnote))
                                 .foregroundStyle(Color.appMuted)
                         }
 
                         runtimeSection
 
-                        VStack(alignment: .leading, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 16) {
                             Text("Your OK")
-                                .font(.appBody(16, weight: .semibold))
+                                .font(.appBody(AppText.callout, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                             Toggle("Ask before each action", isOn: $guardMode)
-                                .font(.appBody(15, weight: .medium))
+                                .font(.appBody(AppText.body, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                             .tint(Color.appAccent)
                         }
@@ -533,7 +533,7 @@ private struct AgentTaskDetailView: View {
 
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Initiative")
-                                .font(.appBody(16, weight: .semibold))
+                                .font(.appBody(AppText.callout, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                             Picker("Initiative", selection: $autonomy) {
                                 ForEach(autonomyLevels, id: \.self) { level in
@@ -558,11 +558,11 @@ private struct AgentTaskDetailView: View {
                             HStack(spacing: 8) {
                                 if isSaving { ProgressView().scaleEffect(0.7).tint(Color.appInk) }
                                         Text(isSaving ? "Saving" : "Save")
-                                    .font(.appBody(14, weight: .semibold))
+                                    .font(.appBody(AppText.body, weight: .semibold))
                             }
                             .foregroundStyle(Color.appInk)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
+                            .padding(.vertical, 14)
                             .background(Color.appAccent.opacity(0.18), in: Capsule())
                         }
                         .buttonStyle(.appScale)
@@ -581,27 +581,27 @@ private struct AgentTaskDetailView: View {
     private var runtimeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Updates")
-                .font(.appBody(16, weight: .semibold))
+                .font(.appBody(AppText.callout, weight: .semibold))
                 .foregroundStyle(Color.appInk)
 
             if isLoadingRuntime {
-                OxySkeletonCard(height: 88, cornerRadius: 18)
+                OxySkeletonCard(height: 88, cornerRadius: AppRadius.bubble)
             } else if let runtime {
-                VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         AppIcon("dotted", size: 14)
                             .foregroundStyle(Color.appAccent)
                         Text(runtime.stateLabel)
-                            .font(.appBody(13, weight: .semibold))
+                            .font(.appBody(AppText.footnote, weight: .semibold))
                             .foregroundStyle(Color.appInk)
                         Spacer(minLength: 0)
                         Text(runtime.deviceType == "ambient_home" ? "Home device" : "Companion")
-                            .font(.appBody(11))
+                            .font(.appBody(AppText.micro))
                             .foregroundStyle(Color.appMuted)
                     }
                     if !runtime.artifacts.isEmpty {
                         Text("\(runtime.artifacts.count) update\(runtime.artifacts.count == 1 ? "" : "s") saved")
-                            .font(.appBody(12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.appMuted)
                     }
                 }
@@ -609,7 +609,7 @@ private struct AgentTaskDetailView: View {
                 .background { MissionGlassPlate() }
             } else {
                 Text("Millie has not started this yet.")
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 4)
             }
@@ -632,11 +632,11 @@ private struct AgentTaskDetailView: View {
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Activity")
-                .font(.appBody(16, weight: .semibold))
+                .font(.appBody(AppText.callout, weight: .semibold))
                 .foregroundStyle(Color.appInk)
             if task.activities.isEmpty {
                 Text("No updates yet.")
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 4)
             } else {
@@ -650,15 +650,15 @@ private struct AgentTaskDetailView: View {
                             .foregroundStyle(activity.pending || activity.inProgress ? Color.appAccent : activity.success ? Color.appSuccess : Color.mgDestructive)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(activity.action)
-                                    .font(.appBody(12, weight: .semibold))
+                                    .font(.appBody(AppText.caption, weight: .semibold))
                                     .foregroundStyle(Color.appInk)
                                 Text(activity.summary)
-                                    .font(.appBody(12))
+                                    .font(.appBody(AppText.caption))
                                     .foregroundStyle(Color.appMuted)
                             }
                             Spacer(minLength: 0)
                         }
-                        .padding(.vertical, 9)
+                        .padding(.vertical, 10)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -713,8 +713,8 @@ struct TrustCenterView: View {
                         }
 
                         if isLoading {
-                            OxySkeletonCard(height: 170, cornerRadius: 20)
-                            OxySkeletonCard(height: 250, cornerRadius: 20)
+                            OxySkeletonCard(height: 170, cornerRadius: AppRadius.card)
+                            OxySkeletonCard(height: 250, cornerRadius: AppRadius.card)
                         } else if let policy {
                             policySection(policy)
                             auditSection(policy)
@@ -733,7 +733,7 @@ struct TrustCenterView: View {
     private func policySection(_ policy: AgentPermissionPolicy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Permission policy")
-                .font(.appBody(18, weight: .semibold))
+                .font(.appDisplay(AppText.title, weight: .semibold))
                 .foregroundStyle(Color.appInk)
 
             VStack(spacing: 0) {
@@ -752,17 +752,17 @@ struct TrustCenterView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Action history")
-                    .font(.appBody(18, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer(minLength: 0)
                 Text(policy.audit.enabled ? "Enabled" : "Off")
-                    .font(.appBody(12, weight: .medium))
+                    .font(.appBody(AppText.caption, weight: .medium))
                     .foregroundStyle(policy.audit.enabled ? Color.appSuccess : Color.appMuted)
             }
 
             if entries.isEmpty {
                 Text("No actions recorded yet.")
-                    .font(.appBody(13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 8)
             } else {
@@ -777,7 +777,7 @@ struct TrustCenterView: View {
             }
 
             Text("Undo is available where the connected service supports it.")
-                .font(.appBody(12))
+                .font(.appBody(AppText.caption))
                 .foregroundStyle(Color.appMuted)
         }
     }
@@ -786,22 +786,22 @@ struct TrustCenterView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.appBody(14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Text(description)
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.appMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 10)
             Text(rule.capitalized)
-                .font(.appBody(11, weight: .semibold))
+                .font(.appBody(AppText.micro, weight: .semibold))
                 .foregroundStyle(Color.appAccent)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Color.appAccent.opacity(0.12), in: Capsule())
         }
-        .padding(.vertical, 13)
+        .padding(.vertical, 14)
     }
 
     private func auditRow(_ entry: AgentAuditEntry) -> some View {
@@ -810,15 +810,15 @@ struct TrustCenterView: View {
                 .foregroundStyle(entry.status.lowercased() == "executed" ? Color.appSuccess : Color.appAccent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.type.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.appBody(13, weight: .semibold))
+                    .font(.appBody(AppText.footnote, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Text(entry.error ?? entry.status.capitalized)
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(entry.error == nil ? Color.appMuted : Color.mgDestructive)
             }
             Spacer(minLength: 0)
             Text(entry.risk.capitalized)
-                .font(.appBody(10, weight: .medium))
+                .font(.appBody(AppText.micro, weight: .medium))
                 .foregroundStyle(Color.appMuted)
         }
         .padding(.vertical, 12)
@@ -827,7 +827,7 @@ struct TrustCenterView: View {
     private var divider: some View {
         Rectangle()
             .fill(Color.appHairline)
-            .frame(height: 0.5)
+            .frame(height: AppBorder.hairline)
     }
 
     private func load() async {

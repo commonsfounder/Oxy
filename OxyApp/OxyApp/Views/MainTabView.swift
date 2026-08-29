@@ -74,19 +74,19 @@ struct MoreView: View {
 
     private var identityHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
+            BrandWordmark(height: 20, color: Color.appInk)
                 .padding(.bottom, 28)
 
             Text(displayName)
-                .font(.heroDisplay(28))
-                .appHeroTracking(28)
+                .font(.heroDisplay())
+                .appHeroTracking(AppText.display)
                 .foregroundStyle(Color.appInk)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
 
             if !accountEmail.isEmpty {
                 Text(accountEmail)
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.appMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -95,7 +95,7 @@ struct MoreView: View {
 
             if appState.isDemoSession {
                 Text("Demo/Test session")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.appBody(AppText.micro, weight: .semibold))
                     .tracking(1.2)
                     .foregroundStyle(Color.appAccent)
                     .padding(.top, 10)
@@ -103,7 +103,7 @@ struct MoreView: View {
 
             Rectangle()
                 .fill(Color.appHairline)
-                .frame(height: 0.5)
+                .frame(height: AppBorder.hairline)
                 .padding(.top, 28)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -153,7 +153,7 @@ struct MoreView: View {
     private var rowDivider: some View {
         Rectangle()
             .fill(Color.appHairline)
-            .frame(height: 0.5)
+            .frame(height: AppBorder.hairline)
     }
 
 }

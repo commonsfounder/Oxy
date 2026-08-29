@@ -14,22 +14,22 @@ struct LiveWorkHeader: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("LIVE")
-                    .font(.appBody(10, weight: .bold))
+                    .font(.appBody(AppText.micro, weight: .bold))
                     .tracking(1.7)
                     .foregroundStyle(Color.appAccent)
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.82))
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                     .contentTransition(.numericText())
             }
 
             Spacer(minLength: 0)
 
             AppIcon("arrow-right", size: 13)
-                .foregroundStyle(GlebChrome.ink.opacity(0.32))
+                .foregroundStyle(Color.appMuted)
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background { MissionGlassPlate() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
@@ -84,12 +84,12 @@ struct BoardLaneSection: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(lane.title)
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(lane == .needsYou ? 0.82 : 0.52))
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(lane == .needsYou ? Color.appInk : Color.appMuted)
 
                 Text("\(items.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                    .font(.appBody(AppText.micro, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.appAccent.opacity(lane == .needsYou ? 0.12 : 0.07)))
@@ -130,19 +130,19 @@ struct BoardCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
                 AppIcon(item.overdue == true ? "alert-circle" : "bolt", size: 15)
-                    .foregroundStyle(item.overdue == true ? Color.red.opacity(0.75) : Color.appAccent)
+                    .foregroundStyle(item.overdue == true ? Color.appDanger : Color.appAccent)
                     .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(GlebChrome.ink)
+                        .font(.appBody(AppText.callout, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let line = questionLine, !line.isEmpty {
                         Text(line)
-                            .font(.system(size: 14))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.62))
+                            .font(.appBody(AppText.body))
+                            .foregroundStyle(Color.appMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -179,23 +179,23 @@ struct BoardCard: View {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(option.label)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(GlebChrome.ink)
+                                .font(.appBody(AppText.body, weight: .semibold))
+                                .foregroundStyle(Color.appInk)
                             if let detail = option.detail, !detail.isEmpty {
                                 Text(detail)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                                    .font(.appBody(AppText.caption))
+                                    .foregroundStyle(Color.appMuted)
                             }
                         }
                         Spacer(minLength: 0)
                         AppIcon("chevron-right", size: 12)
-                            .foregroundStyle(GlebChrome.ink.opacity(0.3))
+                            .foregroundStyle(Color.appMuted)
                     }
-                    .padding(.horizontal, 13)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(Color.appSurface2.opacity(0.72)))
+                        .fill(Color.appSurface2))
                 }
                 .buttonStyle(.appScale(0.98))
             }
@@ -210,10 +210,10 @@ struct BoardCard: View {
                 onDecide(true, nil)
             } label: {
                 Text("Approve")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink)
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
+                    .padding(.vertical, 12)
                     .background(Capsule().fill(Color.appAccent.opacity(0.22)))
             }
             .buttonStyle(.appScale(0.97))
@@ -223,11 +223,11 @@ struct BoardCard: View {
                 onDecide(false, nil)
             } label: {
                 Text("Not now")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                    .font(.appBody(AppText.body, weight: .medium))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background(Capsule().fill(Color.white.opacity(0.4)))
+                    .padding(.vertical, AppSpacing.md)
+                    .background(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.strong))
             }
             .buttonStyle(.appScale(0.97))
         }
@@ -241,11 +241,11 @@ struct BoardCard: View {
         } label: {
             HStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                 AppIcon("arrow-right", size: 12)
             }
-            .foregroundStyle(GlebChrome.ink)
-            .padding(.horizontal, 15)
+            .foregroundStyle(Color.appInk)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(Capsule().fill(Color.appAccent.opacity(0.18)))
         }
@@ -259,7 +259,7 @@ struct BoardCard: View {
                 HStack(alignment: .top, spacing: 10) {
                     if item.waitingExternal == true {
                         AppIcon("clock", size: 15)
-                            .foregroundStyle(GlebChrome.ink.opacity(0.4))
+                            .foregroundStyle(Color.appMuted)
                             .padding(.top, 1)
                     } else {
                         PulsingWorkDot(active: true)
@@ -267,28 +267,28 @@ struct BoardCard: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.title)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(GlebChrome.ink)
+                            .font(.appBody(AppText.callout, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
 
                         if let detail = subtitle, !detail.isEmpty {
                             Text(detail)
-                                .font(.system(size: 13))
-                                .foregroundStyle(GlebChrome.ink.opacity(0.55))
+                                .font(.appBody(AppText.footnote))
+                                .foregroundStyle(Color.appMuted)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer(minLength: 0)
                     AppIcon("chevron-right", size: 12)
-                        .foregroundStyle(GlebChrome.ink.opacity(0.25))
+                        .foregroundStyle(Color.appMuted)
                         .padding(.top, 3)
                 }
 
                 if let progress = item.progress, progress.total > 0 {
                     ProgressRail(progress: progress)
-                        .padding(.top, 13)
+                        .padding(.top, 14)
                 }
             }
             .padding(16)
@@ -315,15 +315,15 @@ struct BoardCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(GlebChrome.ink.opacity(0.9))
+                        .font(.appBody(AppText.body, weight: .medium))
+                        .foregroundStyle(Color.appInk)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
 
                     if let detail = item.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                            .font(.appBody(AppText.caption))
+                            .foregroundStyle(Color.appMuted)
                             .multilineTextAlignment(.leading)
                             .lineLimit(2)
                     }
@@ -333,8 +333,8 @@ struct BoardCard: View {
 
                 if let relative = item.date?.oxyRelativeShort {
                     Text(relative)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(GlebChrome.ink.opacity(0.35))
+                        .font(.appBody(AppText.micro, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
                         .padding(.top, 2)
                 }
             }
@@ -352,8 +352,8 @@ struct BoardCard: View {
     }
 
     private var ledgerTint: Color {
-        if item.failed == true { return Color.red.opacity(0.6) }
-        return lane == .completed ? Color.appAccent.opacity(0.75) : GlebChrome.ink.opacity(0.35)
+        if item.failed == true { return Color.appDanger }
+        return lane == .completed ? Color.appAccent : Color.appFaint
     }
 }
 
@@ -367,7 +367,7 @@ struct ProgressRail: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(GlebChrome.ink.opacity(0.08))
+                        .fill(Color.appHairline)
                     Capsule()
                         .fill(Color.appAccent.opacity(0.75))
                         .frame(width: max(proxy.size.width * progress.fraction, 6))
@@ -377,8 +377,8 @@ struct ProgressRail: View {
             .frame(height: 4)
 
             Text("Step \(progress.done) of \(progress.total)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(GlebChrome.ink.opacity(0.42))
+                .font(.appBody(AppText.micro, weight: .medium))
+                .foregroundStyle(Color.appMuted)
         }
     }
 }

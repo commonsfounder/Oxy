@@ -147,7 +147,7 @@ private struct LoginFormPage: View {
                 Spacer().frame(height: 96)
 
                 Text(isRegistering ? "Create your account." : "Welcome back.")
-                    .font(.appDisplay(30, weight: .light))
+                    .font(.appDisplay(AppText.display, weight: .regular))
                     .foregroundStyle(Color.appInk)
                     .padding(.bottom, 44)
 
@@ -158,7 +158,7 @@ private struct LoginFormPage: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(Font.appBody(12, weight: .medium))
+                        .font(Font.appBody(AppText.caption, weight: .medium))
                         .foregroundStyle(Color.appDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)
@@ -173,7 +173,7 @@ private struct LoginFormPage: View {
                                 .scaleEffect(0.8)
                         }
                         Text(isRegistering ? "Create Account" : "Sign In")
-                            .font(.appBody(15, weight: .semibold))
+                            .font(.appBody(AppText.body, weight: .semibold))
                     }
                     .foregroundStyle(Color.appBackground)
                     .frame(maxWidth: .infinity)
@@ -191,7 +191,7 @@ private struct LoginFormPage: View {
                         HStack(spacing: 8) {
                             AppIcon("person-check", size: 16)
                             Text("Continue as Test User")
-                                .font(.appBody(14, weight: .semibold))
+                                .font(.appBody(AppText.body, weight: .semibold))
                         }
                         .foregroundStyle(Color.appInk)
                         .frame(maxWidth: .infinity)
@@ -200,7 +200,7 @@ private struct LoginFormPage: View {
                         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                                .stroke(Color.appHairline, lineWidth: 0.5)
+                                .stroke(Color.appHairline, lineWidth: AppBorder.hairline)
                         )
                     }
                     .buttonStyle(.appScale)
@@ -209,7 +209,7 @@ private struct LoginFormPage: View {
                     .padding(.top, 14)
 
                     Text("Debug demo session")
-                        .font(.system(size: 11, weight: .light))
+                        .font(.appBody(AppText.micro, weight: .regular))
                         .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 8)
@@ -219,7 +219,7 @@ private struct LoginFormPage: View {
                     withAnimation(.appFast) { isRegistering.toggle() }
                 } label: {
                     Text(isRegistering ? "Already have an account? Sign in" : "New here? Create account")
-                        .font(.appBody(14))
+                        .font(.appBody(AppText.body))
                         .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
@@ -234,7 +234,7 @@ private struct LoginFormPage: View {
     }
 
     private func lineField(placeholder: String, text: Binding<String>, secure: Bool, field: Field) -> some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 10) {
             Group {
                 if secure {
                     SecureField("", text: text, prompt: Text(placeholder).foregroundStyle(Color.appMuted))
@@ -244,13 +244,13 @@ private struct LoginFormPage: View {
                         .autocorrectionDisabled()
                 }
             }
-            .font(.appBody(16))
+            .font(.appBody(AppText.callout))
             .foregroundStyle(Color.appInk)
             .tint(Color.appTitanium)
             .focused($focusedField, equals: field)
 
             Rectangle()
-                .fill(focusedField == field ? Color.appInk.opacity(0.55) : Color.appFillSubtle)
+                .fill(focusedField == field ? Color.appMuted : Color.appFillSubtle)
                 .frame(height: focusedField == field ? 1 : 0.5)
                 .animation(.appFast, value: focusedField)
         }

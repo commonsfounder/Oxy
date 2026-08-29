@@ -33,9 +33,19 @@ extension Color {
         light: Color(red: 0.145, green: 0.133, blue: 0.118)   // deep umber
     )
 
+    /// The quietest tone any *text* is allowed to take — 7.6:1 on the canvas.
+    /// Screens had drifted to `appInk.opacity(0.42…0.56)` for secondary copy, which
+    /// falls under the legibility floor in DESIGN.md. Secondary text is this colour.
     static let appMuted = appDynamicColor(
         dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
         light: Color(red: 0.420, green: 0.391, blue: 0.350)   // warm secondary
+    )
+
+    /// Non-text only: rules, inactive glyphs, disabled chrome, placeholder shapes.
+    /// Never set copy in it — that is what `appMuted` is for.
+    static let appFaint = appDynamicColor(
+        dark: Color(red: 0.412, green: 0.396, blue: 0.380),   // #696560
+        light: Color(red: 0.635, green: 0.616, blue: 0.584)   // #A29D95
     )
 
     static let appAccent = appDynamicColor(
@@ -43,7 +53,14 @@ extension Color {
         light: Color(red: 0.575, green: 0.407, blue: 0.145)   // antique gold
     )
 
-    static let appOnAccent = Color(red: 0.106, green: 0.098, blue: 0.086)
+    /// The label colour paired with `appAccent`. It has to follow the finish: the
+    /// dark-mode gold (#C8A96B) is light enough that near-black reads at 7.7:1 and
+    /// white at 2.3:1, and the light-mode antique gold (#93681F) is the other way
+    /// round (3.5:1 vs 4.9:1). A single fixed value fails one of the two.
+    static let appOnAccent = appDynamicColor(
+        dark: Color(red: 0.106, green: 0.098, blue: 0.086),
+        light: .white
+    )
 
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = appDynamicColor(
@@ -60,6 +77,17 @@ extension Color {
         light: Color(red: 0.08, green: 0.58, blue: 0.36)
     )
 
+    // MARK: - Elevation
+    //
+    // Three levels, and the fill is opaque at every one. The screens had ten
+    // different `appSurface.opacity(0.62…0.94)` values, so two cards side by side
+    // sat at two different heights for no reason.
+
+    /// Level 1 — a card resting on the canvas.
+    static let appRaised = appSurface
+    /// Level 2 — something lifted above a card: a popover, a focused field, a chip.
+    static let appFloating = appSurface2
+
     static let appScrim = Color.black.opacity(0.5)
     static let appFillSubtle = appDynamicColor(dark: Color.white.opacity(0.08), light: Color.black.opacity(0.06))
     static let appFillScrim = appScrim
@@ -70,31 +98,84 @@ extension Color {
 }
 
 // MARK: - Spacing
+//
+// A 4pt grid. Padding and stack spacing come from here; an off-grid value is how a
+// screen starts reading as hand-placed rather than drawn.
 enum AppSpacing {
+    static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
-    static let xl: CGFloat = 24
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
     static let chatMargin: CGFloat = 20
     static let margin: CGFloat = 20
 }
 
+// MARK: - Type scale
+//
+// Eight steps and nothing between them. The app had grown 26 distinct sizes —
+// including 11.5, 12.5, 13.5, 14.5 and 15.5 — which is what makes a screen look
+// assembled instead of drawn. Every `appBody` / `appDisplay` / `appMono` call
+// passes one of these; `test/smoke/ios-design-system.test.js` enforces it.
+enum AppText {
+    /// Eyebrows and tracked micro-labels. Never a full sentence.
+    static let micro: CGFloat = 11
+    /// Timestamps, metric captions, chips.
+    static let caption: CGFloat = 12
+    /// Secondary lines under a title.
+    static let footnote: CGFloat = 13
+    /// The default. Body copy, rows, fields, buttons.
+    static let body: CGFloat = 15
+    /// Row titles and emphasis inside a card.
+    static let callout: CGFloat = 17
+    /// Card and section titles.
+    static let title: CGFloat = 20
+    /// Screen headers and metric figures.
+    static let display: CGFloat = 28
+    /// The one greeting on the home screen.
+    static let hero: CGFloat = 40
+
+    static let all: [CGFloat] = [micro, caption, footnote, body, callout, title, display, hero]
+}
+
 extension Font {
-    static var screenTitle: Font { .appBody(20, weight: .semibold) }
-    static var rowTitle: Font    { .appBody(16, weight: .regular) }
-    static var rowSecondary: Font { .appBody(13, weight: .regular) }
-    static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
+    static var screenTitle: Font  { .appDisplay(AppText.title, weight: .semibold) }
+    static var rowTitle: Font     { .appBody(AppText.callout) }
+    static var rowSecondary: Font { .appBody(AppText.footnote) }
+    static func heroDisplay(_ size: CGFloat = AppText.display) -> Font {
+        .appDisplay(size, weight: .semibold)
+    }
 }
 
 // MARK: - Radius
+//
+// 4pt steps, matching the spacing grid. Nest with `inner(_:inset:)` so a shape
+// inside another shape stays concentric instead of drifting a point or two off.
 enum AppRadius {
-    static let sm: CGFloat = 6
-    static let md: CGFloat = 10
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 12
     static let lg: CGFloat = 16
     static let xl: CGFloat = 22
     static let bubble: CGFloat = 18
     static let card: CGFloat = lg
+
+    /// The radius a shape needs to sit concentrically inside an `outer` corner
+    /// when it is inset by `inset` on every side.
+    static func inner(_ outer: CGFloat, inset: CGFloat) -> CGFloat {
+        max(outer - inset, sm / 2)
+    }
+}
+
+// MARK: - Borders
+//
+// Two widths. A hairline is a hairline; 0.6 / 0.7 / 0.75 / 0.8 were four ways of
+// drawing the same rule slightly differently on adjacent surfaces.
+enum AppBorder {
+    static let hairline: CGFloat = 0.5
+    static let strong: CGFloat = 1
 }
 
 // MARK: - Motion
@@ -164,7 +245,7 @@ extension View {
         .background(.ultraThinMaterial, in: shape)
         .overlay(shape.strokeBorder(
             Color.appAdaptive(dark: .white, light: .black).opacity(interactive ? 0.16 : 0.08),
-            lineWidth: 0.5
+            lineWidth: AppBorder.hairline
         ))
     }
 }
@@ -192,10 +273,6 @@ extension Font {
         .system(size: size, weight: weight, design: .default)
     }
 
-    static func appEditorial(_ size: CGFloat) -> Font {
-        .custom("Fraunces", size: size, relativeTo: .title)
-    }
-
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
     }
@@ -207,63 +284,13 @@ extension Font {
 }
 
 extension View {
+    /// A tracked micro-label above a title. One definition, so every eyebrow in the
+    /// app is the same size, weight, tracking and colour.
     func appEyebrow() -> some View {
-        font(.appBody(12, weight: .medium))
+        font(.appBody(AppText.micro, weight: .semibold))
+            .tracking(1.6)
+            .textCase(.uppercase)
             .foregroundStyle(Color.appMuted)
-    }
-
-    func appHairline(radius: CGFloat) -> some View {
-        self
-    }
-}
-
-struct AppStatusDot: View {
-    enum Kind {
-        case live      // green — active / streaming
-        case enabled   // silver — enabled, idle
-        case off       // gray — disabled / off
-        case error     // coral — error / disconnected-with-a-problem
-        case degraded  // amber — attention-needed
-
-        var color: Color {
-            switch self {
-            case .live:     return .appLive
-            case .enabled:  return .appGlow
-            case .off:      return .appMuted.opacity(0.4)
-            case .error:    return .appDanger
-            case .degraded: return .appAttention
-            }
-        }
-        var halo: Bool { self == .live }
-    }
-
-    var kind: Kind
-    var diameter: CGFloat = 6
-
-    /// Back-compat shorthand: live link vs. idle. Prefer `kind:` for full semantics.
-    init(isLive: Bool, diameter: CGFloat = 6) {
-        self.kind = isLive ? .live : .off
-        self.diameter = diameter
-    }
-
-    init(kind: Kind, diameter: CGFloat = 6) {
-        self.kind = kind
-        self.diameter = diameter
-    }
-
-    var body: some View {
-        ZStack {
-            if kind.halo {
-                Circle()
-                    .fill(kind.color.opacity(0.35))
-                    .frame(width: diameter * 2.4, height: diameter * 2.4)
-                    .blur(radius: diameter * 0.5)
-            }
-            Circle()
-                .fill(kind.color)
-                .frame(width: diameter, height: diameter)
-        }
-        .frame(width: diameter * 2.4, height: diameter * 2.4)
     }
 }
 
@@ -273,49 +300,26 @@ extension Color {
     static let appDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
 }
 
+/// The one rule in the app. `MilgrainDivider` is the same thing under its old name.
 struct AppDivider: View {
     var inset: CGFloat = 0
     var body: some View {
         Rectangle()
             .fill(Color.appHairline)
-            .frame(height: 0.5)
+            .frame(height: AppBorder.hairline)
             .padding(.leading, inset)
     }
 }
 
+/// The one section header. `MilgrainSectionHeader` and `AppSectionTitle` are the
+/// same thing under their old names — there were three identical implementations.
 struct AppSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.appBody(15, weight: .semibold))
+            .font(.appBody(AppText.body, weight: .semibold))
             .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct AppToggle: View {
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Button {
-            withAnimation(.appToggle) { isOn.toggle() }
-        } label: {
-            Capsule()
-                .fill(isOn ? Color.appInk : Color.appAdaptive(dark: .white, light: .black).opacity(0.12))
-                .frame(width: 30, height: 16)
-                .overlay(
-                    Circle()
-                        .fill(isOn ? Color.appObsidian : Color.appMuted)
-                        .frame(width: 12, height: 12)
-                        .padding(2)
-                        .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
-                )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
-        .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
     }
 }
 
@@ -329,7 +333,7 @@ struct AppLineField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: AppSpacing.sm) {
             Group {
                 if axis == .vertical {
                     TextField(
@@ -343,23 +347,25 @@ struct AppLineField: View {
                     TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Color.appMuted))
                 }
             }
-            .font(.appBody(15))
+            .font(.appBody(AppText.body))
             .foregroundStyle(Color.appInk)
-            .tint(Color.appMuted)
+            .tint(Color.appAccent)
             .focused($isFocused)
 
             Rectangle()
-                .fill(isFocused ? Color.appInk.opacity(0.55) : Color.appAdaptive(dark: .white, light: .black).opacity(0.08))
-                .frame(height: isFocused ? 1 : 0.5)
-                .animation(.easeInOut(duration: 0.2), value: isFocused)
+                .fill(isFocused ? Color.appAccent : Color.appHairline)
+                .frame(height: isFocused ? AppBorder.strong : AppBorder.hairline)
+                .animation(.appToggle, value: isFocused)
         }
     }
 }
 
-// Clean shims and new helpers only. Old glass/primary button code burned.
-extension Color {
-    static let appGlow = appAccent.opacity(0.3)
-}
+// MARK: - Buttons
+//
+// Primary carries the accent, per DESIGN.md — it had drifted to a white `appInk`
+// slab, which put the loudest surface in the app on the least important screen.
+
+private let appControlHeight: CGFloat = 50
 
 struct AppPrimaryButton: View {
     let title: String
@@ -367,41 +373,87 @@ struct AppPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.appBody(15, weight: .semibold))
-                .foregroundStyle(Color.appBackground)
+                .font(.appBody(AppText.body, weight: .semibold))
+                .foregroundStyle(Color.appOnAccent)
                 .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(Color.appInk, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                .frame(height: appControlHeight)
+                .background(Color.appAccent, in: Capsule())
         }
         .buttonStyle(.appScale(0.97))
     }
 }
 
+// MARK: - Surfaces
+//
+// One treatment at three heights. The product had four competing card definitions
+// (`AppCard`, `TodayCard`, `MissionGlassPlate`, `EditorialPlate`) and ten different
+// `appSurface.opacity(0.62…0.94)` fills, so two cards on the same screen could sit
+// at two different heights for no reason. They all route through here now.
 
-/// Glassmorphism eliminated per the pure-black minimalist directive — always a plain
-/// passthrough, never a Liquid Glass surface, on any iOS version.
-@ViewBuilder
-func appGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) -> some View {
-    content()
+enum AppElevation {
+    /// In the canvas — no fill, hairline only. Grouping without a card.
+    case flat
+    /// On the canvas — the default card.
+    case raised
+    /// Above a card — popovers, focused fields, chips, the composer.
+    case floating
+
+    var fill: Color {
+        switch self {
+        case .flat:     return .clear
+        case .raised:   return .appRaised
+        case .floating: return .appFloating
+        }
+    }
+
+    /// Dark mode reads lift from the fill stepping away from the canvas; light mode
+    /// reads it from the shadow. Both need to be right, so both are specified.
+    var shadow: (radius: CGFloat, y: CGFloat, opacity: Double) {
+        switch self {
+        case .flat:     return (0, 0, 0)
+        case .raised:   return (10, 4, 0.10)
+        case .floating: return (20, 8, 0.16)
+        }
+    }
 }
 
-// MARK: - AppCard
-//
-// The single shared card surface. Every raised container in the product (Today cards,
-// More menu, action rows, attachment strips) should use this instead of defining its own
-// background + border + radius triple. The content is left-aligned by default; pass a
-// different alignment via the view modifier if needed.
+/// The one raised surface: opaque fill, one hairline, one soft shadow.
+struct AppSurfaceBackground: View {
+    var elevation: AppElevation = .raised
+    var radius: CGFloat = AppRadius.card
 
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let lift = elevation.shadow
+        shape
+            .fill(elevation.fill)
+            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
+            .shadow(color: .black.opacity(lift.opacity), radius: lift.radius, y: lift.y)
+    }
+}
+
+extension View {
+    /// Put this view on a raised surface. Use instead of hand-rolling a
+    /// background + strokeBorder + shadow triple. (Named `plate` rather than
+    /// `surface` so it never reads as the `Color.appSurface` token.)
+    func appPlate(_ elevation: AppElevation = .raised,
+                  radius: CGFloat = AppRadius.card) -> some View {
+        background { AppSurfaceBackground(elevation: elevation, radius: radius) }
+    }
+}
+
+/// The container form of the same surface: content, padding, card.
 struct AppCard<Content: View>: View {
-    var padding: CGFloat = 16
+    var padding: CGFloat = AppSpacing.lg
+    var elevation: AppElevation = .raised
+    var radius: CGFloat = AppRadius.card
     @ViewBuilder let content: Content
 
-    // No background fill, border, or shadow — content sits directly on the pure-black
-    // canvas per the minimalist directive. Separation comes from hairline dividers only.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
+            .appPlate(elevation, radius: radius)
     }
 }
 
@@ -506,21 +558,14 @@ extension Font {
 
 /// Full-bleed dark hairline (#1A1A1A, 0.5pt) — the Milgrain row separator.
 struct MilgrainDivider: View {
-    var body: some View {
-        Rectangle().fill(Color.mgDivider).frame(height: 0.5)
-    }
+    var body: some View { AppDivider() }
 }
 
 /// Editorial section header — a Didot title in editorial ink, Title-case, left-aligned,
 /// no background. The settings-family counterpart to `AppSectionTitle`.
 struct MilgrainSectionHeader: View {
     let title: String
-    var body: some View {
-        Text(title)
-            .font(.appBody(15, weight: .semibold))
-            .foregroundStyle(Color.appInk)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    var body: some View { AppSectionHeader(title: title) }
 }
 
 /// White-on / #333-off capsule toggle, no glow or halo.
@@ -531,14 +576,17 @@ struct MilgrainToggle: View {
         Button {
             withAnimation(.appToggle) { isOn.toggle() }
         } label: {
+            // 30×16 with a 12pt knob was too small to read state at a glance and
+            // put a white knob on gold at ~2:1. Bigger, and the knob now uses the
+            // accent's paired ink like every other on-accent element.
             Capsule()
                 .fill(isOn ? Color.appAccent : Color.mgOff)
-                .frame(width: 30, height: 16)
+                .frame(width: 40, height: 22)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.white : Color.mgSecondary)
-                        .frame(width: 12, height: 12)
-                        .padding(2)
+                        .fill(isOn ? Color.appOnAccent : Color.appMuted)
+                        .frame(width: 16, height: 16)
+                        .padding(3)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
                 )
                 .frame(width: 44, height: 44)
@@ -572,7 +620,7 @@ struct AppSegmented: View {
                     HapticManager.shared.impact(.light)
                 } label: {
                     Text(label(i))
-                        .font(.appBody(14, weight: isSel ? .semibold : .regular))
+                        .font(.appBody(AppText.body, weight: isSel ? .semibold : .regular))
                         .foregroundStyle(isSel ? Color.appOnAccent : Color.appMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
@@ -591,110 +639,14 @@ struct AppSegmented: View {
 
 typealias MilgrainSegmentedControl = AppSegmented
 
-// MARK: - Today tab: light/dark glass language
-//
-// The Today tab is the one screen that breaks the fixed-black rule: it has a
-// living aurora gradient with glass cards floating over it, in two finishes.
-// `TodayPalette` swaps the text/line colours between the dark aurora and the
-// light pastel finish; cards read `p.ink` / `p.muted` etc. so a single bool
-struct TodayPalette {
-    let ink: Color       // primary editorial text
-    let muted: Color     // captions, eyebrows, secondary
-    let titanium: Color  // icons, quiet emphasis
-    let hairline: Color  // 0.5pt rules
-
-    static let dark = TodayPalette(
-        ink:      Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255),
-        muted:    Color(red: 152 / 255, green: 152 / 255, blue: 158 / 255),
-        titanium: Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255),
-        hairline: Color.white.opacity(0.14)
-    )
-    static let light = TodayPalette(
-        ink:      Color(red: 0.13, green: 0.13, blue: 0.15),
-        muted:    Color(red: 0.42, green: 0.42, blue: 0.46),
-        titanium: Color(red: 0.30, green: 0.30, blue: 0.34),
-        hairline: Color.black.opacity(0.10)
-    )
-}
-
-/// Shared raised surface for grouped content.
+/// The Today board's card — the shared surface under its own name.
 struct TodayCard<Content: View>: View {
-    var padding: CGFloat = 16
+    var padding: CGFloat = AppSpacing.lg
     @ViewBuilder let content: Content
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-        VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(padding)
-            .background(shape.fill(Color.appAdaptive(dark: Color.appSurface2, light: .white.opacity(0.88))))
-            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
-            .shadow(color: .black.opacity(0.035), radius: 6, y: 2)
+        AppCard(padding: padding) { content }
     }
-}
-
-/// The living background for the Today tab: a slowly-drifting 3×3 mesh gradient.
-/// Dark finish is a muted aurora that stays mostly black (text stays readable);
-/// light finish is the soft pastel wash. Falls back to a static linear gradient
-/// before iOS 18 where `MeshGradient` doesn't exist.
-struct TodayAuroraBackground: View {
-    let light: Bool
-
-    private var colors: [Color] { light ? Self.lightColors : Self.darkColors }
-
-    var body: some View {
-        Group {
-            if #available(iOS 18.0, *) {
-                // ponytail: 20fps drift — slow enough to barely cost battery, smooth
-                // enough to read as "alive". Drop the interval if it ever feels jerky.
-                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { ctx in
-                    let t = ctx.date.timeIntervalSinceReferenceDate
-                    MeshGradient(width: 3, height: 3, points: Self.points(t), colors: colors)
-                }
-            } else {
-                LinearGradient(colors: [colors.first!, colors.last!],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-        }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.5), value: light)
-    }
-
-    /// 3×3 control points; corners pinned, interior + edge-mids wobble on sine
-    /// waves at different speeds so the gradient never visibly loops.
-    static func points(_ t: Double) -> [SIMD2<Float>] {
-        func w(_ base: Double, _ speed: Double, _ amp: Double) -> Float {
-            Float(base + sin(t * speed) * amp)
-        }
-        return [
-            [0, 0],                         [w(0.5, 0.6, 0.06), 0],                  [1, 0],
-            [0, w(0.5, 0.5, 0.06)],         [w(0.5, 0.4, 0.08), w(0.5, 0.7, 0.08)], [1, w(0.5, 0.55, 0.06)],
-            [0, 1],                         [w(0.5, 0.65, 0.06), 1],                 [1, 1]
-        ]
-    }
-
-    // Dark: stays mostly true-black with a faint cool lift in the middle band — a
-    // quiet depth, not a purple haze.
-    private static let darkColors: [Color] = {
-        let lift  = Color(red: 0.09, green: 0.10, blue: 0.13)
-        let lift2 = Color(red: 0.11, green: 0.12, blue: 0.15)
-        return [.black, .black, .black,
-                lift,   lift2,  lift,
-                .black, .black, .black]
-    }()
-
-    // Light: near-white overall with only a whisper of colour in the middle band —
-    // clean white top AND bottom (no coloured blob hanging at the edges). Subtle on
-    // purpose; the reference is a faint holographic sheen on white, not a wash.
-    private static let lightColors: [Color] = {
-        let white = Color(red: 0.98, green: 0.975, blue: 0.965)
-        let lilac = Color(red: 0.91, green: 0.89,  blue: 0.97)
-        let peach = Color(red: 0.99, green: 0.93,  blue: 0.89)
-        let sky   = Color(red: 0.89, green: 0.94,  blue: 0.99)
-        return [white, white, white,
-                lilac, peach, sky,
-                white, white, white]
-    }()
 }
 
 // MARK: - Scroll-aware tab bar (legacy no-op)
@@ -725,10 +677,14 @@ struct AppOutlineButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.appBody(15, weight: .medium))
+                .font(.appBody(AppText.body, weight: .medium))
                 .foregroundStyle(Color.appMuted)
                 .frame(maxWidth: .infinity)
-                .frame(height: 50)
+                .frame(height: appControlHeight)
+                // It is called an outline button; it had no outline, so it read as
+                // floating text next to the primary capsule with no edge to press.
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.strong))
+                .contentShape(Capsule())
         }
         .buttonStyle(.appScale)
     }
@@ -774,152 +730,21 @@ struct AppGrain: View {
     }
 }
 
-/// The painterly weather sky that fades into the canvas — replaces the old boxed
-/// `HeroSky`. Light mode is a warm day wash with drifting mist; dark mode is a deep
-/// night that falls to black with a soft moon-glow and a few quiet stars. The bottom
-/// of the gradient is clear so the page canvas shows through beneath it. No icons.
-struct AtmosphereSky: View {
-    @Environment(\.colorScheme) private var scheme
-    /// OxyWeatherService symbolName, e.g. "cloud.rain" — only used to cool the palette.
-    var condition: String?
-
-    private var isRain: Bool { (condition ?? "").contains("rain") || (condition ?? "").contains("drizzle") }
-    private var light: Bool { scheme != .dark }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: false)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            ZStack(alignment: .top) {
-                LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
-
-                if light {
-                    // Two soft mist banks drifting at different speeds.
-                    mist(width: 220, y: 150, phase: t * 0.05, amp: 22, opacity: 0.55)
-                    mist(width: 180, y: 104, phase: -t * 0.04 + 2, amp: 18, opacity: 0.4)
-                } else {
-                    // A low moon glow + a scatter of faint, slowly breathing stars.
-                    Circle()
-                        .fill(RadialGradient(colors: [Color(white: 0.96), Color(white: 0.96).opacity(0)],
-                                             center: .center, startRadius: 1, endRadius: 60))
-                        .frame(width: 120, height: 120)
-                        .offset(x: 96, y: 30)
-                    ForEach(0..<7, id: \.self) { i in
-                        let p = Double(i)
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 1.6, height: 1.6)
-                            .opacity(0.25 + 0.55 * (0.5 + 0.5 * sin(t * 0.6 + p * 1.3)))
-                            .offset(x: [-120, -40, 40, 120, -90, 70, 10][i],
-                                    y: [40, 70, 52, 86, 120, 96, 150][i])
-                    }
-                }
-            }
-        }
-        .ignoresSafeArea()
-    }
-
-    private func mist(width: CGFloat, y: CGFloat, phase: Double, amp: CGFloat, opacity: Double) -> some View {
-        Ellipse()
-            .fill(RadialGradient(colors: [Color.white.opacity(opacity), Color.white.opacity(0)],
-                                 center: .center, startRadius: 1, endRadius: width / 2))
-            .frame(width: width, height: width * 0.3)
-            .offset(x: CGFloat(sin(phase)) * amp, y: y)
-    }
-
-    private var stops: [Gradient.Stop] {
-        if light {
-            if isRain {
-                return [.init(color: Color(red: 0.79, green: 0.80, blue: 0.82), location: 0),
-                        .init(color: Color(red: 0.91, green: 0.90, blue: 0.88), location: 0.34),
-                        .init(color: .clear, location: 0.72)]
-            }
-            return [.init(color: Color(red: 0.95, green: 0.76, blue: 0.42), location: 0),
-                    .init(color: Color(red: 0.96, green: 0.86, blue: 0.71), location: 0.32),
-                    .init(color: Color(red: 0.98, green: 0.94, blue: 0.88), location: 0.55),
-                    .init(color: .clear, location: 0.78)]
-        }
-        if isRain {
-            return [.init(color: Color(red: 0.06, green: 0.09, blue: 0.13), location: 0),
-                    .init(color: Color(red: 0.03, green: 0.05, blue: 0.08), location: 0.4),
-                    .init(color: .clear, location: 0.74)]
-        }
-        return [.init(color: Color(red: 0.055, green: 0.114, blue: 0.188), location: 0),
-                .init(color: Color(red: 0.043, green: 0.082, blue: 0.141), location: 0.34),
-                .init(color: Color(red: 0.027, green: 0.043, blue: 0.078), location: 0.6),
-                .init(color: .clear, location: 0.82)]
-    }
-}
-
 /// A Didot section title — the editorial counterpart to a small-caps header.
 struct AppSectionTitle: View {
     let text: String
-    // size retained for source compat; all section headers now share one canonical scale.
-    var size: CGFloat = 22
-    init(_ text: String, size: CGFloat = 22) { self.text = text; self.size = size }
-    var body: some View {
-        Text(text)
-            .font(.appBody(15, weight: .semibold))
-            .foregroundStyle(Color.appInk)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    init(_ text: String) { self.text = text }
+    var body: some View { AppSectionHeader(title: text) }
 }
 
 /// Hairline rule with a small centred dot — the only divider ornament the language uses.
 struct AppRule: View {
     var body: some View {
         HStack(spacing: 10) {
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-            Circle().fill(Color.appMuted.opacity(0.55)).frame(width: 3, height: 3)
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+            Rectangle().fill(Color.appHairline).frame(height: AppBorder.hairline)
+            Circle().fill(Color.appFaint).frame(width: 3, height: 3)
+            Rectangle().fill(Color.appHairline).frame(height: AppBorder.hairline)
         }
-    }
-}
-
-/// A tonal, grained plate for featured blocks (e.g. "This evening"). No border, no
-/// shadow — it reads as a different stock of paper laid on the canvas.
-struct EditorialPlate<Content: View>: View {
-    var padding: CGFloat = 22
-    @ViewBuilder var content: Content
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(padding)
-            .background {
-                ZStack {
-                    Color.appSurface
-                    AppGrain(intensity: 0.06)
-                }
-            }
-            .clipShape(shape)
-    }
-}
-
-/// Editorial body text with a raised Didot initial (a versal). Not a true wrapping
-/// drop cap — SwiftUI has no `::first-letter` — but it gives the paragraph an
-/// editorial opening. `dropSize` is the initial's point size.
-struct DropCapText: View {
-    let text: String
-    var bodySize: CGFloat = 16
-    var dropSize: CGFloat = 38
-    var color: Color = .appMuted
-
-    private var attributed: AttributedString {
-        var a = AttributedString(text)
-        a.font = .system(size: bodySize, weight: .regular)
-        a.foregroundColor = color
-        if !a.characters.isEmpty {
-            let end = a.index(a.startIndex, offsetByCharacters: 1)
-            a[a.startIndex..<end].font = .custom("Didot", size: dropSize)
-            a[a.startIndex..<end].foregroundColor = .appInk
-        }
-        return a
-    }
-
-    var body: some View {
-        Text(attributed)
-            .lineSpacing(4)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -932,15 +757,15 @@ struct AppRow<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
-        let content = HStack(spacing: 12) {
+        let content = HStack(spacing: AppSpacing.md) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.rowTitle).foregroundStyle(Color.appInk)
                 if let subtitle { Text(subtitle).font(.rowSecondary).foregroundStyle(Color.appMuted) }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: AppSpacing.sm)
             trailing()
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, AppSpacing.lg)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
 

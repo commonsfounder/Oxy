@@ -114,9 +114,6 @@ enum AppGlyph {
 // MARK: - Shared visual chrome
 
 enum GlebChrome {
-    static let ink = Color.appInk
-    static let muted = Color.appMuted
-
     static var pastelBlob: some View {
         ZStack {
             Color.appBackground
@@ -148,7 +145,7 @@ struct GlebTopChrome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                BrandWordmark(height: 14, color: GlebChrome.ink.opacity(0.62))
+                BrandWordmark(height: 14, color: Color.appMuted)
                 Spacer(minLength: 0)
                 weatherPill
                 profileButton
@@ -173,18 +170,18 @@ struct GlebTopChrome: View {
         } label: {
             HStack(spacing: 6) {
                 AppIcon(AppGlyph.weather(weather.symbolName), size: 15)
-                    .foregroundStyle(Color.orange.opacity(0.9))
+                    .foregroundStyle(Color.appAccent)
                 Text("\(Int(weather.temperatureC.rounded()))°")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.8))
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                 AppIcon("chevron-down", size: 10)
-                    .foregroundStyle(GlebChrome.ink.opacity(0.4))
+                    .foregroundStyle(Color.appMuted)
                     .rotationEffect(.degrees(weatherExpanded ? 180 : 0))
             }
-            .padding(.horizontal, 11)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.appSurface.opacity(0.82), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.appAccent.opacity(0.20), lineWidth: 0.7))
+            .background(Color.appSurface, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.appAccent.opacity(0.20), lineWidth: AppBorder.hairline))
         }
         .buttonStyle(.plain)
         }
@@ -203,19 +200,19 @@ struct GlebTopChrome: View {
 
         VStack(alignment: .leading, spacing: 14) {
             Text(w.conditionDescription)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(GlebChrome.ink.opacity(0.75))
+                .font(.appBody(AppText.footnote, weight: .medium))
+                .foregroundStyle(Color.appMuted)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
                 ForEach(cells, id: \.0) { cell in
                     VStack(spacing: 4) {
                         Text(cell.0.uppercased())
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.appBody(AppText.micro, weight: .semibold))
                             .tracking(0.8)
-                            .foregroundStyle(GlebChrome.muted)
+                            .foregroundStyle(Color.appMuted)
                         Text(cell.1)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink)
+                            .font(.appBody(AppText.body, weight: .medium))
+                            .foregroundStyle(Color.appInk)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -228,10 +225,10 @@ struct GlebTopChrome: View {
     private var profileButton: some View {
         Button(action: onProfile) {
             AppIcon("person", size: 16)
-                .foregroundStyle(GlebChrome.ink.opacity(0.72))
+                .foregroundStyle(Color.appMuted)
                 .frame(width: 36, height: 36)
-                .background(Color.appSurface.opacity(0.86), in: Circle())
-                .overlay(Circle().strokeBorder(Color.appAccent.opacity(0.26), lineWidth: 0.8))
+                .background(Color.appSurface, in: Circle())
+                .overlay(Circle().strokeBorder(Color.appAccent.opacity(0.26), lineWidth: AppBorder.hairline))
         }
         .buttonStyle(.appScale)
     }

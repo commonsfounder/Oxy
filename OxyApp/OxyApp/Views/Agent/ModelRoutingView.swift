@@ -41,15 +41,15 @@ struct ModelRoutingView: View {
             HStack(spacing: 10) {
                 AppIcon("sparkles", size: 16).foregroundStyle(Color.appAccent)
                 Text("Millie's AI")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
             }
             Text(providerName(snapshot.active.provider))
-                .font(.system(size: 14, weight: .medium))
+                .font(.appBody(AppText.body, weight: .medium))
                 .foregroundStyle(Color.mgHeading)
             if !snapshot.selected.configured {
                 Text("This choice is not set up yet.")
-                    .font(.system(size: 12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.mgSecondary)
             }
         }
@@ -60,7 +60,7 @@ struct ModelRoutingView: View {
 
     private func routeEditor(_ snapshot: ModelRoutingSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionTitle("Choose Millie's AI", size: 20)
+            AppSectionTitle("Choose Millie's AI")
             Picker("Provider", selection: $selectedProvider) {
                 ForEach(snapshot.providers) { provider in
                     Text(provider.name).tag(provider.id)
@@ -76,9 +76,9 @@ struct ModelRoutingView: View {
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(Color.appInk)
-                .padding(.vertical, 15)
+                .padding(.vertical, 16)
                 .padding(.horizontal, 16)
                 .background(Color.appAccent, in: Capsule())
             }
@@ -91,21 +91,21 @@ struct ModelRoutingView: View {
 
     private func providerList(_ providers: [ModelProvider]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppSectionTitle("Available AI", size: 20)
+            AppSectionTitle("Available AI")
             ForEach(providers) { provider in
                 HStack(spacing: 12) {
                     AppIcon(provider.configured ? "bolt" : "dotted", size: 14)
                         .foregroundStyle(provider.configured ? Color.appAccent : Color.mgSecondary)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(provider.name).font(.system(size: 14, weight: .semibold))
+                        Text(provider.name).font(.appBody(AppText.body, weight: .semibold))
                         Text(provider.configured ? "Ready" : "Not set up")
-                            .font(.system(size: 12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.mgSecondary)
                     }
                     Spacer()
                     if provider.id == selectedProvider {
                         Text("In use")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.appBody(AppText.micro, weight: .semibold))
                             .foregroundStyle(Color.appAccent)
                     }
                 }
@@ -116,10 +116,10 @@ struct ModelRoutingView: View {
 
     private func errorState(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("AI choices unavailable").font(.system(size: 18, weight: .semibold))
-            Text(message).font(.system(size: 13)).foregroundStyle(Color.mgSecondary)
+            Text("AI choices unavailable").font(.appDisplay(AppText.title, weight: .semibold))
+            Text(message).font(.appBody(AppText.footnote)).foregroundStyle(Color.mgSecondary)
             Button("Try again") { Task { await load() } }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(AppText.body, weight: .semibold))
         }
         .foregroundStyle(Color.mgHeading)
         .padding(.top, 40)

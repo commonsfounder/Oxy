@@ -10,12 +10,12 @@ struct StepTitleBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 30, weight: .bold))
+                .font(.appDisplay(AppText.display, weight: .bold))
                 .foregroundStyle(ink)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 15))
-                    .foregroundStyle(ink.opacity(0.55))
+                    .font(.appBody(AppText.body))
+                    .foregroundStyle(Color.appMuted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,24 +36,24 @@ struct PaymentConfirmStepView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text(details.merchant)
-                        .font(.system(size: 15))
-                        .foregroundStyle(ink.opacity(0.6))
+                        .font(.appBody(AppText.body))
+                        .foregroundStyle(Color.appMuted)
                     Spacer()
                     Text(details.amount)
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.appDisplay(AppText.display, weight: .bold))
                         .foregroundStyle(ink)
                 }
-                Divider().overlay(ink.opacity(0.08))
+                Divider().overlay(Color.appHairline)
                 Text(details.detail)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ink.opacity(0.5))
+                    .font(.appBody(AppText.footnote))
+                    .foregroundStyle(Color.appMuted)
             }
             .padding(18)
             .background { MissionGlassPlate() }
 
             Text("Cancel before payment.")
-                .font(.system(size: 12))
-                .foregroundStyle(ink.opacity(0.4))
+                .font(.appBody(AppText.caption))
+                .foregroundStyle(Color.appMuted)
                 .padding(.top, 12)
         }
     }
@@ -72,10 +72,10 @@ struct RideConfirmStepView: View {
             if let estimate = details.estimate {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Estimate")
-                        .font(.appBody(13, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.45))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
                     Text(estimate)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.appDisplay(AppText.title, weight: .bold))
                         .foregroundStyle(ink)
                 }
                 .padding(.bottom, 14)
@@ -84,10 +84,10 @@ struct RideConfirmStepView: View {
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
                 Text("Uber shows the final fare before you confirm.")
-                    .font(.system(size: 12))
+                    .font(.appBody(AppText.caption))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundStyle(ink.opacity(0.45))
+            .foregroundStyle(Color.appMuted)
         }
     }
 }
@@ -107,13 +107,13 @@ struct LinkResultStepView: View {
                     ForEach(Array(details.steps.enumerated()), id: \.offset) { index, step in
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(index + 1)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(ink.opacity(0.55))
+                                .font(.appBody(AppText.caption, weight: .semibold))
+                                .foregroundStyle(Color.appMuted)
                                 .frame(width: 20, height: 20)
-                                .background(ink.opacity(0.08), in: Circle())
+                                .background(Color.appHairline, in: Circle())
                             Text(step)
-                                .font(.system(size: 14))
-                                .foregroundStyle(ink.opacity(0.85))
+                                .font(.appBody(AppText.body))
+                                .foregroundStyle(ink)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -130,7 +130,7 @@ struct LinkResultStepView: View {
                                 HStack(spacing: 10) {
                                     AppIcon("arrow-up-right", size: 13)
                                     Text(link.label)
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.appBody(AppText.body, weight: .semibold))
                                     Spacer(minLength: 0)
                                 }
                                 .foregroundStyle(ink)
@@ -138,7 +138,7 @@ struct LinkResultStepView: View {
                                 .padding(.vertical, 12)
                                 .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                                    .strokeBorder(Color.appHairline, lineWidth: 0.5))
+                                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
                             }
                         }
                     }
@@ -148,10 +148,10 @@ struct LinkResultStepView: View {
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
                 Text("Links from this email.")
-                    .font(.system(size: 12))
+                    .font(.appBody(AppText.caption))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundStyle(ink.opacity(0.45))
+            .foregroundStyle(Color.appMuted)
         }
     }
 }
@@ -162,7 +162,6 @@ struct SubjectDetailStepView: View {
     let details: SubjectDetails
     var ink: Color
     @State private var selectedOptionIndex: Int?
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -171,10 +170,10 @@ struct SubjectDetailStepView: View {
             if let amountText = details.amountText {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Amount")
-                        .font(.appBody(13, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.45))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
                     Text(amountText)
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.appDisplay(AppText.display, weight: .bold))
                         .foregroundStyle(ink)
                 }
             }
@@ -184,20 +183,20 @@ struct SubjectDetailStepView: View {
             if !details.options.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Options")
-                        .font(.appBody(13, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.45))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Array(details.options.enumerated()), id: \.offset) { index, option in
                                 let isSelected = selectedOptionIndex == index
                                 Text(option)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(isSelected ? (colorScheme == .dark ? Color.black : Color.white) : ink.opacity(0.75))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 9)
+                                    .font(.appBody(AppText.footnote, weight: .medium))
+                                    .foregroundStyle(isSelected ? Color.appOnAccent : Color.appMuted)
+                                    .padding(.horizontal, AppSpacing.lg)
+                                    .padding(.vertical, AppSpacing.sm)
                                     .background {
                                         if isSelected {
-                                            Capsule().fill(ink)
+                                            Capsule().fill(Color.appAccent)
                                         } else {
                                             Capsule().fill(Color.appSurface)
                                         }
@@ -218,9 +217,9 @@ struct SubjectDetailStepView: View {
                 HStack(spacing: 6) {
                     AppIcon("shield-check", size: 13)
                     Text("Final price is confirmed at checkout")
-                        .font(.system(size: 12))
+                        .font(.appBody(AppText.caption))
                 }
-                .foregroundStyle(ink.opacity(0.45))
+                .foregroundStyle(Color.appMuted)
             }
         }
     }
@@ -241,7 +240,7 @@ struct SubjectDetailStepView: View {
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(Color.appHairline, lineWidth: 0.6)
+                    .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
             )
         } else {
             placeholderPlate
@@ -255,9 +254,9 @@ struct SubjectDetailStepView: View {
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .fill(Color.appSurface2)
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.6)
+                .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
             AppIcon("cube", size: 60)
-                .foregroundStyle(ink.opacity(0.4))
+                .foregroundStyle(Color.appMuted)
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
         }
     }
@@ -278,9 +277,9 @@ struct AssistantAskStepView: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 10) {
                 AppIcon("sparkles", size: 16)
-                    .foregroundStyle(ink.opacity(0.5))
+                    .foregroundStyle(Color.appMuted)
                 Text(text)
-                    .font(.system(size: 19, weight: .medium))
+                    .font(.appDisplay(AppText.title, weight: .medium))
                     .foregroundStyle(ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -290,7 +289,7 @@ struct AssistantAskStepView: View {
 
             HStack(spacing: 8) {
                 TextField("Type your answer", text: $draft, axis: .vertical)
-                    .font(.system(size: 15))
+                    .font(.appBody(AppText.body))
                     .foregroundStyle(ink)
                     .focused($focused)
                     .submitLabel(.send)
@@ -300,14 +299,14 @@ struct AssistantAskStepView: View {
                 Button(action: send) {
                     if isSending {
                         ProgressView()
-                            .tint(.white)
+                            .tint(Color.appOnAccent)
                             .frame(width: 30, height: 30)
-                            .background(ink.opacity(0.5), in: Circle())
+                            .background(Color.appAccent.opacity(0.5), in: Circle())
                     } else {
                         AppIcon("arrow-up", size: 14, weight: .bold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.appOnAccent)
                             .frame(width: 30, height: 30)
-                            .background(ink, in: Circle())
+                            .background(Color.appAccent, in: Circle())
                     }
                 }
                 .buttonStyle(.appScale(0.94))
@@ -316,7 +315,7 @@ struct AssistantAskStepView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Color.appSurface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
+            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
         }
     }
 
@@ -343,17 +342,17 @@ struct WorkingHeroStepView: View {
                     .controlSize(.small)
                     .tint(Color.appAccent)
                 Text("In progress")
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(ink.opacity(0.68))
+                    .font(.appBody(AppText.body, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.appDisplay(24, weight: .semibold))
+                    .font(.appDisplay(AppText.display, weight: .semibold))
                     .foregroundStyle(ink)
                 Text(status)
-                    .font(.appBody(15))
-                    .foregroundStyle(ink.opacity(0.5))
+                    .font(.appBody(AppText.body))
+                    .foregroundStyle(Color.appMuted)
                     .animation(.appFast, value: status)
             }
         }
@@ -372,19 +371,19 @@ struct LiveStepsTraceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Activity")
-                .font(.appBody(13, weight: .semibold))
-                .foregroundStyle(ink.opacity(0.45))
+                .font(.appBody(AppText.footnote, weight: .semibold))
+                .foregroundStyle(Color.appMuted)
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(steps) { step in
                     HStack(alignment: .top, spacing: 8) {
                         Circle()
-                            .fill(ink.opacity(0.35))
+                            .fill(Color.appFaint)
                             .frame(width: 5, height: 5)
                             .padding(.top, 6)
                         Text(step.stepName)
-                            .font(.system(size: 13))
-                            .foregroundStyle(ink.opacity(0.6))
+                            .font(.appBody(AppText.footnote))
+                            .foregroundStyle(Color.appMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -403,13 +402,13 @@ struct SessionDoneStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             AppIcon("check-circle", size: 30)
-                .foregroundStyle(ink.opacity(0.8))
+                .foregroundStyle(Color.appMuted)
             Text(title)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.appDisplay(AppText.title, weight: .semibold))
                 .foregroundStyle(ink)
             Text("Added to Home.")
-                .font(.system(size: 14))
-                .foregroundStyle(ink.opacity(0.55))
+                .font(.appBody(AppText.body))
+                .foregroundStyle(Color.appMuted)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)

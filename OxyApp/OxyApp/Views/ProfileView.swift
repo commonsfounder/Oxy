@@ -37,7 +37,7 @@ struct ProfileView: View {
                             section(title: "Identity") {
                                 HStack {
                                     Text("Your Name")
-                                        .font(.system(size: 15, weight: .regular))
+                                        .font(.appBody(AppText.body, weight: .regular))
                                         .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
                                     TextField(
@@ -45,7 +45,7 @@ struct ProfileView: View {
                                         text: $settings.userName,
                                         prompt: Text("Not set — tap to add").foregroundStyle(Color.appMuted)
                                     )
-                                        .font(.appBody(15))
+                                        .font(.appBody(AppText.body))
                                         .foregroundStyle(Color.mgHeading)
                                         .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
@@ -58,7 +58,7 @@ struct ProfileView: View {
 
                                 HStack {
                                     Text("Assistant Name")
-                                        .font(.system(size: 15, weight: .regular))
+                                        .font(.appBody(AppText.body, weight: .regular))
                                         .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
                                     TextField(
@@ -66,7 +66,7 @@ struct ProfileView: View {
                                         text: $settings.name,
                                         prompt: Text("Not set — tap to name").foregroundStyle(Color.appMuted)
                                     )
-                                        .font(.appBody(15))
+                                        .font(.appBody(AppText.body))
                                         .foregroundStyle(Color.mgHeading)
                                         .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
@@ -121,7 +121,7 @@ struct ProfileView: View {
                                 if let accountStatusText {
                                     MilgrainDivider()
                                     Text(accountStatusText)
-                                        .font(.system(size: 12, weight: .light))
+                                        .font(.appBody(AppText.caption, weight: .regular))
                                         .foregroundStyle(Color.mgSecondary)
                                         .lineSpacing(3)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,11 +184,11 @@ struct ProfileView: View {
     private func identityRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 15, weight: .regular))
+                .font(.appBody(AppText.body, weight: .regular))
                 .foregroundStyle(Color.mgHeading)
             Spacer(minLength: 16)
             Text(value)
-                .font(.appMono(12))
+                .font(.appMono(AppText.caption))
                 .foregroundStyle(Color.mgSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -207,7 +207,7 @@ struct ProfileView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(AppText.body, weight: .regular))
                 Spacer()
                 AppIcon("chevron-right", size: 14)
                     .foregroundStyle(Color.mgSecondary)

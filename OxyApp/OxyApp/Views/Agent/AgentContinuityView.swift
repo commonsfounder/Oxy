@@ -27,12 +27,12 @@ struct AgentContinuityView: View {
                         }
                         if let successMessage {
                             Text(successMessage)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.appBody(AppText.footnote, weight: .medium))
                                 .foregroundStyle(Color.appAccent)
                         }
                         if let errorMessage {
                             Text(errorMessage)
-                                .font(.system(size: 13))
+                                .font(.appBody(AppText.footnote))
                                 .foregroundStyle(Color.mgDestructive)
                         }
                         if let snapshot {
@@ -65,10 +65,10 @@ struct AgentContinuityView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 AppIcon("dotted", size: 15).foregroundStyle(Color.appAccent)
-                AppSectionTitle("Bring your history", size: 20)
+                AppSectionTitle("Bring your history")
             }
             Text("Import a .zip export. A .json includes conversations only.")
-                .font(.system(size: 13))
+                .font(.appBody(AppText.footnote))
                 .foregroundStyle(Color.mgSecondary)
             Button {
                 showingImporter = true
@@ -78,9 +78,9 @@ struct AgentContinuityView: View {
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(Color.appInk)
-                .padding(.vertical, 15)
+                .padding(.vertical, 16)
                 .padding(.horizontal, 16)
                 .background(Color.appAccent, in: Capsule())
             }
@@ -96,7 +96,7 @@ struct AgentContinuityView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
                 AppIcon("doc", size: 15).foregroundStyle(Color.appAccent)
-                AppSectionTitle("\(preview.source.capitalized) export", size: 20)
+                AppSectionTitle("\(preview.source.capitalized) export")
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -105,11 +105,11 @@ struct AgentContinuityView: View {
                         AppIcon(row.found ? "bolt" : "dotted", size: 12)
                             .foregroundStyle(row.found ? Color.appAccent : Color.mgSecondary)
                         Text(row.label)
-                            .font(.system(size: 13, weight: row.found ? .medium : .regular))
+                            .font(.appBody(AppText.footnote, weight: row.found ? .medium : .regular))
                             .foregroundStyle(row.found ? Color.mgHeading : Color.mgSecondary)
                         Spacer()
                         Text(row.detail)
-                            .font(.system(size: 12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.mgSecondary)
                     }
                 }
@@ -119,10 +119,10 @@ struct AgentContinuityView: View {
                 MilgrainDivider()
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Automations")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
                         .foregroundStyle(Color.mgHeading)
                     Text("These arrive switched off. Turn each one off in \(preview.source.capitalized) before enabling it here, or it runs twice.")
-                        .font(.system(size: 12))
+                        .font(.appBody(AppText.caption))
                         .foregroundStyle(Color.mgSecondary)
                     ForEach(preview.workflows.prefix(8)) { workflow in
                         HStack(alignment: .top, spacing: 10) {
@@ -130,17 +130,17 @@ struct AgentContinuityView: View {
                                 .foregroundStyle(workflow.isScheduled ? Color.appAccent : Color.mgSecondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(workflow.name)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.appBody(AppText.footnote, weight: .medium))
                                     .foregroundStyle(Color.mgHeading)
                                 Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger — runs only when you ask")
-                                    .font(.system(size: 11))
+                                    .font(.appBody(AppText.micro))
                                     .foregroundStyle(Color.mgSecondary)
                             }
                         }
                     }
                     if preview.workflows.count > 8 {
                         Text("and \(preview.workflows.count - 8) more")
-                            .font(.system(size: 11))
+                            .font(.appBody(AppText.micro))
                             .foregroundStyle(Color.mgSecondary)
                     }
                 }
@@ -151,7 +151,7 @@ struct AgentContinuityView: View {
                     Task { await confirmImport() }
                 } label: {
                     Text(isWorking ? "Importing…" : "Import")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .padding(.vertical, 14)
                         .frame(maxWidth: .infinity)
@@ -161,7 +161,7 @@ struct AgentContinuityView: View {
                 .disabled(isWorking)
 
                 Button("Cancel") { reset() }
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.appBody(AppText.body, weight: .medium))
                     .foregroundStyle(Color.mgSecondary)
                     .disabled(isWorking)
             }
@@ -207,23 +207,23 @@ struct AgentContinuityView: View {
 
     private func history(_ imports: [AgentContinuityImport]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            AppSectionTitle("Imported", size: 20)
+            AppSectionTitle("Imported")
             if imports.isEmpty {
                 Text("Nothing imported yet.")
-                    .font(.system(size: 13))
+                    .font(.appBody(AppText.footnote))
                     .foregroundStyle(Color.mgSecondary)
             } else {
                 ForEach(imports) { item in
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(item.source.capitalized).font(.system(size: 14, weight: .semibold))
+                            Text(item.source.capitalized).font(.appBody(AppText.body, weight: .semibold))
                             Spacer()
                             Text(item.status.capitalized)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.appBody(AppText.micro, weight: .semibold))
                                 .foregroundStyle(item.status == "failed" ? Color.mgDestructive : Color.appAccent)
                         }
                         Text("\(item.conversationCount) conversations · \(item.messageCount) messages · \(item.memoryCount) memories")
-                            .font(.system(size: 12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.mgSecondary)
                     }
                     .padding(.vertical, 12)

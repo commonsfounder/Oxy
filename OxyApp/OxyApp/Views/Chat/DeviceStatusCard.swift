@@ -16,27 +16,27 @@ struct DeviceStatusCard: View {
                     metrics
                 }
 
-                VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 10) {
                     liveState
                     metrics
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 11)
+            .padding(.vertical, 12)
 
             Rectangle()
                 .fill(Color.appHairline)
-                .frame(height: 0.5)
+                .frame(height: AppBorder.hairline)
         }
     }
 
     private var liveState: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(telemetry.isStreaming ? Color.appLive : Color.appMuted.opacity(0.5))
+                .fill(telemetry.isStreaming ? Color.appLive : Color.appFaint)
                 .frame(width: 6, height: 6)
             Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
-                .font(.appMono(10, weight: .medium))
+                .font(.appMono(AppText.micro, weight: .medium))
                 .tracking(0.6)
                 .foregroundStyle(telemetry.isStreaming ? Color.appInk : Color.appMuted)
                 .fixedSize()
@@ -52,7 +52,7 @@ struct DeviceStatusCard: View {
 
     private func metric(_ text: String) -> some View {
         Text(text)
-            .font(.appMono(10, weight: .medium))
+            .font(.appMono(AppText.micro, weight: .medium))
             .tracking(0.4)
             .foregroundStyle(Color.appTitanium)
             .fixedSize()

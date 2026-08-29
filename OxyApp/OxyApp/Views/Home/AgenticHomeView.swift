@@ -89,7 +89,7 @@ struct AgenticHomeView: View {
 
                         if isLoading && board.isEmpty && missions.isEmpty && visibleLifeBriefing == nil {
                             ProgressView()
-                                .tint(GlebChrome.ink.opacity(0.4))
+                                .tint(Color.appMuted)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 40)
                         } else {
@@ -102,7 +102,7 @@ struct AgenticHomeView: View {
                                     ForEach(missions) { mission in
                                         MissionCardView(
                                             mission: mission,
-                                            ink: GlebChrome.ink,
+                                            ink: Color.appInk,
                                             onCTA: { handleMissionCTA(mission) },
                                             onMailCTA: { email in handleMailCTA(email) },
                                             onDismiss: mission.kind == .mailGroup || mission.watchID != nil ? nil : {
@@ -262,7 +262,7 @@ struct AgenticHomeView: View {
                             chatLaunch = nil
                         } label: {
                             AppIcon("xmark", size: 14)
-                                .foregroundStyle(GlebChrome.ink)
+                                .foregroundStyle(Color.appInk)
                                 .frame(width: 36, height: 36)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
@@ -321,25 +321,25 @@ struct AgenticHomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("TODAY")
-                    .font(.appBody(11, weight: .semibold))
+                    .font(.appBody(AppText.micro, weight: .semibold))
                     .tracking(2.2)
                     .foregroundStyle(Color.appAccent)
                 Spacer(minLength: 0)
                 Text(dateLine.uppercased())
-                    .font(.appMono(10, weight: .medium))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.42))
+                    .font(.appMono(AppText.micro, weight: .medium))
+                    .foregroundStyle(Color.appMuted)
             }
 
             Text(greetingLine)
-                .font(.appDisplay(40, weight: .medium))
-                .foregroundStyle(GlebChrome.ink)
+                .font(.appDisplay(AppText.hero, weight: .medium))
+                .foregroundStyle(Color.appInk)
                 .lineSpacing(-2)
                 .lineLimit(2)
                 .minimumScaleFactor(0.78)
 
             Text(homeSummary)
-                .font(.appBody(14, weight: .medium))
-                .foregroundStyle(GlebChrome.ink.opacity(0.56))
+                .font(.appBody(AppText.body, weight: .medium))
+                .foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
             AppRule()
@@ -361,41 +361,32 @@ struct AgenticHomeView: View {
 
     private var homeEmptyState: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                AppIcon("sparkles", size: 14)
-                    .foregroundStyle(Color.appAccent)
-                Text("READY WHEN YOU ARE")
-                    .font(.appBody(10, weight: .bold))
-                    .tracking(1.5)
-                    .foregroundStyle(Color.appAccent)
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Start with one request.")
-                    .font(.appBody(20, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink)
-                Text("Ask for a plan, an update, or a next step.")
-                    .font(.appBody(14))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.56))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Nothing on the board")
+                    .font(.appDisplay(AppText.title, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Text("Anything you ask for shows up here while it runs.")
+                    .font(.appBody(AppText.body))
+                    .foregroundStyle(Color.appMuted)
             }
 
             Button {
                 HapticManager.shared.impact(.light)
                 openChat(autoSend: nil, startFresh: true)
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: AppSpacing.sm) {
                     Text("Open chat")
-                        .font(.appBody(13, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                     AppIcon("arrow-up-right", size: 12)
                 }
                 .foregroundStyle(Color.appOnAccent)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.vertical, AppSpacing.md)
                 .background(Color.appAccent, in: Capsule())
             }
             .buttonStyle(.appScale(0.97))
         }
-        .padding(18)
+        .padding(AppSpacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { MissionGlassPlate() }
     }
@@ -480,12 +471,12 @@ struct AgenticHomeView: View {
                 ForEach(recentEntities) { entity in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entity.entityName)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.85))
+                            .font(.appBody(AppText.footnote, weight: .medium))
+                            .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(entity.site)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                            .font(.appBody(AppText.micro, weight: .regular))
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(1)
                     }
                     .frame(width: 180, alignment: .leading)
@@ -513,17 +504,17 @@ struct AgenticHomeView: View {
                 openChat(autoSend: nil, startFresh: true)
             } label: {
                 AppIcon("plus", size: 16)
-                    .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                    .foregroundStyle(Color.appMuted)
                     .frame(width: 40, height: 40)
                     .background(Color.appSurface, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
             .buttonStyle(.appScale)
 
-            HStack(spacing: 9) {
+            HStack(spacing: 10) {
                 TextField("Ask or delegate", text: $composerDraft)
-                    .font(.system(size: 16))
-                    .foregroundStyle(GlebChrome.ink)
+                    .font(.appBody(AppText.callout))
+                    .foregroundStyle(Color.appInk)
                     .focused($composerFocused)
                     .submitLabel(.send)
                     .onSubmit { sendComposer() }
@@ -534,32 +525,40 @@ struct AgenticHomeView: View {
                         openChat(autoSend: nil, startFresh: false)
                     } label: {
                         AppIcon("mic", size: 16)
-                            .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                            .foregroundStyle(Color.appMuted)
                     }
                     .buttonStyle(.plain)
                 } else {
                     Button(action: sendComposer) {
                         AppIcon("arrow-up", size: 14, weight: .bold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.appOnAccent)
                             .frame(width: 30, height: 30)
-                            .background(Color.black, in: Circle())
+                            .background(Color.appAccent, in: Circle())
                     }
                     .buttonStyle(.appScale(0.94))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(Color.appSurface.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(composerFocused ? Color.appAccent.opacity(0.46) : Color.appHairline, lineWidth: composerFocused ? 1 : 0.6))
-            .shadow(color: Color.appAccent.opacity(composerFocused ? 0.10 : 0.04), radius: composerFocused ? 14 : 8, y: 4)
+            .padding(.horizontal, AppSpacing.lg)
+            .padding(.vertical, AppSpacing.md)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: Self.composerFieldRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Self.composerFieldRadius, style: .continuous)
+                .strokeBorder(composerFocused ? Color.appAccent : Color.appHairline,
+                              lineWidth: composerFocused ? AppBorder.strong : AppBorder.hairline))
+            .shadow(color: Color.appAccent.opacity(composerFocused ? 0.14 : 0), radius: 14, y: 4)
         }
-        .padding(5)
-        .background(Color.appBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 23, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.6))
+        // The tray is inset from the field by `composerInset`, so the two radii stay
+        // concentric instead of the 23-over-18 pair they had drifted to.
+        .padding(Self.composerInset)
+        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: Self.composerTrayRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Self.composerTrayRadius, style: .continuous)
+            .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
     }
 
     // MARK: - Navigation gestures
+
+    private static let composerInset: CGFloat = AppSpacing.xs
+    private static let composerFieldRadius: CGFloat = AppRadius.bubble
+    private static let composerTrayRadius: CGFloat = composerFieldRadius + composerInset
 
     private static let chatDragCommitDistance: CGFloat = -60
 
@@ -590,10 +589,10 @@ struct AgenticHomeView: View {
         HStack {
             Spacer()
             AppIcon("chat", size: 17)
-                .foregroundStyle(GlebChrome.ink.opacity(0.75))
+                .foregroundStyle(Color.appMuted)
                 .frame(width: 44, height: 44)
                 .background(Color.appSurface, in: Circle())
-                .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.6))
+                .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
                 .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
         }
         .padding(.trailing, 10)
@@ -956,11 +955,11 @@ private struct LifeBriefingCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("What matters")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                    .font(.appBody(AppText.footnote, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                 Spacer()
                 AppIcon("sparkles", size: 15)
-                    .foregroundStyle(GlebChrome.ink.opacity(0.45))
+                    .foregroundStyle(Color.appMuted)
             }
 
             VStack(spacing: 0) {
@@ -969,30 +968,30 @@ private struct LifeBriefingCard: View {
                         HapticManager.shared.impact(.light)
                         onItem(item)
                     } label: {
-                        HStack(alignment: .top, spacing: 11) {
+                        HStack(alignment: .top, spacing: 12) {
                             AppIcon(item.iconName, size: 16)
-                                .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                                .foregroundStyle(Color.appMuted)
                                 .frame(width: 26, height: 26)
-                                .background(GlebChrome.ink.opacity(0.06), in: Circle())
+                                .background(Color.appHairline, in: Circle())
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(item.displayTitle)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(GlebChrome.ink)
+                                    .font(.appBody(AppText.body, weight: .semibold))
+                                    .foregroundStyle(Color.appInk)
                                     .multilineTextAlignment(.leading)
                                 if item.kind.caseInsensitiveCompare("approval") != .orderedSame,
                                    let detail = item.displayDetail {
                                     Text(detail)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(GlebChrome.ink.opacity(0.55))
+                                        .font(.appBody(AppText.footnote))
+                                        .foregroundStyle(Color.appMuted)
                                         .multilineTextAlignment(.leading)
                                 }
                             }
 
                             Spacer(minLength: 6)
                             AppIcon("arrow-right", size: 12)
-                                .foregroundStyle(GlebChrome.ink.opacity(0.35))
-                                .padding(.top, 7)
+                                .foregroundStyle(Color.appMuted)
+                                .padding(.top, 8)
                         }
                         .contentShape(Rectangle())
                         .padding(.vertical, 10)
@@ -1001,7 +1000,7 @@ private struct LifeBriefingCard: View {
 
                     if item.id != briefing.items.last?.id {
                         Divider()
-                            .overlay(GlebChrome.ink.opacity(0.08))
+                            .overlay(Color.appHairline)
                     }
                 }
             }
@@ -1277,19 +1276,19 @@ struct MissionCardView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(mission.displayTitle)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.appDisplay(AppText.title, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let vendor = mission.vendor {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             AppIcon("box", size: 11)
                             Text(vendor)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.appBody(AppText.caption, weight: .semibold))
                         }
-                        .foregroundStyle(ink.opacity(0.5))
+                        .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(ink.opacity(0.05), in: Capsule())
+                        .padding(.vertical, 6)
+                        .background(Color.appHairline, in: Capsule())
                     }
                 }
                 Spacer(minLength: 8)
@@ -1305,11 +1304,11 @@ struct MissionCardView: View {
 
             HStack {
                 if let eta = deliveryETA {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 6) {
                         AppIcon("clock", size: 12)
-                        Text(eta).font(.system(size: 12, weight: .medium))
+                        Text(eta).font(.appBody(AppText.caption, weight: .medium))
                     }
-                    .foregroundStyle(ink.opacity(0.5))
+                    .foregroundStyle(Color.appMuted)
                 }
                 Spacer()
                 pillCTA(mission.cta ?? "Track", primary: true)
@@ -1319,7 +1318,7 @@ struct MissionCardView: View {
 
     private var routeMap: some View {
         ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .fill(Color(red: 0.93, green: 0.94, blue: 0.96))
             GeometryReader { geo in
                 Path { p in
@@ -1339,15 +1338,15 @@ struct MissionCardView: View {
             }
         }
         .frame(height: 86)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
     }
 
     private func deliveryRail(stage: Int, labels: [String]) -> some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 8) {
             HStack(spacing: 3) {
                 ForEach(0..<labels.count, id: \.self) { i in
                     Circle()
-                        .fill(i <= stage ? Color(red: 0.18, green: 0.7, blue: 0.34) : ink.opacity(0.16))
+                        .fill(i <= stage ? Color(red: 0.18, green: 0.7, blue: 0.34) : Color.appHairline)
                         .frame(width: i == stage ? 11 : 9, height: i == stage ? 11 : 9)
                         .overlay {
                             if i == stage {
@@ -1356,7 +1355,7 @@ struct MissionCardView: View {
                         }
                     if i < labels.count - 1 {
                         Capsule()
-                            .fill(i < stage ? Color(red: 0.18, green: 0.7, blue: 0.34) : ink.opacity(0.12))
+                            .fill(i < stage ? Color(red: 0.18, green: 0.7, blue: 0.34) : Color.appHairline)
                             .frame(height: 2)
                     }
                 }
@@ -1364,8 +1363,8 @@ struct MissionCardView: View {
             HStack {
                 ForEach(0..<labels.count, id: \.self) { i in
                     Text(labels[i])
-                        .font(.system(size: 10, weight: i == stage ? .semibold : .regular))
-                        .foregroundStyle(i == stage ? ink.opacity(0.8) : ink.opacity(0.4))
+                        .font(.appBody(AppText.micro, weight: i == stage ? .semibold : .regular))
+                        .foregroundStyle(i == stage ? Color.appMuted : Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: i == 0 ? .leading : (i == labels.count - 1 ? .trailing : .center))
                 }
             }
@@ -1385,14 +1384,14 @@ struct MissionCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(mission.eyebrow)
-                    .font(.appBody(13, weight: .semibold))
-                    .foregroundStyle(ink.opacity(0.42))
+                    .font(.appBody(AppText.footnote, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
                 Spacer(minLength: 8)
                 if mission.mailItems.count > 1 {
                     Text("\(mailPage + 1)/\(mission.mailItems.count)")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.45))
-                        .padding(.horizontal, 9)
+                        .font(.appBody(AppText.caption, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Color.appSurface2, in: Capsule())
                 }
@@ -1419,29 +1418,29 @@ struct MissionCardView: View {
             HStack(spacing: 12) {
                 ZStack(alignment: .topLeading) {
                     Circle()
-                        .fill(ink.opacity(0.08))
+                        .fill(Color.appHairline)
                         .frame(width: 40, height: 40)
                         .overlay(
                             Text(monogram(name))
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(ink.opacity(0.65))
+                                .font(.appBody(AppText.body, weight: .semibold))
+                                .foregroundStyle(Color.appMuted)
                         )
                     providerBadge(email.provider)
                         .offset(x: -6, y: -6)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.appBody(AppText.body, weight: .semibold))
                         .foregroundStyle(ink)
                         .lineLimit(1)
                     Text(email.cleanSubject)
-                        .font(.system(size: 13))
-                        .foregroundStyle(ink.opacity(0.55))
+                        .font(.appBody(AppText.footnote))
+                        .foregroundStyle(Color.appMuted)
                         .lineLimit(1)
                     if let text = (summary?.isEmpty == false ? summary : email.cleanSnippet), !text.isEmpty {
                         Text(text)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(ink.opacity(0.6))
+                            .font(.appBody(AppText.caption))
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1456,13 +1455,13 @@ struct MissionCardView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Text(email.cta?.isEmpty == false ? email.cta! : "Draft reply")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(AppText.body, weight: .semibold))
                         AppIcon("arrow-right", size: 15, weight: .semibold)
                     }
-                    .foregroundStyle(Color.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 11)
-                    .background { Capsule().fill(Color.black) }
+                    .foregroundStyle(Color.appOnAccent)
+                    .padding(.horizontal, AppSpacing.lg)
+                    .padding(.vertical, AppSpacing.md)
+                    .background { Capsule().fill(Color.appAccent) }
                 }
                 .buttonStyle(.appScale(0.96))
                 Spacer(minLength: 0)
@@ -1488,8 +1487,10 @@ struct MissionCardView: View {
             .scaledToFit()
             .frame(width: 16, height: 16)
             .padding(3)
-            .background(Circle().fill(Color.white))
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+            // A provider mark keeps its own white plate in both finishes — these are
+            // third-party logos drawn for a light ground.
+            .background(Circle().fill(.white))
+            .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
     }
 
@@ -1501,18 +1502,18 @@ struct MissionCardView: View {
                 AppIcon("calendar", size: 17)
                     .foregroundStyle(Color(red: 0.55, green: 0.4, blue: 0.85))
                     .frame(width: 40, height: 40)
-                    .background(Color(red: 0.55, green: 0.4, blue: 0.85).opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Color(red: 0.55, green: 0.4, blue: 0.85).opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(mission.eyebrow)
-                        .font(.appBody(13, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.42))
+                        .font(.appBody(AppText.footnote, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
                     Text(mission.displayTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.appBody(AppText.callout, weight: .semibold))
                         .foregroundStyle(ink)
                     if let detail = mission.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 13))
-                            .foregroundStyle(ink.opacity(0.55))
+                            .font(.appBody(AppText.footnote))
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
                 Spacer(minLength: 0)
@@ -1541,17 +1542,17 @@ struct MissionCardView: View {
                                 .frame(width: 10, height: 10)
                         }
                         Text(mission.eyebrow)
-                            .font(.appBody(13, weight: .semibold))
-                            .foregroundStyle(mission.kind == .status ? Color(red: 0.16, green: 0.6, blue: 0.3) : ink.opacity(0.42))
+                            .font(.appBody(AppText.footnote, weight: .semibold))
+                            .foregroundStyle(mission.kind == .status ? Color(red: 0.16, green: 0.6, blue: 0.3) : Color.appMuted)
                     }
                     Text(mission.displayTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.appBody(AppText.callout, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let detail = mission.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 13))
-                            .foregroundStyle(ink.opacity(0.55))
+                            .font(.appBody(AppText.footnote))
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1572,7 +1573,7 @@ struct MissionCardView: View {
         switch mission.kind {
         case .action: return Color(red: 0.16, green: 0.15, blue: 0.2)
         case .status: return Color(red: 0.18, green: 0.6, blue: 0.32)
-        default: return ink.opacity(0.7)
+        default: return Color.appMuted
         }
     }
 
@@ -1582,15 +1583,15 @@ struct MissionCardView: View {
         Button(action: onCTA) {
             HStack(spacing: 8) {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                 AppIcon("arrow-right", size: 15, weight: .semibold)
             }
-            .foregroundStyle(primary ? Color.white : ink)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
+            .foregroundStyle(primary ? Color.appOnAccent : Color.appInk)
+            .padding(.horizontal, AppSpacing.lg)
+            .padding(.vertical, AppSpacing.md)
             .background {
-                if primary { Capsule().fill(Color.black) }
-                else { Capsule().fill(ink.opacity(0.07)) }
+                if primary { Capsule().fill(Color.appAccent) }
+                else { Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.strong) }
             }
         }
         .buttonStyle(.appScale(0.96))
@@ -1602,7 +1603,7 @@ struct MissionCardView: View {
             .frame(width: 36, height: 36)
             .overlay(
                 Text(monogram(vendor ?? "•"))
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.appBody(AppText.footnote, weight: .bold))
                     .foregroundStyle(.white)
             )
             .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
@@ -1615,22 +1616,19 @@ struct MissionCardView: View {
     }
 }
 
+/// The home board's card: the shared surface, plus the faint grain that gives the
+/// board its paper. Fill, hairline and shadow all come from `AppSurfaceBackground`
+/// so a mission card and a Today card sit at exactly the same height.
 struct MissionGlassPlate: View {
+    var elevation: AppElevation = .raised
+    var radius: CGFloat = AppRadius.card
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-        ZStack {
-            Color.appSurface.opacity(0.92)
-            AppGrain(intensity: 0.028)
-        }
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.white.opacity(0.20))
-                    .frame(height: 0.7)
-                    .clipShape(shape)
+        AppSurfaceBackground(elevation: elevation, radius: radius)
+            .overlay {
+                AppGrain(intensity: 0.028)
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             }
-            .shadow(color: Color(red: 0.19, green: 0.14, blue: 0.08).opacity(0.07), radius: 12, y: 5)
     }
 }
 

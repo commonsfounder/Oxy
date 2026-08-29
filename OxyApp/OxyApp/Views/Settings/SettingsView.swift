@@ -29,140 +29,138 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
-                    appGlassContainer(spacing: 24) {
-                    VStack(spacing: 28) {
-                        settingsSection(title: "Millie") {
-                            FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
+                        VStack(spacing: 28) {
+                            settingsSection(title: "Millie") {
+                                FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
 
-                            MilgrainDivider()
+                                MilgrainDivider()
 
-                            settingRow(label: "Briefings", description: "Daily check-ins") {
-                                MilgrainToggle(isOn: $settings.proactiveBriefings)
-                                    .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
-                            }
-                        }
-
-                        settingsSection(title: "Preferences") {
-                            dropdownRow(
-                                label: "Maps",
-                                options: [
-                                    ("apple", "Apple Maps"),
-                                    ("google", "Google Maps")
-                                ],
-                                selection: $settings.preferredMapsApp
-                            )
-
-                            MilgrainDivider()
-
-                            dropdownRow(
-                                label: "Getting around",
-                                options: [
-                                    ("driving", "Driving"),
-                                    ("transit", "Transit"),
-                                    ("walking", "Walking")
-                                ],
-                                selection: $settings.preferredTransportMode
-                            )
-
-                            MilgrainDivider()
-
-                            settingRow(label: "Ask before opening private apps", description: "Banking, health, and similar") {
-                                MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
-                                    .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
-                            }
-
-                            MilgrainDivider()
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Home address")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.mgHeading)
-                                if !settings.homeAddress.isEmpty {
-                                    Text(settings.homeAddress)
-                                        .font(.system(size: 12, weight: .regular))
-                                        .foregroundStyle(Color.mgSecondary)
-                                }
-                                HStack(spacing: 10) {
-                                    AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
-                                    Button {
-                                        Task { await saveHomeAddress() }
-                                    } label: {
-                                        if isSavingHomeAddress {
-                                            ProgressView().scaleEffect(0.7)
-                                        } else {
-                                            Text("Save").font(.system(size: 13, weight: .semibold))
-                                        }
-                                    }
-                                    .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
-                                }
-                                if let homeAddressError {
-                                    Text(homeAddressError)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color.mgDestructive)
+                                settingRow(label: "Briefings", description: "Daily check-ins") {
+                                    MilgrainToggle(isOn: $settings.proactiveBriefings)
+                                        .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                                 }
                             }
-                            .padding(.vertical, 14)
-                        }
 
-                        settingsSection(title: "Conversation") {
-                            dropdownRow(
-                                label: "Response detail",
-                                options: [
-                                    ("low", "Low"),
-                                    ("medium", "Medium"),
-                                    ("high", "High")
-                                ],
-                                selection: $settings.chatEffort
-                            )
+                            settingsSection(title: "Preferences") {
+                                dropdownRow(
+                                    label: "Maps",
+                                    options: [
+                                        ("apple", "Apple Maps"),
+                                        ("google", "Google Maps")
+                                    ],
+                                    selection: $settings.preferredMapsApp
+                                )
 
-                            MilgrainDivider()
+                                MilgrainDivider()
 
-                            settingRow(label: "Ask before actions", description: nil) {
-                                MilgrainToggle(isOn: $settings.guardMode)
-                                    .onChange(of: settings.guardMode) { _, _ in saveSettings() }
-                            }
-                        }
+                                dropdownRow(
+                                    label: "Getting around",
+                                    options: [
+                                        ("driving", "Driving"),
+                                        ("transit", "Transit"),
+                                        ("walking", "Walking")
+                                    ],
+                                    selection: $settings.preferredTransportMode
+                                )
 
-                        settingsSection(title: "More") {
-                            navRow(label: "Displays") { moreDestination = .displays }
-                            MilgrainDivider()
-                            navRow(label: "Payments") { moreDestination = .payments }
-                            MilgrainDivider()
-                            navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
-                            MilgrainDivider()
-                            navRow(label: "Import history") { moreDestination = .continuity }
-                            MilgrainDivider()
-                            navRow(label: "Trust") { moreDestination = .trust }
-                        }
+                                MilgrainDivider()
 
-                        settingsSection(title: "About") {
-                            legalLink(label: "Support", path: "/support")
-                            MilgrainDivider()
-                            legalLink(label: "Privacy Policy", path: "/privacy")
-                            MilgrainDivider()
-                            legalLink(label: "Terms of Use", path: "/terms")
-                            MilgrainDivider()
-                            Button(action: handleVersionTap) {
-                                HStack {
-                                    Text("Version")
-                                        .font(.system(size: 14, weight: .semibold))
+                                settingRow(label: "Ask before opening private apps", description: "Banking, health, and similar") {
+                                    MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
+                                        .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
+                                }
+
+                                MilgrainDivider()
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Home address")
+                                        .font(.appBody(AppText.body, weight: .semibold))
                                         .foregroundStyle(Color.mgHeading)
-                                    Spacer()
-                                    Text("milgrain-0001-alpha")
-                                        .font(.system(size: 14, weight: .regular))
-                                        .foregroundStyle(Color.mgCaption)
-                                        .lineLimit(1)
+                                    if !settings.homeAddress.isEmpty {
+                                        Text(settings.homeAddress)
+                                            .font(.appBody(AppText.caption, weight: .regular))
+                                            .foregroundStyle(Color.mgSecondary)
+                                    }
+                                    HStack(spacing: 10) {
+                                        AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
+                                        Button {
+                                            Task { await saveHomeAddress() }
+                                        } label: {
+                                            if isSavingHomeAddress {
+                                                ProgressView().scaleEffect(0.7)
+                                            } else {
+                                                Text("Save").font(.appBody(AppText.footnote, weight: .semibold))
+                                            }
+                                        }
+                                        .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
+                                    }
+                                    if let homeAddressError {
+                                        Text(homeAddressError)
+                                            .font(.appBody(AppText.caption, weight: .medium))
+                                            .foregroundStyle(Color.mgDestructive)
+                                    }
                                 }
-                                .padding(.vertical, 16)
+                                .padding(.vertical, 14)
                             }
-                            .buttonStyle(.appScale(0.98))
-                        }
 
-                        Spacer().frame(height: 32)
-                    }
-                    .padding(.horizontal, AppSpacing.margin)
-                    .padding(.top, 12)
-                    }
+                            settingsSection(title: "Conversation") {
+                                dropdownRow(
+                                    label: "Response detail",
+                                    options: [
+                                        ("low", "Low"),
+                                        ("medium", "Medium"),
+                                        ("high", "High")
+                                    ],
+                                    selection: $settings.chatEffort
+                                )
+
+                                MilgrainDivider()
+
+                                settingRow(label: "Ask before actions", description: nil) {
+                                    MilgrainToggle(isOn: $settings.guardMode)
+                                        .onChange(of: settings.guardMode) { _, _ in saveSettings() }
+                                }
+                            }
+
+                            settingsSection(title: "More") {
+                                navRow(label: "Displays") { moreDestination = .displays }
+                                MilgrainDivider()
+                                navRow(label: "Payments") { moreDestination = .payments }
+                                MilgrainDivider()
+                                navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
+                                MilgrainDivider()
+                                navRow(label: "Import history") { moreDestination = .continuity }
+                                MilgrainDivider()
+                                navRow(label: "Trust") { moreDestination = .trust }
+                            }
+
+                            settingsSection(title: "About") {
+                                legalLink(label: "Support", path: "/support")
+                                MilgrainDivider()
+                                legalLink(label: "Privacy Policy", path: "/privacy")
+                                MilgrainDivider()
+                                legalLink(label: "Terms of Use", path: "/terms")
+                                MilgrainDivider()
+                                Button(action: handleVersionTap) {
+                                    HStack {
+                                        Text("Version")
+                                            .font(.appBody(AppText.body, weight: .semibold))
+                                            .foregroundStyle(Color.mgHeading)
+                                        Spacer()
+                                        Text("milgrain-0001-alpha")
+                                            .font(.appBody(AppText.body, weight: .regular))
+                                            .foregroundStyle(Color.mgCaption)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.vertical, 16)
+                                }
+                                .buttonStyle(.appScale(0.98))
+                            }
+
+                            Spacer().frame(height: 32)
+                        }
+                        .padding(.horizontal, AppSpacing.margin)
+                        .padding(.top, 12)
                     }
                 }
             }
@@ -197,7 +195,7 @@ struct SettingsView: View {
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppSectionTitle(title, size: 20)
+            AppSectionTitle(title)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 16)
                 .background { MissionGlassPlate() }
@@ -216,7 +214,7 @@ struct SettingsView: View {
 
         return HStack(spacing: 12) {
             Text(label)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(Color.mgHeading)
             Spacer(minLength: 8)
             Menu {
@@ -236,7 +234,7 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(selectedTitle)
-                        .font(.appBody(14, weight: .medium))
+                        .font(.appBody(AppText.body, weight: .medium))
                         .foregroundStyle(Color.appInk)
                         .lineLimit(1)
                     AppIcon("chevron-updown", size: 13)
@@ -264,7 +262,7 @@ struct SettingsView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 Spacer()
                 AppIcon("chevron-right", size: 13)
@@ -283,11 +281,11 @@ struct SettingsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.appBody(AppText.caption, weight: .regular))
                         .foregroundStyle(Color.mgSecondary)
                 }
             }
@@ -304,7 +302,7 @@ struct SettingsView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(AppText.body, weight: .regular))
                 Spacer()
                 AppIcon("arrow-up-right", size: 12)
                     .foregroundStyle(Color.mgSecondary)
@@ -414,7 +412,7 @@ private struct BackendURLEditorSheet: View {
                     .keyboardType(.URL)
 
                     Text("Leave blank for the default backend.")
-                        .font(.appBody(12))
+                        .font(.appBody(AppText.caption))
                         .foregroundStyle(Color.mgSecondary)
 
                     if !currentURL.isEmpty {
@@ -424,7 +422,7 @@ private struct BackendURLEditorSheet: View {
                             onDone()
                         } label: {
                             Text("Reset to default")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.appBody(AppText.body, weight: .medium))
                         }
                     }
 
@@ -444,7 +442,7 @@ private struct BackendURLEditorSheet: View {
                         currentURL = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                         onDone()
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 }
             }
@@ -476,15 +474,15 @@ private struct PairedDisplaysView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 22) {
                             VStack(alignment: .leading, spacing: 8) {
-                                AppSectionTitle("Nearby displays", size: 20)
+                                AppSectionTitle("Nearby displays")
                                 Text("Pair a browser display nearby. It receives only updates you explicitly send.")
-                                    .font(.appBody(13))
+                                    .font(.appBody(AppText.footnote))
                                     .foregroundStyle(Color.mgSecondary)
                             }
 
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Start pairing")
-                                    .font(.system(size: 15, weight: .semibold))
+                                    .font(.appBody(AppText.body, weight: .semibold))
                                     .foregroundStyle(Color.mgHeading)
                                 AppLineField(placeholder: "Display name (optional)", text: $pairingName)
                                 Button {
@@ -494,7 +492,7 @@ private struct PairedDisplaysView: View {
                                         Text(isWorking ? "Creating code…" : "Create pairing code")
                                         Spacer()
                                     }
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.appBody(AppText.body, weight: .semibold))
                                     .foregroundStyle(Color.mgHeading)
                                     .padding(.vertical, 14)
                                 }
@@ -506,15 +504,15 @@ private struct PairedDisplaysView: View {
                             if let challenge {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text("Open this link on the display, then enter the code")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.appBody(AppText.body, weight: .semibold))
                                         .foregroundStyle(Color.mgHeading)
                                     Text(challenge.displayUrl)
-                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                        .font(.appMono(AppText.caption, weight: .regular))
                                         .foregroundStyle(Color.mgSecondary)
                                         .textSelection(.enabled)
                                     HStack(alignment: .firstTextBaseline) {
                                         Text(challenge.code)
-                                            .font(.system(size: 32, weight: .bold, design: .monospaced))
+                                            .font(.appMono(AppText.display, weight: .bold))
                                             .foregroundStyle(Color.mgHeading)
                                             .textSelection(.enabled)
                                         Spacer()
@@ -522,11 +520,11 @@ private struct PairedDisplaysView: View {
                                             UIPasteboard.general.string = challenge.code
                                             copied = true
                                         }
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.appBody(AppText.footnote, weight: .semibold))
                                         .foregroundStyle(Color.appAccent)
                                     }
                                     Text("One-time code. It expires after 10 minutes.")
-                                        .font(.appBody(12))
+                                        .font(.appBody(AppText.caption))
                                         .foregroundStyle(Color.mgCaption)
                                 }
                                 .padding(16)
@@ -534,13 +532,13 @@ private struct PairedDisplaysView: View {
                             }
 
                             VStack(alignment: .leading, spacing: 10) {
-                                AppSectionTitle("Paired", size: 20)
+                                AppSectionTitle("Paired")
                                 if isLoading {
                                     ProgressView()
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 } else if displays.isEmpty {
                                     Text("No displays paired yet.")
-                                        .font(.appBody(13))
+                                        .font(.appBody(AppText.footnote))
                                         .foregroundStyle(Color.mgSecondary)
                                 } else {
                                     VStack(spacing: 0) {
@@ -548,10 +546,10 @@ private struct PairedDisplaysView: View {
                                             HStack(alignment: .top, spacing: 12) {
                                                 VStack(alignment: .leading, spacing: 4) {
                                                     Text(display.name)
-                                                        .font(.system(size: 15, weight: .semibold))
+                                                        .font(.appBody(AppText.body, weight: .semibold))
                                                         .foregroundStyle(Color.mgHeading)
                                                     Text(displayPresenceLabel(display))
-                                                        .font(.appBody(12))
+                                                        .font(.appBody(AppText.caption))
                                                         .foregroundStyle(Color.mgSecondary)
                                                 }
                                                 Spacer()
@@ -559,7 +557,7 @@ private struct PairedDisplaysView: View {
                                                     pendingRevoke = display
                                                     showRevokeConfirmation = true
                                                 }
-                                                .font(.system(size: 13, weight: .semibold))
+                                                .font(.appBody(AppText.footnote, weight: .semibold))
                                                 .foregroundStyle(Color.mgDestructive)
                                             }
                                             .padding(.vertical, 14)
@@ -575,7 +573,7 @@ private struct PairedDisplaysView: View {
 
                             if let errorMessage {
                                 Text(errorMessage)
-                                    .font(.appBody(12))
+                                    .font(.appBody(AppText.caption))
                                     .foregroundStyle(Color.mgDestructive)
                             }
                         }
@@ -662,7 +660,7 @@ private extension View {
         } else {
             self
                 .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
         }
     }
 
@@ -699,10 +697,10 @@ private struct FreedomSlider: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Initiative")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(AppText.body, weight: .regular))
                     .foregroundStyle(Color.mgHeading)
                 Text(simpleLabel)
-                    .font(.appBody(12))
+                    .font(.appBody(AppText.caption))
                     .foregroundStyle(Color.mgSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -64,7 +64,7 @@ struct TurnReceiptRow: View {
             glyph(for: rowState)
 
             Text(summaryLine)
-                .font(.appBody(13))
+                .font(.appBody(AppText.footnote))
                 .foregroundStyle(Color.appMuted)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -74,13 +74,13 @@ struct TurnReceiptRow: View {
             if let _ = directOpenStep {
                 HStack(spacing: 3) {
                     Text("Open")
-                        .font(.appBody(12.5, weight: .medium))
+                        .font(.appBody(AppText.caption, weight: .medium))
                     AppIcon("chevron-right", size: 11)
                 }
                 .foregroundStyle(Color.appTitanium)
             } else if isExpandable {
                 AppIcon("chevron-down", size: 12)
-                    .foregroundStyle(Color.appMuted.opacity(0.75))
+                    .foregroundStyle(Color.appMuted)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
         }
@@ -118,11 +118,11 @@ struct TurnReceiptRow: View {
                 glyph(for: step.state)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(step.fragment.prefix(1).uppercased() + step.fragment.dropFirst())
-                        .font(.appBody(13))
-                        .foregroundStyle(Color.appInk.opacity(0.94))
+                        .font(.appBody(AppText.footnote))
+                        .foregroundStyle(Color.appInk)
                     if let detail = step.detail {
                         Text(detail)
-                            .font(.appBody(12))
+                            .font(.appBody(AppText.caption))
                             .foregroundStyle(Color.appMuted)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -133,13 +133,13 @@ struct TurnReceiptRow: View {
                 if step.action.hasReceiptLink {
                     HStack(spacing: 3) {
                         Text("Open")
-                            .font(.appBody(12, weight: .medium))
+                            .font(.appBody(AppText.caption, weight: .medium))
                         AppIcon("chevron-right", size: 10)
                     }
                     .foregroundStyle(Color.appTitanium)
                 }
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
@@ -160,7 +160,7 @@ struct TurnReceiptRow: View {
                     .foregroundStyle(Color.appDanger)
             case .neutral:
                 Circle()
-                    .fill(Color.appMuted.opacity(0.5))
+                    .fill(Color.appFaint)
                     .frame(width: 5, height: 5)
             }
         }
