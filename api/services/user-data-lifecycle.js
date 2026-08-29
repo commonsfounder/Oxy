@@ -601,7 +601,7 @@ function createUserDataRouteHandlers({ lifecycle, requireMatchingUser, logger = 
       if (!requireMatchingUser(req, res, userId)) return;
       try {
         const data = await lifecycle.exportUserData(userId);
-        res.setHeader('Content-Disposition', 'attachment; filename="milgrain-data-export.json"');
+        res.setHeader('Content-Disposition', 'attachment; filename="adam-data-export.json"');
         res.json(data);
       } catch (error) {
         logger.error?.('/user/export error:', error.message);

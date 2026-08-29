@@ -137,8 +137,8 @@ async function findSpend({ userId, action, params, enrichedParams, context, deps
   const categoryQuery = String(params?.category || '').trim().toLowerCase();
   const textQuery = String(params?.query || '').trim();
   const sources = String(params?.sources || 'all').trim().toLowerCase();
-  const wantEmail = sources !== 'millie';
-  const wantMillie = sources !== 'email';
+  const wantEmail = sources !== 'adam';
+  const wantAdam = sources !== 'email';
   const cap = Math.max(1, Math.min(Number(params?.max_results) || 60, 150));
 
   let emailSearched = false;
@@ -201,10 +201,10 @@ async function findSpend({ userId, action, params, enrichedParams, context, deps
 
   let query = supabase.from('purchases').select('*').eq('user_id', userId);
   if (!wantEmail) query = query.eq('source', 'millie_browser');
-  if (!wantMillie) query = query.eq('source', 'email_receipt');
+  if (!wantAdam) query = query.eq('source', 'email_receipt');
   if (merchantFilter) query = query.ilike('merchant', `%${escapeIlikePattern(merchantFilter)}%`);
   // "What did that sock order cost?" is not a merchant question — the only thing the user
-  // remembers is what the thing was, which lives in the description (Millie's own order
+  // remembers is what the thing was, which lives in the description (Adam's own order
   // goal) or the receipt's subject line. Without this, a real recorded order was
   // unfindable by the most natural way to ask about it.
   if (textQuery) {

@@ -241,7 +241,7 @@ test('an unreachable mailbox is admitted rather than reported as zero spending',
   assert.match(text, /could not search your email \(Google is not connected\)/);
 });
 
-test('"through Millie" scopes the caveat to what Millie itself placed', () => {
+test('"through Adam" scopes the caveat to what Adam itself placed', () => {
   const text = formatSpendSummary(
     [{ total_amount: 42, currency: 'GBP', status: 'confirmed', source: 'millie_browser' }],
     { sources: ['millie_browser'] }
@@ -271,8 +271,8 @@ test('a purchase line names what was observed, including a missing amount', () =
   );
 });
 
-test('a mailbox that could not be re-read is flagged as staleness, not as "only Millie orders"', () => {
-  // The naive version of this caveat claimed stored email receipts were Millie's own orders
+test('a mailbox that could not be re-read is flagged as staleness, not as "only Adam orders"', () => {
+  // The naive version of this caveat claimed stored email receipts were Adam's own orders
   // whenever the live mailbox search failed.
   const text = formatSpendSummary(
     [{ total_amount: 104.95, currency: 'GBP', status: 'confirmed', source: 'email_receipt' }],

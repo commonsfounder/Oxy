@@ -1,4 +1,4 @@
-// find_spend and the Millie-purchase record against the REAL purchases table and
+// find_spend and the Adam-purchase record against the REAL purchases table and
 // demo-test-user. The Gmail leg genuinely cannot run for this account (no Google
 // connection), which is exactly what the honest-coverage assertions here depend on.
 
@@ -123,7 +123,7 @@ test('the email leg reports its own failure instead of implying zero spending', 
   assert.ok(result.coverage.emailError, 'a failed mailbox search must carry a reason');
 });
 
-test('"through Millie" returns only what Millie itself placed', async () => {
+test('"through Adam" returns only what Adam itself placed', async () => {
   await seed([{ merchant: 'SpendTestNike', purchased_at: '2026-07-14T10:00:00Z', total_amount: 104.95, currency: 'GBP', source_ref: 'spendtest-m1' }]);
   await supabase.from('purchases').insert({
     user_id: USER_ID, source: 'millie_browser', merchant: 'Spendtest-shop',
@@ -131,13 +131,13 @@ test('"through Millie" returns only what Millie itself placed', async () => {
     order_id: 'MB-1', source_ref: 'https://spendtest-shop.example/order-confirmation'
   });
 
-  const result = await app.executeAction(USER_ID, 'find_spend', { sources: 'millie' });
+  const result = await app.executeAction(USER_ID, 'find_spend', { sources: 'adam' });
   assert.ok(result.purchases.length >= 1);
   assert.ok(result.purchases.every(p => p.source === 'millie_browser'));
   assert.match(result.text, /only orders placed through me/);
 });
 
-// ── The Millie purchase record itself ──────────────────────────────────────────────────
+// ── The Adam purchase record itself ──────────────────────────────────────────────────
 test('a confirmed browser order is recorded at confirmation time, from what was observed', async () => {
   // The real recorder, with a fake session standing in for a live browser — the row it
   // writes, and what it refuses to invent, is the thing under test.
@@ -161,7 +161,7 @@ test('a confirmed browser order is recorded at confirmation time, from what was 
   assert.equal(data.raw_total_text, '£24.50');
 
   // And it is immediately answerable via the normal spend query.
-  const result = await app.executeAction(USER_ID, 'find_spend', { sources: 'millie', merchant: 'Spendtest-shop' });
+  const result = await app.executeAction(USER_ID, 'find_spend', { sources: 'adam', merchant: 'Spendtest-shop' });
   assert.equal(result.purchases[0].orderId, 'SHOP-88213');
 });
 
@@ -204,7 +204,7 @@ test('an order is findable by what it WAS, not only by which shop sold it', () =
       source_ref: 'https://spendtest-shop.example/order-confirmation?id=socks'
     });
 
-    const result = await app.executeAction(USER_ID, 'find_spend', { query: 'socks', sources: 'millie' });
+    const result = await app.executeAction(USER_ID, 'find_spend', { query: 'socks', sources: 'adam' });
     const found = result.purchases.find(p => p.orderId === 'SOCK-1');
     assert.ok(found, 'the order should be findable by its item description');
     assert.equal(Number(found.amount), 24.5);

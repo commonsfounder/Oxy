@@ -114,7 +114,7 @@ function normalizeTask(task = {}) {
       kind: 'goal',
       title: goal,
       detail: 'Review.',
-      prompt: `Help Millie continue: ${goal}`,
+      prompt: `Help Adam continue: ${goal}`,
       urgency: 'soon',
       priority: 88,
       taskId: task.id || null,
@@ -244,12 +244,12 @@ function normalizeEmail(email = {}, index = 0) {
 }
 
 function normalizeScheduledTask(task = {}, now = new Date()) {
-  const title = cleanText(task.title, 'Something Millie is watching', 180);
+  const title = cleanText(task.title, 'Something Adam is watching', 180);
   const schedule = task.condition
     ? `Until ${cleanText(task.condition, 'a change', 120)}.`
     : task.next_run_at
       ? `Next check ${formatEventTime(asDate(task.next_run_at) || now, now)}.`
-      : 'Millie is watching this.';
+      : 'Adam is watching this.';
   return {
     id: `watch:${task.id || title}`,
     kind: 'watch',
@@ -300,7 +300,7 @@ function groupRepeatedMessages(items) {
 // "now" (that tier is reserved for approvals and imminent events). A purely
 // informational reply ranks like a background email notification.
 function normalizeConversationUpdate(update = {}) {
-  const name = cleanText(update.participantDisplayName, 'Someone Millie contacted', 120);
+  const name = cleanText(update.participantDisplayName, 'Someone Adam contacted', 120);
   const body = cleanText(update.latestEventBody, 'Sent an update.', 210);
   const needsDecision = Boolean(update.needsDecision);
   return {

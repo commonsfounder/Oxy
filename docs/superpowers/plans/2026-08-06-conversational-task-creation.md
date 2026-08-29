@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Do not create a second "mode" for delegation. Talking to Millie stays one surface; whether a task spins up is decided per-turn, not by which screen the user is looking at.
+- Do not create a second "mode" for delegation. Talking to Adam stays one surface; whether a task spins up is decided per-turn, not by which screen the user is looking at.
 - Do not promote `AgentWorkView` or `TrustCenterView` to top-level navigation in this pass — that is explicitly deferred pending a separate consumer-product review.
 - Do not redesign or touch `AgentTaskSessionView`'s generated step UI in this pass — its only involvement here is that its one calling path (the `jobKind` fork) is being removed.
 - `npm test` must stay green before any commit — no exceptions (AGENTS.md).
@@ -150,7 +150,7 @@ git add OxyApp/OxyApp/Views/Home/AgenticHomeView.swift OxyApp/OxyApp/Models/Agen
 git commit -m "$(cat <<'EOF'
 feat(ios): remove client-side jobKind fork, route all composer input through chat
 
-Talking to Millie was silently forking into two different screens (chat vs. an
+Talking to Adam was silently forking into two different screens (chat vs. an
 AgentTaskSession wizard) based on a keyword match on the first message, before
 any conversation happened. The backend already decides per-turn whether to
 persist a durable task from a chat message, so the client-side pre-classification
@@ -535,7 +535,7 @@ In `persistentTaskMissions` (line 640), change the `active` mapping:
                     kind: .agent,
                     eyebrow: eyebrow,
                     title: task.goal,
-                    detail: lower == "running" ? "Millie is handling this." : lower == "paused" ? "Saved and ready to continue." : "Ready when you are.",
+                    detail: lower == "running" ? "Adam is handling this." : lower == "paused" ? "Saved and ready to continue." : "Ready when you are.",
                     cta: cta,
                     prompt: nil,
                     symbol: "circle.dotted",
@@ -708,7 +708,7 @@ Expected: `** BUILD SUCCEEDED **`.
 
 - [ ] **Step 13: Manual verification in the simulator**
 
-1. Trigger a real review-gated action from chat (e.g. ask Millie to send an email or book something that hits a `bypassReview`-gated action) so a task ends up `paused` with `awaitingApproval: true`.
+1. Trigger a real review-gated action from chat (e.g. ask Adam to send an email or book something that hits a `bypassReview`-gated action) so a task ends up `paused` with `awaitingApproval: true`.
 2. Return to Home — confirm the mission card now shows "Needs your OK" with **Approve** / **Not now** buttons instead of a single generic CTA.
 3. Tap **Approve** — confirm the action executes, the card updates/clears on the next refresh, and (if the task had more steps) it resumes.
 4. Repeat and tap **Not now** — confirm the task is cancelled and the card clears.

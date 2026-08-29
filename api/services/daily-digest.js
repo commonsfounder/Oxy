@@ -203,7 +203,7 @@ function normalizeWatchUpdate(briefing = {}, now = new Date()) {
     id: `watch:${briefing.id || title}`,
     kind: status === 'failed' ? 'watch_problem' : 'watch_update',
     title,
-    detail: body || (status === 'failed' ? `Millie could not check "${title}".` : title),
+    detail: body || (status === 'failed' ? `Adam could not check "${title}".` : title),
     priority,
     sortTime: created?.getTime() || Number.MAX_SAFE_INTEGER,
     ref: { briefingId: briefing.id || null, scheduledTaskId: briefing.metadata?.scheduledTaskId || null, status },

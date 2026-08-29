@@ -31,13 +31,13 @@ struct SettingsView: View {
                     ScrollView {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 28) {
-                        settingsSection(title: "Millie") {
+                        settingsSection(title: "Adam") {
                             FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
 
-                            MilgrainDivider()
+                            SettingsDivider()
 
                             settingRow(label: "Briefings", description: "Daily check-ins") {
-                                MilgrainToggle(isOn: $settings.proactiveBriefings)
+                                SettingsToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
                         }
@@ -52,7 +52,7 @@ struct SettingsView: View {
                                 selection: $settings.preferredMapsApp
                             )
 
-                            MilgrainDivider()
+                            SettingsDivider()
 
                             dropdownRow(
                                 label: "Getting around",
@@ -64,23 +64,23 @@ struct SettingsView: View {
                                 selection: $settings.preferredTransportMode
                             )
 
-                            MilgrainDivider()
+                            SettingsDivider()
 
                             settingRow(label: "Ask before opening private apps", description: "Banking, health, and similar") {
-                                MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
+                                SettingsToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
 
-                            MilgrainDivider()
+                            SettingsDivider()
 
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Home address")
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.mgHeading)
+                                    .foregroundStyle(Color.appInk)
                                 if !settings.homeAddress.isEmpty {
                                     Text(settings.homeAddress)
                                         .font(.system(size: 12, weight: .regular))
-                                        .foregroundStyle(Color.mgSecondary)
+                                        .foregroundStyle(Color.appMuted)
                                 }
                                 HStack(spacing: 10) {
                                     AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
@@ -98,7 +98,7 @@ struct SettingsView: View {
                                 if let homeAddressError {
                                     Text(homeAddressError)
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color.mgDestructive)
+                                        .foregroundStyle(Color.appDestructive)
                                 }
                             }
                             .padding(.vertical, 14)
@@ -115,42 +115,42 @@ struct SettingsView: View {
                                 selection: $settings.chatEffort
                             )
 
-                            MilgrainDivider()
+                            SettingsDivider()
 
                             settingRow(label: "Ask before actions", description: nil) {
-                                MilgrainToggle(isOn: $settings.guardMode)
+                                SettingsToggle(isOn: $settings.guardMode)
                                     .onChange(of: settings.guardMode) { _, _ in saveSettings() }
                             }
                         }
 
                         settingsSection(title: "More") {
                             navRow(label: "Displays") { moreDestination = .displays }
-                            MilgrainDivider()
+                            SettingsDivider()
                             navRow(label: "Payments") { moreDestination = .payments }
-                            MilgrainDivider()
+                            SettingsDivider()
                             navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
-                            MilgrainDivider()
+                            SettingsDivider()
                             navRow(label: "Import history") { moreDestination = .continuity }
-                            MilgrainDivider()
+                            SettingsDivider()
                             navRow(label: "Trust") { moreDestination = .trust }
                         }
 
                         settingsSection(title: "About") {
                             legalLink(label: "Support", path: "/support")
-                            MilgrainDivider()
+                            SettingsDivider()
                             legalLink(label: "Privacy Policy", path: "/privacy")
-                            MilgrainDivider()
+                            SettingsDivider()
                             legalLink(label: "Terms of Use", path: "/terms")
-                            MilgrainDivider()
+                            SettingsDivider()
                             Button(action: handleVersionTap) {
                                 HStack {
                                     Text("Version")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color.mgHeading)
+                                        .foregroundStyle(Color.appInk)
                                     Spacer()
-                                    Text("milgrain-0001-alpha")
+                                    Text("adam-0001-alpha")
                                         .font(.system(size: 14, weight: .regular))
-                                        .foregroundStyle(Color.mgCaption)
+                                        .foregroundStyle(Color.appMuted)
                                         .lineLimit(1)
                                 }
                                 .padding(.vertical, 16)
@@ -217,7 +217,7 @@ struct SettingsView: View {
         return HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.mgHeading)
+                .foregroundStyle(Color.appInk)
             Spacer(minLength: 8)
             Menu {
                 ForEach(options, id: \.value) { option in
@@ -265,10 +265,10 @@ struct SettingsView: View {
             HStack {
                 Text(label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
                 Spacer()
                 AppIcon("chevron-right", size: 13)
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
             }
             .padding(.vertical, 16)
         }
@@ -284,11 +284,11 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
                 if let description {
                     Text(description)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                 }
             }
             Spacer()
@@ -307,9 +307,9 @@ struct SettingsView: View {
                     .font(.system(size: 15, weight: .regular))
                 Spacer()
                 AppIcon("arrow-up-right", size: 12)
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
             }
-            .foregroundStyle(Color.mgHeading)
+            .foregroundStyle(Color.appInk)
             .padding(.vertical, 16)
         }
         .buttonStyle(.appScale(0.98))
@@ -403,7 +403,7 @@ private struct BackendURLEditorSheet: View {
             ZStack {
                 GlebChrome.pastelBlob.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
-                    MilgrainSectionHeader(title: "Custom Backend URL")
+                    SettingsSectionHeader(title: "Custom Backend URL")
 
                     AppLineField(
                         placeholder: "https://your-backend.run.app",
@@ -415,7 +415,7 @@ private struct BackendURLEditorSheet: View {
 
                     Text("Leave blank for the default backend.")
                         .font(.appBody(12))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
 
                     if !currentURL.isEmpty {
                         Button(role: .destructive) {
@@ -437,7 +437,7 @@ private struct BackendURLEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onDone() }
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -445,7 +445,7 @@ private struct BackendURLEditorSheet: View {
                         onDone()
                     }
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
                 }
             }
         }
@@ -479,13 +479,13 @@ private struct PairedDisplaysView: View {
                                 AppSectionTitle("Nearby displays", size: 20)
                                 Text("Pair a browser display nearby. It receives only updates you explicitly send.")
                                     .font(.appBody(13))
-                                    .foregroundStyle(Color.mgSecondary)
+                                    .foregroundStyle(Color.appMuted)
                             }
 
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Start pairing")
                                     .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Color.mgHeading)
+                                    .foregroundStyle(Color.appInk)
                                 AppLineField(placeholder: "Display name (optional)", text: $pairingName)
                                 Button {
                                     Task { await createPairing() }
@@ -495,7 +495,7 @@ private struct PairedDisplaysView: View {
                                         Spacer()
                                     }
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.mgHeading)
+                                    .foregroundStyle(Color.appInk)
                                     .padding(.vertical, 14)
                                 }
                                 .disabled(isWorking)
@@ -507,15 +507,15 @@ private struct PairedDisplaysView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text("Open this link on the display, then enter the code")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color.mgHeading)
+                                        .foregroundStyle(Color.appInk)
                                     Text(challenge.displayUrl)
                                         .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(Color.mgSecondary)
+                                        .foregroundStyle(Color.appMuted)
                                         .textSelection(.enabled)
                                     HStack(alignment: .firstTextBaseline) {
                                         Text(challenge.code)
                                             .font(.system(size: 32, weight: .bold, design: .monospaced))
-                                            .foregroundStyle(Color.mgHeading)
+                                            .foregroundStyle(Color.appInk)
                                             .textSelection(.enabled)
                                         Spacer()
                                         Button(copied ? "Copied" : "Copy code") {
@@ -527,7 +527,7 @@ private struct PairedDisplaysView: View {
                                     }
                                     Text("One-time code. It expires after 10 minutes.")
                                         .font(.appBody(12))
-                                        .foregroundStyle(Color.mgCaption)
+                                        .foregroundStyle(Color.appMuted)
                                 }
                                 .padding(16)
                                 .background { MissionGlassPlate() }
@@ -541,7 +541,7 @@ private struct PairedDisplaysView: View {
                                 } else if displays.isEmpty {
                                     Text("No displays paired yet.")
                                         .font(.appBody(13))
-                                        .foregroundStyle(Color.mgSecondary)
+                                        .foregroundStyle(Color.appMuted)
                                 } else {
                                     VStack(spacing: 0) {
                                         ForEach(displays) { display in
@@ -549,10 +549,10 @@ private struct PairedDisplaysView: View {
                                                 VStack(alignment: .leading, spacing: 4) {
                                                     Text(display.name)
                                                         .font(.system(size: 15, weight: .semibold))
-                                                        .foregroundStyle(Color.mgHeading)
+                                                        .foregroundStyle(Color.appInk)
                                                     Text(displayPresenceLabel(display))
                                                         .font(.appBody(12))
-                                                        .foregroundStyle(Color.mgSecondary)
+                                                        .foregroundStyle(Color.appMuted)
                                                 }
                                                 Spacer()
                                                 Button("Forget") {
@@ -560,11 +560,11 @@ private struct PairedDisplaysView: View {
                                                     showRevokeConfirmation = true
                                                 }
                                                 .font(.system(size: 13, weight: .semibold))
-                                                .foregroundStyle(Color.mgDestructive)
+                                                .foregroundStyle(Color.appDestructive)
                                             }
                                             .padding(.vertical, 14)
                                             if display.id != displays.last?.id {
-                                                MilgrainDivider()
+                                                SettingsDivider()
                                             }
                                         }
                                     }
@@ -576,7 +576,7 @@ private struct PairedDisplaysView: View {
                             if let errorMessage {
                                 Text(errorMessage)
                                     .font(.appBody(12))
-                                    .foregroundStyle(Color.mgDestructive)
+                                    .foregroundStyle(Color.appDestructive)
                             }
                         }
                         .padding(.horizontal, AppSpacing.margin)
@@ -700,10 +700,10 @@ private struct FreedomSlider: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Initiative")
                     .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
                 Text(simpleLabel)
                     .font(.appBody(12))
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
 

@@ -62,7 +62,7 @@ test('background surface keeps identity, capabilities, working loop, truthfulnes
 test('background surface does NOT receive chat-only turn-taking instructions that make no sense unsupervised', () => {
   const prompt = buildSystemPrompt({ surface: 'background', context: {} });
   // These are chat RESPONSE RULES / COMMUNICATION_CRAFT_SECTION content — a live-conversation
-  // framing that presumes a person is actively talking to Millie right now.
+  // framing that presumes a person is actively talking to Adam right now.
   assert.doesNotMatch(prompt, /For greetings or simple check-ins like "hi", "hey", or "ok"/);
   assert.doesNotMatch(prompt, /The user leads the conversation\. Follow their topic/);
   assert.doesNotMatch(prompt, /FAST TURN MODE/);
@@ -76,8 +76,8 @@ test('background surface has its own repeat-avoidance instruction distinct from 
   assert.match(prompt, phrase('Do not repeat a step you already completed earlier in this run'));
 });
 
-// ── Briefing: routed through Millie's identity/voice, not a separate persona ───────────────
-test('briefing surface opens with Millie\'s own voice, not a separate "You are a personal assistant" persona', () => {
+// ── Briefing: routed through Adam's identity/voice, not a separate persona ───────────────
+test('briefing surface opens with Adam\'s own voice, not a separate "You are a personal assistant" persona', () => {
   const prompt = buildSystemPrompt({ surface: 'briefing', context: {} });
   assert.ok(prompt.startsWith(MILLIE_VOICE_PROMPT));
   assert.doesNotMatch(prompt, /You are a personal assistant/);
@@ -98,7 +98,7 @@ test('briefing surface renders memory, preferences, history, native context, win
     surface: 'briefing',
     context: {
       memory: 'Trains to Leeds most weekends.',
-      preferences: 'assistant_name: Millie',
+      preferences: 'assistant_name: Adam',
       historyText: 'user: how was the weather\nassistant: sunny all week',
       nativeContextText: 'Native context:\nLocation: 53.8, -1.5\nHealth: not available',
       windowLabel: 'Afternoon',
@@ -108,7 +108,7 @@ test('briefing surface renders memory, preferences, history, native context, win
     }
   });
   assert.match(prompt, /Trains to Leeds most weekends\./);
-  assert.match(prompt, /assistant_name: Millie/);
+  assert.match(prompt, /assistant_name: Adam/);
   assert.match(prompt, /sunny all week/);
   assert.match(prompt, /53\.8, -1\.5/);
   assert.match(prompt, phrase('Write the Afternoon update'));

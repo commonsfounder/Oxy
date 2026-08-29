@@ -1,10 +1,10 @@
-# Milgrain Superagent Command Center
+# Adam Superagent Command Center
 
 Last updated: 2026-07-05
 
 ## North Star
 
-Milgrain is a premium, wearable-first personal assistant: press, speak, remember,
+Adam is a premium, wearable-first personal assistant: press, speak, remember,
 act. The app must feel like a trusted companion that safely gets real work done,
 not a chatbot wrapper or a gadget demo.
 
@@ -51,7 +51,7 @@ into hardware/Kickstarter once the software loop is credible.
 - Entitlement strategy: should the backend hard-block high-cost routes for users
   without an active/trial subscription immediately, or ship a softer TestFlight
   mode where the server records entitlement state but only warns/logs?
-- Brand migration: user-facing copy scrubbed to Milgrain (2026-07-05) — Info.plist
+- Brand migration: user-facing copy scrubbed to Adam (2026-07-05) — Info.plist
   strings, CFBundleDisplayName, Siri/Shortcuts titles, in-chat permission errors,
   pendant BLE name/firmware, privacy/terms/support pages, emails, wallet pass,
   connector defaults. Still open: whether to also rename the Xcode project/target,

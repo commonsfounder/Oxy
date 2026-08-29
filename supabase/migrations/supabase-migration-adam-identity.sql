@@ -1,4 +1,4 @@
--- Millie's own persistent communication identity — one identity per user, with one
+-- Adam's own persistent communication identity — one identity per user, with one
 -- handle per channel type. Channel is scoped to email + phone_sms in this milestone;
 -- adding 'whatsapp'/'telegram_bot' later is a one-line ALTER on the two check
 -- constraints below, not a redesign.
@@ -11,7 +11,7 @@
 create table millie_identities (
   id uuid primary key default gen_random_uuid(),
   user_id text not null unique references users(user_id) on delete cascade,
-  display_name text not null default 'Millie',
+  display_name text not null default 'Adam',
   created_at timestamptz not null default now()
 );
 

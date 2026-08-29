@@ -66,7 +66,7 @@ function runtimeSessionRow(userId, input = {}) {
     device_type: normalizeDeviceType(input.deviceType),
     kind: normalizeRuntimeKind(input.kind),
     project_ref: cleanText(input.projectRef, '', 180) || null,
-    title: cleanText(input.title, 'Millie session', MAX_TITLE_LENGTH),
+    title: cleanText(input.title, 'Adam session', MAX_TITLE_LENGTH),
     state: normalizeRuntimeState(input.state),
     metadata: normalizeMetadata(input.metadata),
     updated_at: new Date().toISOString()
@@ -115,7 +115,7 @@ function summarizeSession(row, artifacts = []) {
     deviceType: normalizeDeviceType(row.device_type, 'unknown'),
     kind: normalizeRuntimeKind(row.kind),
     projectRef: row.project_ref || null,
-    title: cleanText(row.title, 'Millie session', MAX_TITLE_LENGTH),
+    title: cleanText(row.title, 'Adam session', MAX_TITLE_LENGTH),
     state: normalizeRuntimeState(row.state),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
@@ -169,7 +169,7 @@ async function updateSession(supabase, userId, sessionId, updates = {}) {
   const patch = {};
   if (updates.state !== undefined) patch.state = normalizeRuntimeState(updates.state);
   if (updates.projectRef !== undefined) patch.project_ref = cleanText(updates.projectRef, '', 180) || null;
-  if (updates.title !== undefined) patch.title = cleanText(updates.title, 'Millie session', MAX_TITLE_LENGTH);
+  if (updates.title !== undefined) patch.title = cleanText(updates.title, 'Adam session', MAX_TITLE_LENGTH);
   if (updates.heartbeatAt !== undefined) patch.heartbeat_at = updates.heartbeatAt;
   if (updates.completedAt !== undefined) patch.completed_at = updates.completedAt;
   if (updates.metadata !== undefined) patch.metadata = normalizeMetadata(updates.metadata);

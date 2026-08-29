@@ -9,7 +9,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') return mockAxios;
   return originalLoad.call(this, request, parent, isMain);
 };
-const { sendMillieEmail, parseInboundPayload, verifyResendWebhookSignature, MILLIE_EMAIL_SIGNATURE_LINE } = require('../../connectors/millie-email-resend');
+const { sendAdamEmail, parseInboundPayload, verifyResendWebhookSignature, MILLIE_EMAIL_SIGNATURE_LINE } = require('../../connectors/adam-email-resend');
 Module._load = originalLoad;
 
 // Resend delivers webhooks via Svix: headers svix-id/svix-timestamp/svix-signature, secret
@@ -23,7 +23,7 @@ function buildValidSignature(secret, id, timestamp, rawBody) {
 }
 const TEST_SECRET = `whsec_${Buffer.from('test-signing-key-32-bytes-long!').toString('base64')}`;
 
-test('sendMillieEmail posts to Resend with the from/to/subject/body and appends the signature line', async () => {
+test('sendAdamEmail posts to Resend with the from/to/subject/body and appends the signature line', async () => {
   const oldKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = 'test-key';
   let captured;
@@ -33,7 +33,7 @@ test('sendMillieEmail posts to Resend with the from/to/subject/body and appends 
     return { data: { id: 'resend-msg-1' } };
   };
   try {
-    const result = await sendMillieEmail({
+    const result = await sendAdamEmail({
       from: 'chizi@millie.oxy.app',
       to: 'reservations@bistro.example',
       subject: 'Booking change',

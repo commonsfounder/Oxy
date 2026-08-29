@@ -147,7 +147,7 @@ function inferOutboundCommunicationAction(message) {
   if (email) {
     const recipient = trimTrailingPunctuation(email[1]);
     const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(recipient)
-      ? 'send_millie_email'
+      ? 'send_adam_email'
       : 'send_email';
     return {
       reason: type,
@@ -160,7 +160,7 @@ function inferOutboundCommunicationAction(message) {
   if (messageMatch) {
     const contact = trimTrailingPunctuation(messageMatch[1]);
     const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(contact)
-      ? 'send_millie_sms'
+      ? 'send_adam_sms'
       : 'send_message';
     return {
       reason: type,
@@ -202,7 +202,7 @@ const WATCH_TARGETS = /\b(flight|flights|fare|fares|ticket|tickets|hotel|hotels|
 
 function stripWakeWord(text) {
   return normalizeText(text)
-    .replace(/^(?:hey|okay|ok)?\s*millie(?:\s*[:,;-]\s*|\s+)/i, '')
+    .replace(/^(?:hey|okay|ok)?\s*adam(?:\s*[:,;-]\s*|\s+)/i, '')
     .replace(/^(?:okay|ok|please|pls)\s+/i, '')
     .trim();
 }

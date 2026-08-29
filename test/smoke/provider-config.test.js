@@ -41,11 +41,11 @@ test('provider configuration reports a model-provider mismatch without exposing 
 test('provider failures become useful safe copy', () => {
   assert.equal(
     formatProviderFailure('openai 401: Incorrect API key provided'),
-    'Millie is unavailable right now. Try again later.'
+    'Adam is unavailable right now. Try again later.'
   );
   assert.equal(
     formatProviderFailure('openai 404: model does not exist'),
-    'Millie needs a model connection before she can answer. Try again later.'
+    'Adam needs a model connection before answering. Try again later.'
   );
   assert.doesNotMatch(formatProviderFailure('openai 401: Incorrect API key provided'), /api key|openai/i);
 });

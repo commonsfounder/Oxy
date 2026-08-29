@@ -64,7 +64,7 @@ Core principles (no fluff):
 - Keep the good engineering (streaming, voice, native handoffs).
 
 **Brand in UI:**
-- "the app" or simple wordmark when needed. No heavy Milgrain worship in software.
+- "the app" or simple wordmark when needed. No heavy Adam worship in software.
 - Subtle personality: consistent icon or glyph for the AI when it speaks or acts.
 - Settings for personality level later if wanted.
 

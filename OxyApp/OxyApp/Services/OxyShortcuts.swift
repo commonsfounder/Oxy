@@ -117,13 +117,13 @@ final class SiriRequestBus: @unchecked Sendable {
 /// the app to a fresh chat and sends the spoken query straight through the
 /// normal chat pipeline (so streaming, TTS, actions and review all still apply).
 struct AskOxyIntent: AppIntent {
-    static let title: LocalizedStringResource = "Ask Milgrain"
-    static let description = IntentDescription("Ask Milgrain a question or give it a task by voice.")
+    static let title: LocalizedStringResource = "Ask Adam"
+    static let description = IntentDescription("Ask Adam a question or give it a task by voice.")
 
     /// Bring the app to the foreground — the chat surface handles the request.
     static let openAppWhenRun: Bool = true
 
-    @Parameter(title: "Request", requestValueDialog: "What should I ask Milgrain?")
+    @Parameter(title: "Request", requestValueDialog: "What should I ask Adam?")
     var query: String
 
     @MainActor
@@ -143,8 +143,8 @@ struct AskOxyIntent: AppIntent {
 /// "Open Oxy" — just launches the app to the chat tab. Lightweight counterpart
 /// for the Action Button / a simple Shortcut.
 struct OpenOxyIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Milgrain"
-    static let description = IntentDescription("Open Milgrain and start a conversation.")
+    static let title: LocalizedStringResource = "Open Adam"
+    static let description = IntentDescription("Open Adam and start a conversation.")
     static let openAppWhenRun: Bool = true
 
     @MainActor
@@ -164,7 +164,7 @@ struct OxyShortcuts: AppShortcutsProvider {
                 "Ask \(.applicationName)",
                 "Talk to \(.applicationName)"
             ],
-            shortTitle: "Ask Milgrain",
+            shortTitle: "Ask Adam",
             systemImageName: "bubble.left.and.bubble.right"
         )
         AppShortcut(
@@ -173,7 +173,7 @@ struct OxyShortcuts: AppShortcutsProvider {
                 "Open \(.applicationName)",
                 "Start a conversation with \(.applicationName)"
             ],
-            shortTitle: "Open Milgrain",
+            shortTitle: "Open Adam",
             systemImageName: "sparkles"
         )
     }

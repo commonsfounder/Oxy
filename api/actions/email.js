@@ -211,7 +211,7 @@ async function dailyDigestAction({ userId, action, params, enrichedParams, conte
 }
 
 // Sending is where a promise becomes real. Everything about commitments used to depend on
-// the user separately telling Millie "track this" — looksLikeCommitment and
+// the user separately telling Adam "track this" — looksLikeCommitment and
 // matchesSentEvidence existed, were unit-tested, and were called from nowhere. So the
 // send is intercepted here: the message goes out first, and only a send Gmail actually
 // accepted is allowed to change what the user is on the hook for.

@@ -308,7 +308,7 @@ function classifyCategory(merchant = '', description = '') {
 }
 
 // The honest sentence. Names the sources actually searched, and always states what a
-// receipts-and-Millie-orders view cannot see.
+// receipts-and-Adam-orders view cannot see.
 function formatSpendSummary(purchases = [], {
   since = '', merchant = '', sources = ['email_receipt', 'millie_browser'],
   emailSearched = true, emailError = '', unclassified = 0, categoryQuery = ''
@@ -327,11 +327,11 @@ function formatSpendSummary(purchases = [], {
   const amounts = summary.totals.map(t => formatMoney(t.total, t.currency)).join(' + ');
   const parts = [`${amounts || 'no priced records'} across ${purchases.length} record${purchases.length === 1 ? '' : 's'}${scope}${window}`];
 
-  const millieCount = purchases.filter(p => p.source === 'millie_browser').length;
-  const emailCount = purchases.length - millieCount;
+  const adamCount = purchases.filter(p => p.source === 'millie_browser').length;
+  const emailCount = purchases.length - adamCount;
   const sourceBits = [];
   if (emailCount) sourceBits.push(`${emailCount} from receipts in your connected email`);
-  if (millieCount) sourceBits.push(`${millieCount} ordered through me`);
+  if (adamCount) sourceBits.push(`${adamCount} ordered through me`);
   if (sourceBits.length) parts.push(sourceBits.join(', '));
 
   if (summary.unpriced) parts.push(`${summary.unpriced} record${summary.unpriced === 1 ? ' had' : 's had'} no reliably-stated total, so ${summary.unpriced === 1 ? 'it is' : 'they are'} not in that figure`);

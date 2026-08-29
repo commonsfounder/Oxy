@@ -1,5 +1,5 @@
 -- The people layer. Deliberately an EXTENSION of `participants`, not a new `people` table:
--- participants already is the channel-agnostic "who Millie deals with" record, and
+-- participants already is the channel-agnostic "who Adam deals with" record, and
 -- participant_addresses already is the stable-handle identity index (unique lookup on
 -- channel_type + address_value) that makes "Alisa", her email address, and an occasion
 -- record resolve to one person. A second table would have been the exact fragmented
@@ -34,7 +34,7 @@ create table if not exists person_facts (
   kind text not null default 'note' check (kind in ('note', 'preference')),
   fact text not null,
   -- Provenance, and the honest confidence signal: 'stated' means the user said it,
-  -- 'inferred' means Millie derived it. Nothing else may be stored.
+  -- 'inferred' means Adam derived it. Nothing else may be stored.
   source text not null default 'stated' check (source in ('stated', 'inferred')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

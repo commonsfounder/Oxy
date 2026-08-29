@@ -1,4 +1,4 @@
--- Durable outbound notification events. Until now, everything Millie noticed proactively
+-- Durable outbound notification events. Until now, everything Adam noticed proactively
 -- (a watch firing, a parcel moving, the morning digest) only became a briefing row and a
 -- best-effort APNs push whose failure was swallowed — so if the user did not open the app,
 -- they simply never found out.

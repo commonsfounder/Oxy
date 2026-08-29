@@ -28,7 +28,7 @@ if (fs.existsSync(envPath)) {
 
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const USER = process.env.SMOKE_USER || 'user123';
-const TAG = 'MILLIE-RELEASE-SMOKE';
+const TAG = 'ADAM-RELEASE-SMOKE';
 
 const results = [];
 function record(name, ok, detail) {

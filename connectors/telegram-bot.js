@@ -1,10 +1,10 @@
 const crypto = require('crypto');
 const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 
-// This is a genuine Telegram Bot (BotFather / Bot API), Millie's own identity on Telegram —
+// This is a genuine Telegram Bot (BotFather / Bot API), Adam's own identity on Telegram —
 // distinct from connectors/telegram.js, which logs into the USER'S OWN Telegram account via
 // MTProto. That connector sends as the user, to the user's own contacts; this one lets the
-// user talk to Millie herself from their Telegram app, the same conversation as the iOS chat.
+// user talk to Adam directly from their Telegram app, the same conversation as the iOS chat.
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('telegram bot connector bootstrap');
 

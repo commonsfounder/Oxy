@@ -252,13 +252,13 @@ test('email tone guidance (moved from the static prompt): cliches, requested ton
   }
 });
 
-test('default identity selection: Millie-identity vs personal-mailbox guidance survives natively on all four contracts', () => {
+test('default identity selection: Adam-identity vs personal-mailbox guidance survives natively on all four contracts', () => {
   const decls = nativeDescriptions();
-  assert.match(decls.send_millie_email.description, /business, support line, restaurant/);
-  assert.match(decls.send_millie_sms.description, /business, support line, restaurant/);
+  assert.match(decls.send_adam_email.description, /business, support line, restaurant/);
+  assert.match(decls.send_adam_sms.description, /business, support line, restaurant/);
   assert.match(decls.send_email.description, /personal correspondence where the sender should clearly be the user/);
   assert.match(decls.send_outlook_email.description, /personal correspondence where the sender should clearly be the user/);
-  assert.match(decls.send_message.description, /always their own identity, never Millie's/);
+  assert.match(decls.send_message.description, /always their own identity, never Adam's/);
 });
 
 test('project actions: all 7 project_* guidance strings survive natively, including the destructive-action warnings', () => {

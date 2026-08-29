@@ -58,7 +58,7 @@ final class PendantLiveActivityManager {
             activity = existing
             return
         }
-        let attributes = PendantActivityAttributes(deviceName: "Millie Home Device")
+        let attributes = PendantActivityAttributes(deviceName: "Adam Home Device")
         let state = PendantActivityAttributes.ContentState(status: status, isListening: listening)
         do {
             activity = try Activity.request(

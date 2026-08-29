@@ -15,10 +15,10 @@ struct ScreenHeaderView: View {
     var body: some View {
         HStack(spacing: 10) {
             if let onBack {
-                // Raw chevron — no frosted glass, no circular chrome (Milgrain spec).
+                // Raw chevron — no frosted glass, no circular chrome (Adam spec).
                 Button(action: onBack) {
                     AppIcon("chevron-left", size: 17)
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                         .frame(width: circle, height: circle)
                         .contentShape(Rectangle())
                 }
@@ -28,7 +28,7 @@ struct ScreenHeaderView: View {
 
             Text(title)
                 .font(.screenTitle)
-                .foregroundStyle(Color.mgHeading)
+                .foregroundStyle(Color.appInk)
 
             Spacer()
         }
@@ -36,7 +36,7 @@ struct ScreenHeaderView: View {
         .padding(.vertical, 8)
         // Opaque, and extended up through the status-bar inset, so scrolled content
         // can never ghost above or behind the header at the very top of the screen.
-        .background(Color.mgBg.ignoresSafeArea(edges: .top))
+        .background(Color.appBackground.ignoresSafeArea(edges: .top))
     }
 }
 
@@ -46,5 +46,5 @@ struct ScreenHeaderView: View {
         ScreenHeaderView(title: "More")
         Spacer()
     }
-    .background(Color.mgBg)
+    .background(Color.appBackground)
 }

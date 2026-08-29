@@ -1,10 +1,10 @@
-# Milgrain UI/UX Overhaul — Implementation Plan
+# Adam UI/UX Overhaul — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn six screens that read like three stitched-together design systems into one coherent, trustworthy product — starting by purging leaked trace data from the Memory system, then unifying the design language, then rebuilding the worst screens on that single foundation.
 
-**Architecture:** The app already has the *right values* (dark charcoal canvas, gold accent, SF type, serif reserved for the wordmark/greetings). The problem is (a) the backend writes internal trace strings into the user-facing `memories` table, and (b) `AppTheme.swift` grew **two parallel component sets** — the `app*` family (Chat/Today) and the `mg*` "Milgrain" family (Settings/Connectors/Memory/Pendant) — plus a graveyard of no-op shims and contradictory rules. We fix the data leak first, then collapse the two component families into one canonical set, then rebuild each screen on it. No new brand; this is consolidation, not reinvention.
+**Architecture:** The app already has the *right values* (dark charcoal canvas, gold accent, SF type, serif reserved for the wordmark/greetings). The problem is (a) the backend writes internal trace strings into the user-facing `memories` table, and (b) `AppTheme.swift` grew **two parallel component sets** — the `app*` family (Chat/Today) and the `mg*` "Adam" family (Settings/Connectors/Memory/Pendant) — plus a graveyard of no-op shims and contradictory rules. We fix the data leak first, then collapse the two component families into one canonical set, then rebuild each screen on it. No new brand; this is consolidation, not reinvention.
 
 **Tech Stack:** SwiftUI (iOS 18+, dark-only), `OxyApp/OxyApp.xcodeproj` scheme `OxyApp`. Backend: Node.js in `api/` (Cloud Run, auto-deploys on push to `origin/main`). Backend tests: `npm test`.
 
@@ -21,7 +21,7 @@ Replace ad-hoc `.system(size:)` / mixed `.appDisplay` / `.appBody` calls with th
 |---|---|---|
 | `heroDisplay` | 30 / semibold / rounded ⚑ (was 46) | The one big identity moment per screen (More name, Today greeting). **Capped at 30** so it stops shoving content down (audit #12). |
 | `screenTitle` | 20 / semibold | Screen headers (Memory, Settings, Pendant, Connections). |
-| `sectionTitle` | 15 / semibold, `.appMuted` | Group headers within a screen. Replaces the 20pt `MilgrainSectionHeader` and the 11pt uppercase eyebrow — pick **one** section-header treatment. ⚑ |
+| `sectionTitle` | 15 / semibold, `.appMuted` | Group headers within a screen. Replaces the 20pt `AdamSectionHeader` and the 11pt uppercase eyebrow — pick **one** section-header treatment. ⚑ |
 | `rowTitle` | 16 / regular, `.appInk` | Primary row text. |
 | `rowSecondary` | 13 / regular, `.appMuted` | Captions, status, descriptions. Never below `.appMuted` (0.72 white). |
 
@@ -29,7 +29,7 @@ Replace ad-hoc `.system(size:)` / mixed `.appDisplay` / `.appBody` calls with th
 ⚑ **`AppSpacing.margin = 20`** everywhere (matches Chat's existing `chatMargin`). Currently: Chat 20, Settings-family 24, Connectors 16, header 12. Unify all to 20, header included. Edge-to-edge components (dividers, aurora) are the only exceptions.
 
 ### Selection state language (unmistakable)
-One pattern for mutually-exclusive choices: a **filled accent capsule** behind the selected segment (gold `appAccent` fill, `appOnAccent` text; unselected = `.appMuted` on clear). This replaces `MilgrainSegmentedControl`'s thin-hairline/weight-only cue (audit #6, #38). For binary toggles: keep one toggle component (see below).
+One pattern for mutually-exclusive choices: a **filled accent capsule** behind the selected segment (gold `appAccent` fill, `appOnAccent` text; unselected = `.appMuted` on clear). This replaces `AdamSegmentedControl`'s thin-hairline/weight-only cue (audit #6, #38). For binary toggles: keep one toggle component (see below).
 
 ### Semantic color roles (LOCKED)
 Define roles, don't force one color onto every state:
@@ -45,10 +45,10 @@ Keep exactly one of each; the rest become thin aliases or are deleted:
 
 | Keep | Delete / alias to it |
 |---|---|
-| `AppSectionHeader` (renamed→`sectionTitle` style) | `MilgrainSectionHeader`, `AppSectionTitle` |
-| `AppToggle` | `MilgrainToggle` |
-| `AppSegmented` (new, filled-capsule) | `MilgrainSegmentedControl` |
-| `AppDivider` | `MilgrainDivider` |
+| `AppSectionHeader` (renamed→`sectionTitle` style) | `AdamSectionHeader`, `AppSectionTitle` |
+| `AppToggle` | `AdamToggle` |
+| `AppSegmented` (new, filled-capsule) | `AdamSegmentedControl` |
+| `AppDivider` | `AdamDivider` |
 | `AppRow` (new shared row) | hand-rolled rows in every screen |
 | `AppCard` | `TodayCard`, `EditorialPlate` (Today keeps `TodayCard` only if it needs the glass finish) |
 
@@ -196,8 +196,8 @@ extension Font {
 **Files:**
 - Modify: `OxyApp/OxyApp/Extensions/AppTheme.swift`
 
-- [ ] **Step 1:** Make `MilgrainSectionHeader` and `AppSectionTitle` thin aliases of a single `AppSectionHeader` styled as `sectionTitle` (15/semibold, `.appMuted`). Keep the type names so call sites compile; unify the visual.
-- [ ] **Step 2:** Make `MilgrainDivider` an alias of `AppDivider`.
+- [ ] **Step 1:** Make `AdamSectionHeader` and `AppSectionTitle` thin aliases of a single `AppSectionHeader` styled as `sectionTitle` (15/semibold, `.appMuted`). Keep the type names so call sites compile; unify the visual.
+- [ ] **Step 2:** Make `AdamDivider` an alias of `AppDivider`.
 - [ ] **Step 3:** Delete confirmed-dead no-op shims that no call site depends on: the `appGlass`, `appHairline(radius:)` no-ops, `DropCapText`, `EditorialPlate`, `AppGrain`/`AtmosphereSky`/`AppRule` **only if** grep shows zero non-Today references. Run `grep -rn "EditorialPlate\|DropCapText\|AppRule\|AppGrain" OxyApp` first; delete only the truly unused.
 - [ ] **Step 4:** Resolve the contradictory card doctrine (DECIDED, confirmed against the live app): Today's filled `TodayCard` surfaces (appSurface) read well — **keep them**. Do NOT flatten the app to pure black. The doctrine is: **filled cards where they carry content (Today); flat rows-on-canvas + dividers for the settings-family list screens** (Memory/Settings/Connections/Pendant/Account). Leave `AppCard` and `TodayCard` both intact; each screen picks the right one. Do not force `ProfileView` off `TodayCard` unless it visibly improves it.
 - [ ] **Step 5: Build & verify** every screen still renders (Chat, Today, Memory, Settings, Connectors, Pendant, More, Profile). Screenshot each.
@@ -216,10 +216,10 @@ extension Font {
 ### Task 2.4: New `AppSegmented` — filled-capsule selection
 
 **Files:**
-- Modify: `OxyApp/OxyApp/Extensions/AppTheme.swift` (add `AppSegmented`), alias `MilgrainSegmentedControl` to it.
+- Modify: `OxyApp/OxyApp/Extensions/AppTheme.swift` (add `AppSegmented`), alias `AdamSegmentedControl` to it.
 
 **Interfaces:**
-- Produces: `AppSegmented(options:labels:selection:)` — same signature as `MilgrainSegmentedControl` so Settings/Pendant call sites don't change.
+- Produces: `AppSegmented(options:labels:selection:)` — same signature as `AdamSegmentedControl` so Settings/Pendant call sites don't change.
 
 - [ ] **Step 1: Implement** the filled-capsule control:
 ```swift
@@ -255,7 +255,7 @@ struct AppSegmented: View {
 }
 ```
 (Add a small `Collection` `subscript(safe:)` helper if not present.)
-- [ ] **Step 2:** Alias: `typealias MilgrainSegmentedControl = AppSegmented` OR replace usages directly in Settings/Pendant.
+- [ ] **Step 2:** Alias: `typealias AdamSegmentedControl = AppSegmented` OR replace usages directly in Settings/Pendant.
 - [ ] **Step 3: Build & verify** in Settings — the selected Bubble/Maps/Transport option is now unmistakable (audit #6, #38). Screenshot.
 - [ ] **Step 4: Commit** — `feat(design): filled-capsule AppSegmented with clear selection state`
 

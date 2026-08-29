@@ -16,7 +16,7 @@ async function findOpenConversationsForParticipant(supabase, participantId) {
   return data.filter(c => c.status === 'open' || c.status === 'awaiting_reply');
 }
 
-async function getOrCreateConversation(supabase, { userId, millieIdentityId, participantId, requestTaskId = null }) {
+async function getOrCreateConversation(supabase, { userId, adamIdentityId, participantId, requestTaskId = null }) {
   const open = await findOpenConversationsForParticipant(supabase, participantId);
   const matching = requestTaskId
     ? open.find(c => c.request_task_id === requestTaskId)
@@ -25,7 +25,7 @@ async function getOrCreateConversation(supabase, { userId, millieIdentityId, par
 
   const { data: conversation, error } = await supabase.from('external_conversations').insert({
     user_id: userId,
-    millie_identity_id: millieIdentityId,
+    millie_identity_id: adamIdentityId,
     participant_id: participantId,
     request_task_id: requestTaskId,
     status: 'open',
@@ -36,7 +36,7 @@ async function getOrCreateConversation(supabase, { userId, millieIdentityId, par
 }
 
 async function appendEvent(supabase, {
-  conversationId, channelType, direction, participantAddressId = null, millieIdentityHandleId = null,
+  conversationId, channelType, direction, participantAddressId = null, adamIdentityHandleId = null,
   providerEventId = null, subject = '', body, needsDecision = false, rawProviderPayload = null
 }) {
   const bodyEncrypted = encryptTokens({ subject, body });
@@ -45,7 +45,7 @@ async function appendEvent(supabase, {
     channel_type: channelType,
     direction,
     participant_address_id: participantAddressId,
-    millie_identity_handle_id: millieIdentityHandleId,
+    millie_identity_handle_id: adamIdentityHandleId,
     provider_event_id: providerEventId,
     body_encrypted: bodyEncrypted,
     needs_decision: needsDecision,

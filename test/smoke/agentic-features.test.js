@@ -63,7 +63,7 @@ test('agentic task manager module loads and has expected functions', () => {
 test('agent OS context keeps identity, profile, preferences, goals, and relationships in one safe shape', () => {
   const context = buildAgentContext({
     memories: [
-      { source: 'manual_profile', content: 'Identity\n- Lives in London\nWork\n- Building Milgrain\nRelationships\n- Partner prefers quiet mornings' },
+      { source: 'manual_profile', content: 'Identity\n- Lives in London\nWork\n- Building Adam\nRelationships\n- Partner prefers quiet mornings' },
       { source: 'fact', content: 'Prefers direct communication' }
     ],
     preferences: [
@@ -83,8 +83,8 @@ test('agent OS context keeps identity, profile, preferences, goals, and relation
     connectors: [{ connector_id: 'google' }, { connector_id: 'microsoft' }]
   });
 
-  assert.equal(context.agent.name, 'Millie');
-  assert.deepEqual(context.profile.sections.work, ['Work', '- Building Milgrain']);
+  assert.equal(context.agent.name, 'Adam');
+  assert.deepEqual(context.profile.sections.work, ['Work', '- Building Adam']);
   assert.deepEqual(context.profile.sections.relationships, ['Relationships', '- Partner prefers quiet mornings']);
   assert.deepEqual(context.preferences, {
     autonomy: 'Balanced',
@@ -96,7 +96,7 @@ test('agent OS context keeps identity, profile, preferences, goals, and relation
 });
 
 test('agent workspace paths and content are bounded before persistence', () => {
-  assert.equal(normalizeWorkspacePath('./projects/milgrain/notes.md'), 'projects/milgrain/notes.md');
+  assert.equal(normalizeWorkspacePath('./projects/adam/notes.md'), 'projects/adam/notes.md');
   assert.throws(() => normalizeWorkspacePath('../outside.txt'), /Invalid workspace path/);
   assert.throws(() => validateWorkspaceContent('x'.repeat(512 * 1024 + 1)), /too large/);
   assert.equal(validateWorkspaceContent('hello'), 'hello');
@@ -145,19 +145,19 @@ test('continuity import normalises ChatGPT-style history and derives bounded mem
   const imported = normaliseContinuityPayload({
     source: 'chatgpt',
     conversations: [{
-      title: 'Milgrain build',
+      title: 'Adam build',
       mapping: {
-        a: { message: { author: { role: 'user' }, content: { parts: ['I am building Milgrain and prefer direct communication.'] }, create_time: 1 } },
+        a: { message: { author: { role: 'user' }, content: { parts: ['I am building Adam and prefer direct communication.'] }, create_time: 1 } },
         b: { message: { author: { role: 'assistant' }, content: { parts: ['Keep the next step small.'] }, create_time: 2 } }
       }
     }],
-    projects: [{ title: 'Milgrain', description: 'I am building a household agent.' }],
+    projects: [{ title: 'Adam', description: 'I am building a household agent.' }],
     instructions: 'I prefer concise answers.'
   });
   assert.equal(imported.source, 'chatgpt');
   assert.equal(imported.conversations[0].messages.length, 2);
   assert.equal(imported.instructions[0], 'I prefer concise answers.');
-  assert.ok(importedMemoryCandidates(imported).some(line => /building Milgrain/i.test(line)));
+  assert.ok(importedMemoryCandidates(imported).some(line => /building Adam/i.test(line)));
   assert.ok(JSON.stringify(imported).length < 20000);
 });
 

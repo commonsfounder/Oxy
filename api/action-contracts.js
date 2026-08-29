@@ -1,9 +1,9 @@
-// Which outbound tool the model reaches for — Millie's own identity (send_millie_email/sms) or
+// Which outbound tool the model reaches for — Adam's own identity (send_adam_email/sms) or
 // the user's connected mailbox and device (send_email/send_outlook_email/send_message). Explicit
 // steering, not tool availability, is what decides it.
-const MILLIE_IDENTITY_GUIDANCE = 'Use this by default whenever Millie is contacting a business, support line, restaurant or booking, delivery or vendor service, or any external organization or stranger on the user\'s behalf — this is the normal case for requests like "email/text the restaurant and ask if they can move us to 8." Do not use this for the user\'s own personal correspondence — friends, family, work or school contacts, job applications, or anything where the sender should clearly be the user, not Millie — use the user\'s own connected mailbox/device for that instead. Millie signs as herself; never impersonate the user.';
-const PERSONAL_IDENTITY_GUIDANCE = 'Use this only when the user is personally corresponding as themselves — friends, family, work or school contacts, job applications, or any personal correspondence where the sender should clearly be the user. If the user is contacting a business, support line, restaurant, vendor, delivery service, or any external organization or stranger with Millie acting on their behalf, use send_millie_email instead, unless the user explicitly says to send it from their own account.';
-const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone via their device\'s Messages app — always their own identity, never Millie\'s. Fine for personal contacts (friends, family, colleagues). If the user is contacting a business, support line, restaurant, vendor, or any external organization or stranger with Millie acting on their behalf, use send_millie_sms instead so it comes from Millie\'s own number.';
+const MILLIE_IDENTITY_GUIDANCE = 'Use this by default whenever Adam is contacting a business, support line, restaurant or booking, delivery or vendor service, or any external organization or stranger on the user\'s behalf — this is the normal case for requests like "email/text the restaurant and ask if they can move us to 8." Do not use this for the user\'s own personal correspondence — friends, family, work or school contacts, job applications, or anything where the sender should clearly be the user, not Adam — use the user\'s own connected mailbox/device for that instead. Adam signs as itself; never impersonate the user.';
+const PERSONAL_IDENTITY_GUIDANCE = 'Use this only when the user is personally corresponding as themselves — friends, family, work or school contacts, job applications, or any personal correspondence where the sender should clearly be the user. If the user is contacting a business, support line, restaurant, vendor, delivery service, or any external organization or stranger with Adam acting on their behalf, use send_adam_email instead, unless the user explicitly says to send it from their own account.';
+const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone via their device\'s Messages app — always their own identity, never Adam\'s. Fine for personal contacts (friends, family, colleagues). If the user is contacting a business, support line, restaurant, vendor, or any external organization or stranger with Adam acting on their behalf, use send_adam_sms instead so it comes from Adam\'s own number.';
 
 // Shared messaging-register guidance for conversational channels (iMessage/WhatsApp/Telegram).
 // Moved out of the numbered prompt rules — this is squarely about how to construct THIS
@@ -11,7 +11,7 @@ const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone vi
 const CONVERSATIONAL_MESSAGE_GUIDANCE = 'Keep the message brief, natural, and text-like: rewrite the requested content into an actual first-person message addressed to the contact, matching the register of any recent messages with them. Never paste a "saying X" clause verbatim as the message body — e.g. "saying how much I miss her" must become something like "I miss you so much", not "how much i miss her".';
 
 // Shared email tone/quality guidance, appended to both the user's-own-account and
-// Millie's-own-identity email contracts.
+// Adam's-own-identity email contracts.
 const EMAIL_TONE_GUIDANCE = 'Draft the body as 1-3 short paragraphs. Default tone is warm, clear, and human — most email is professional or corporate, so use polished business language when the thread calls for it, but avoid empty cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the thread or user specifically warrants that formality. If the user specifies a tone (casual, friendly, firm, apologetic, confident, less desperate, short, professional), make the draft visibly follow it. If the user gives no real content (e.g. only "say hello" or "introduce myself"), ask for the actual substance before sending — never send a placeholder or generic template body; it must contain specific content from the user, the conversation, memory, or tool results.';
 
 const ACTION_CONTRACTS = {
@@ -142,7 +142,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'review',
     adapter: { kind: 'connector', id: 'google' }
   },
-  send_millie_email: {
+  send_adam_email: {
     adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['to', 'body'],
@@ -156,12 +156,12 @@ const ACTION_CONTRACTS = {
       attach_document_ids: ['document id from find_documents — never a filename']
     },
     guidance: MILLIE_IDENTITY_GUIDANCE,
-    successSummary: 'Message sent from Millie',
+    successSummary: 'Message sent from Adam',
     failureSummary: 'Message failed to send',
     confirmation: 'review_required',
     executionMode: 'review'
   },
-  send_millie_sms: {
+  send_adam_sms: {
     adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['to', 'body'],
@@ -173,7 +173,7 @@ const ACTION_CONTRACTS = {
       request_task_id: 'optional id of the ongoing request this belongs to'
     },
     guidance: MILLIE_IDENTITY_GUIDANCE,
-    successSummary: 'Message sent from Millie',
+    successSummary: 'Message sent from Adam',
     failureSummary: 'Message failed to send',
     confirmation: 'review_required',
     executionMode: 'review'
@@ -586,11 +586,11 @@ const ACTION_CONTRACTS = {
       since: 'ISO date — resolve relative wording ("last month", "since June") to a real date yourself',
       before: 'ISO date',
       category: 'only one of: clothes, groceries, tech, food, travel, subscriptions — omit unless the user actually asked by category',
-      sources: 'all (default) | email — only emailed receipts | millie — only orders placed through Millie',
+      sources: 'all (default) | email — only emailed receipts | adam — only orders placed through Adam',
       merchant: 'a merchant name or sender domain, e.g. "Nike" or "apple.com"',
       query: 'what the thing WAS, when the user remembers the item rather than the shop — e.g. "socks" for "what did that sock order cost?"'
     },
-    guidance: 'Use for "how much have I spent recently?", "what did I spend on Amazon last month?", "how much have I spent through Millie?" (sources:"millie"), "find that receipt" / "find my Apple receipt" (merchant), "what did that sock order cost?" (query:"socks" — use query, not merchant, when the user names the ITEM rather than the shop), "how much did that order cost?" and "what subscriptions or recurring charges are showing up in my email?". It searches the connected mailbox for real receipts, extracts merchant/date/total/order id/items only where the email genuinely states them, and combines that with orders Millie itself placed and saw confirmed. Relay the returned figure and its caveat TOGETHER — never state a total as if it were complete spending. There is no bank or card feed in this product, so card and cash purchases without an emailed receipt are genuinely invisible; if the user asks for total spending, say that plainly rather than implying the number is everything. Records whose total could not be read from a labelled total line are counted separately and excluded from the sum — do not fill them in with a plausible number. Different currencies are never converted or added together. If a category question cannot be classified confidently, say which records were excluded rather than guessing what they were. Each result carries threadId/messageId for the source email, so "show me that receipt" can point at the real message.',
+    guidance: 'Use for "how much have I spent recently?", "what did I spend on Amazon last month?", "how much have I spent through Adam?" (sources:"adam"), "find that receipt" / "find my Apple receipt" (merchant), "what did that sock order cost?" (query:"socks" — use query, not merchant, when the user names the ITEM rather than the shop), "how much did that order cost?" and "what subscriptions or recurring charges are showing up in my email?". It searches the connected mailbox for real receipts, extracts merchant/date/total/order id/items only where the email genuinely states them, and combines that with orders Adam itself placed and saw confirmed. Relay the returned figure and its caveat TOGETHER — never state a total as if it were complete spending. There is no bank or card feed in this product, so card and cash purchases without an emailed receipt are genuinely invisible; if the user asks for total spending, say that plainly rather than implying the number is everything. Records whose total could not be read from a labelled total line are counted separately and excluded from the sum — do not fill them in with a plausible number. Different currencies are never converted or added together. If a category question cannot be classified confidently, say which records were excluded rather than guessing what they were. Each result carries threadId/messageId for the source email, so "show me that receipt" can point at the real message.',
     successSummary: 'Spend checked',
     failureSummary: 'Could not check your spending',
     confirmation: 'none',
@@ -917,7 +917,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref'],
-    inputExample: { project_ref: 'milgrain' },
+    inputExample: { project_ref: 'adam' },
     guidance: 'Inspect the configured isolated project for the current durable task. Use before editing or reporting project progress.',
     successSummary: 'Project status loaded',
     failureSummary: 'Project status unavailable',
@@ -928,7 +928,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref'],
-    inputExample: { project_ref: 'milgrain' },
+    inputExample: { project_ref: 'adam' },
     guidance: 'Inspect the current uncommitted diff in the isolated project. Never claim code changed without checking this.',
     successSummary: 'Project changes loaded',
     failureSummary: 'Project changes unavailable',
@@ -939,7 +939,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref', 'path', 'content'],
-    inputExample: { project_ref: 'milgrain', path: 'src/feature.js', content: 'code' },
+    inputExample: { project_ref: 'adam', path: 'src/feature.js', content: 'code' },
     guidance: 'Write text into the isolated task project only. The project reference must be configured by the user; never invent a project or use an absolute path.',
     successSummary: 'Project file saved',
     failureSummary: 'Project file save failed',
@@ -951,7 +951,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['project_ref'],
     optional: ['check'],
-    inputExample: { project_ref: 'milgrain', check: 'test|release' },
+    inputExample: { project_ref: 'adam', check: 'test|release' },
     paramHints: { check: 'test|release' },
     guidance: 'Run only the configured project check in the isolated task project. Use check=test by default and report failures honestly.',
     successSummary: 'Project check finished',
@@ -963,7 +963,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref', 'message'],
-    inputExample: { project_ref: 'milgrain', message: 'Add referral credit flow' },
+    inputExample: { project_ref: 'adam', message: 'Add referral credit flow' },
     guidance: 'Save the current isolated task changes as a local changeset after checking the diff. This does not publish or merge anything.',
     successSummary: 'Project changeset saved',
     failureSummary: 'Project changeset failed',
@@ -974,7 +974,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['project_ref'],
-    inputExample: { project_ref: 'milgrain' },
+    inputExample: { project_ref: 'adam' },
     guidance: 'Discard only uncommitted changes in the isolated task branch. This is destructive and requires explicit approval.',
     successSummary: 'Project changes rolled back',
     failureSummary: 'Project rollback failed',
@@ -985,7 +985,7 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'high',
     required: ['project_ref'],
-    inputExample: { project_ref: 'milgrain' },
+    inputExample: { project_ref: 'adam' },
     guidance: 'Publish a clean, committed isolated task branch to its configured remote. Never merge or push the default branch; always show the branch and require approval.',
     successSummary: 'Project branch synchronized',
     failureSummary: 'Project synchronization failed',

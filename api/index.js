@@ -458,7 +458,7 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
   // Raw body (not express.json()) is required here: signature verification is computed
   // over the exact bytes Resend sent, and any parse+re-serialize would change
   // whitespace/key order and silently break every signature.
-  const { verifyResendWebhookSignature, parseInboundPayload } = require('../connectors/millie-email-resend');
+  const { verifyResendWebhookSignature, parseInboundPayload } = require('../connectors/adam-email-resend');
   const rawBody = req.body.toString('utf8');
   const secret = process.env.RESEND_WEBHOOK_SECRET;
   if (!secret) {
@@ -509,7 +509,7 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
     const conversation = openConversations.length
       ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
       : (await getOrCreateConversation(supabase, {
-        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+        userId: identity.user_id, adamIdentityId: identity.id, participantId: participant.id
       })).conversation;
 
     const decision = classifyReply(normalized.body);
@@ -518,7 +518,7 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
       channelType: 'email',
       direction: 'inbound',
       participantAddressId: address.id,
-      millieIdentityHandleId: handle.id,
+      adamIdentityHandleId: handle.id,
       providerEventId: normalized.providerMessageId,
       subject: normalized.subject,
       body: normalized.body,
@@ -604,7 +604,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
     const conversation = openConversations.length
       ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
       : (await getOrCreateConversation(supabase, {
-        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+        userId: identity.user_id, adamIdentityId: identity.id, participantId: participant.id
       })).conversation;
 
     const decision = classifyReply(normalized.body);
@@ -613,7 +613,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
       channelType: 'phone_sms',
       direction: 'inbound',
       participantAddressId: address.id,
-      millieIdentityHandleId: handle.id,
+      adamIdentityHandleId: handle.id,
       providerEventId: normalized.providerMessageId,
       body: normalized.body,
       needsDecision: decision === 'ask',
@@ -636,7 +636,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
   }
 });
 
-// Millie's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
+// Adam's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
 app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
   if (expectedSecret && req.get('X-Telegram-Bot-Api-Secret-Token') !== expectedSecret) {
@@ -1862,7 +1862,7 @@ function isLifeBriefingRequest(message = '') {
     .trim()
     .replace(/[?]+$/, '')
     .trim();
-  return /^(?:millie\s+)?(?:what is important|whats important|what matters|anything important|what do i need to know)$/.test(normalized);
+  return /^(?:adam\s+)?(?:what is important|whats important|what matters|anything important|what do i need to know)$/.test(normalized);
 }
 
 function isPureContentGenerationTurn(message = '') {
@@ -2923,9 +2923,9 @@ function looksLikeMessageAddress(value) {
   return /^\+?[0-9][0-9\s().-]{5,}$/.test(text) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
 }
 
-// DB-backed daily send cap for Millie's own identity; unlike createRateLimiter it survives
+// DB-backed daily send cap for Adam's own identity; unlike createRateLimiter it survives
 // restarts and multiple machines. __testOverride injects the count so tests need no Supabase.
-async function countMillieSendsToday(userId, channelType) {
+async function countAdamSendsToday(userId, channelType) {
   const since = new Date();
   since.setUTCHours(0, 0, 0, 0);
   const { data: identities } = await supabase.from('millie_identities').select('id').eq('user_id', userId).limit(1);
@@ -2943,15 +2943,15 @@ async function countMillieSendsToday(userId, channelType) {
   return count || 0;
 }
 
-async function checkMillieSendCap(userId, channelType, countFn = countMillieSendsToday) {
+async function checkAdamSendCap(userId, channelType, countFn = countAdamSendsToday) {
   const cap = Number(process.env.MILLIE_DAILY_SEND_CAP) || 20;
   const sentToday = await countFn(userId, channelType);
   if (sentToday >= cap) {
-    return { allowed: false, message: `Millie has reached her sending limit for today (${cap}). Try again tomorrow.` };
+    return { allowed: false, message: `Adam has reached the sending limit for today (${cap}). Try again tomorrow.` };
   }
   return { allowed: true };
 }
-checkMillieSendCap.__testOverride = (countFn, userId, channelType) => checkMillieSendCap(userId, channelType, countFn);
+checkAdamSendCap.__testOverride = (countFn, userId, channelType) => checkAdamSendCap(userId, channelType, countFn);
 
 function resolveNativeMessageContact(contact, nativeHints) {
   if (looksLikeMessageAddress(contact)) {
@@ -3118,7 +3118,7 @@ async function executeAction(userId, action, params, context = {}) {
   return normalizeActionOutcome(result);
 }
 
-// Proactive outbound delivery, wired to the real senders. Everything Millie notices in the
+// Proactive outbound delivery, wired to the real senders. Everything Adam notices in the
 // background now becomes a durable notification_events row that a sweep tries to actually
 // deliver — rather than a briefing card the user only sees if they open the app.
 const notificationDelivery = createDeliveryRuntime({
@@ -3337,7 +3337,7 @@ async function saveMemory(userId, content, source = 'fact') {
 
 function parseExplicitMemoryRequest(text) {
   const match = String(text || '').trim().match(
-    /^(?:millie[,:]?\s+)?(?:please\s+)?remember(?:\s+that)?\s+(.+?)\s*[.!?]*$/i
+    /^(?:adam[,:]?\s+)?(?:please\s+)?remember(?:\s+that)?\s+(.+?)\s*[.!?]*$/i
   );
   if (!match) return null;
   const fact = match[1].trim();
@@ -4223,8 +4223,8 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
 
     log('info', 'auth.register', { userId });
 
-    require('./services/millie-identity').ensureMillieIdentity(supabase, userId, { attemptPhone: false })
-      .catch(err => log('warn', 'millie.provision.signup_failed', { userId, error: err.message }));
+    require('./services/adam-identity').ensureAdamIdentity(supabase, userId, { attemptPhone: false })
+      .catch(err => log('warn', 'adam.provision.signup_failed', { userId, error: err.message }));
 
     if (email) {
       try {
@@ -4246,9 +4246,9 @@ app.post('/millie/provision', async (req, res) => {
   try {
     const { userId } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
-    const { ensureMillieIdentity } = require('./services/millie-identity');
+    const { ensureAdamIdentity } = require('./services/adam-identity');
     const { provisionPhoneNumber } = require('../connectors/phone-provider');
-    const { identity, handles } = await ensureMillieIdentity(supabase, userId, {
+    const { identity, handles } = await ensureAdamIdentity(supabase, userId, {
       attemptPhone: true,
       provisionPhoneNumber
     });
@@ -4258,7 +4258,7 @@ app.post('/millie/provision', async (req, res) => {
       phone: handles.find(h => h.channel_type === 'phone_sms')?.handle_value || null
     });
   } catch (err) {
-    log('error', 'millie.provision.error', { error: err.message });
+    log('error', 'adam.provision.error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -4480,7 +4480,7 @@ app.post('/auth/forgot-password', forgotPasswordRateLimiter, async (req, res) =>
 app.get('/auth/reset-password', (req, res) => {
   const { token } = req.query;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!DOCTYPE html><html><head><title>Reset Password · Milgrain</title>
+  res.send(`<!DOCTYPE html><html><head><title>Reset Password · Adam</title>
   <style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px;color:#1a1a1a}
   h2{margin-bottom:8px}input{width:100%;padding:10px;margin:8px 0 16px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px;font-size:15px}
   button{width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:15px;cursor:pointer}</style>
@@ -8734,7 +8734,7 @@ function legalPage(title, body) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} · Milgrain</title>
+  <title>${escapeHtml(title)} · Adam</title>
   <style>
     body{margin:0;background:#0b0b0c;color:#f4f0ec;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     main{max-width:760px;margin:0 auto;padding:48px 20px 72px}
@@ -8755,7 +8755,7 @@ app.get('/privacy', (_req, res) => {
     <h1>Privacy Policy</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <h2>Data Controller</h2>
-    <p>Milgrain is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
+    <p>Adam is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
     <h2>What We Collect</h2>
     <ul>
       <li>Chat messages and conversation history</li>
@@ -8766,7 +8766,7 @@ app.get('/privacy', (_req, res) => {
       <li>Calendar and reminder data (when calendar permission is granted)</li>
       <li>Email content (when Gmail connector is connected)</li>
       <li>OAuth tokens for connected services</li>
-      <li>Memories you ask Milgrain to keep, plus stable facts inferred from conversations</li>
+      <li>Memories you ask Adam to keep, plus stable facts inferred from conversations</li>
     </ul>
     <h2>How We Use It</h2>
     <ul>
@@ -8790,7 +8790,7 @@ app.get('/privacy', (_req, res) => {
     <h2>Your Rights</h2>
     <p>You have the right to access, rectification, erasure, portability, restriction, and objection. To exercise these rights, email <a href="mailto:support@oxy.app">support@oxy.app</a>.</p>
     <h2>Security Incidents</h2>
-    <p>If a data breach affects your account, Milgrain will notify you within 72 hours of confirming the incident where legally required.</p>
+    <p>If a data breach affects your account, Adam will notify you within 72 hours of confirming the incident where legally required.</p>
     <h2>Contact</h2>
     <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   `));
@@ -8802,19 +8802,19 @@ app.get('/terms', (_req, res) => {
     <h1>Terms of Service</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <h2>The Service</h2>
-    <p>Milgrain is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
+    <p>Adam is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
     <h2>Acceptable Use</h2>
     <ul>
-      <li>No illegal activity using Milgrain or connected services</li>
+      <li>No illegal activity using Adam or connected services</li>
       <li>No abuse of connected services (e.g. sending spam)</li>
       <li>No attempts to circumvent safety measures or extract training data</li>
     </ul>
     <h2>Subscription</h2>
-    <p>Milgrain costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
+    <p>Adam costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
     <h2>Refund Policy</h2>
     <p>You have a 14-day cooling-off period for new subscriptions under the UK Consumer Contracts Regulations 2013. Contact <a href="mailto:support@oxy.app">support@oxy.app</a> to request a refund within this period.</p>
     <h2>Limitation of Liability</h2>
-    <p>Milgrain is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Milgrain's responses. Always verify important information independently.</p>
+    <p>Adam is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Adam's responses. Always verify important information independently.</p>
     <h2>Governing Law</h2>
     <p>These terms are governed by the laws of England and Wales.</p>
     <h2>Contact</h2>
@@ -8824,16 +8824,16 @@ app.get('/terms', (_req, res) => {
 
 app.get('/support', (_req, res) => {
   res.setHeader('Content-Type', 'text/html');
-  res.send(`<!DOCTYPE html><html><head><title>Milgrain Support</title>
+  res.send(`<!DOCTYPE html><html><head><title>Adam Support</title>
   <style>body{font-family:sans-serif;max-width:680px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}h1{font-size:28px}h2{font-size:20px;margin-top:32px}a{color:#2563eb}.faq{background:#f9f9f9;padding:16px;border-radius:8px;margin:12px 0}</style>
   </head><body>
-  <h1>Milgrain Support</h1>
+  <h1>Adam Support</h1>
   <p><strong>Email:</strong> <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   <p>We aim to respond within 48 hours. For security issues: <a href="mailto:security@oxy.app">security@oxy.app</a></p>
 
   <h2>Delete Your Data</h2>
   <ol>
-    <li>Open Milgrain and go to Settings</li>
+    <li>Open Adam and go to Settings</li>
     <li>Scroll to "Danger Zone" at the bottom</li>
     <li>Tap "Delete Account" and follow the confirmation steps</li>
     <li>All your data (messages, memories, connected accounts) will be permanently deleted</li>
@@ -8841,8 +8841,8 @@ app.get('/support', (_req, res) => {
   <p>Alternatively, email <a href="mailto:support@oxy.app">support@oxy.app</a> with the subject "Delete my account" from your registered email address.</p>
 
   <h2>Frequently Asked Questions</h2>
-  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Milgrain only accesses your email when you ask it to.</div>
-  <div class="faq"><strong>What does Milgrain remember?</strong><br>Milgrain extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
+  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Adam only accesses your email when you ask it to.</div>
+  <div class="faq"><strong>What does Adam remember?</strong><br>Adam extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
   <div class="faq"><strong>Can I cancel my subscription?</strong><br>Yes, anytime. Cancel from Settings &rarr; Subscription or via your App Store/payment provider. You have 14 days from first purchase for a full refund (UK consumer law).</div>
   <div class="faq"><strong>Is my data secure?</strong><br>Your data is stored in encrypted databases. Connector tokens are encrypted at rest. We never sell your data. See our <a href="/privacy">Privacy Policy</a>.</div>
   <div class="faq"><strong>How do I report a bug?</strong><br>Email <a href="mailto:support@oxy.app">support@oxy.app</a> with your device, app version (visible in Settings), and what happened.</div>
@@ -8893,10 +8893,10 @@ app.post('/admin/cleanup-conversations', async (req, res) => {
 app.get('/install-shortcut', (_req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const filePath = path.join(__dirname, '..', 'Milgrain.shortcut');
+  const filePath = path.join(__dirname, '..', 'Adam.shortcut');
   if (fs.existsSync(filePath)) {
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="Milgrain.shortcut"');
+    res.setHeader('Content-Disposition', 'attachment; filename="Adam.shortcut"');
     res.sendFile(filePath);
   } else {
     res.status(404).json({ error: 'Shortcut file not found' });
@@ -9075,7 +9075,7 @@ function displayBearerToken(req) {
 function displayPageHtml() {
   return [
     '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">',
-    '<title>Milgrain display</title><style>',
+    '<title>Adam display</title><style>',
     'body{margin:0;background:#111;color:#f5f1ec;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}',
     'main{min-height:100vh;display:grid;place-items:center;padding:8vw;box-sizing:border-box}',
     'section{width:min(720px,100%)}h1{font-size:clamp(28px,6vw,64px);margin:0 0 18px}',
@@ -9089,8 +9089,8 @@ function displayPageHtml() {
     'const params=new URLSearchParams(location.search);',
     'const savedId=localStorage.getItem("milgrain_display_id");',
     'const savedToken=localStorage.getItem("milgrain_display_token");',
-    'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Milgrain.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
-    'function renderEvent(event){app.innerHTML="<p class=\\"muted\\">Milgrain</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Adam.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
+    'function renderEvent(event){app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
     'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){renderPair();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");renderPair();return}if(!response.ok)return;const data=await response.json();if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
     'if(savedId&&savedToken)poll();else renderPair();setInterval(poll,2000);',
     '</script></body></html>'
@@ -9347,7 +9347,7 @@ app.get('/agent/scheduled-tasks', requireSessionAuth, async (req, res) => {
       }))
     });
   } catch (e) {
-    res.status(500).json({ error: 'Could not load what Millie is watching.' });
+    res.status(500).json({ error: 'Could not load what Adam is watching.' });
   }
 });
 
@@ -9961,7 +9961,7 @@ app.post('/workflows/:id/checkpoints/:checkpointId/resolve', requireSessionAuth,
   }
 });
 
-// Files Millie has read or made. Until now nothing in the app could show that a document
+// Files Adam has read or made. Until now nothing in the app could show that a document
 // existed at all, let alone open one.
 app.get('/documents', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
@@ -10057,7 +10057,7 @@ const actionDeps = {
   // Built from env at module scope and null when Stripe is unconfigured, so it is handed
   // over rather than rebuilt -- a second client would not see that null.
   stripeClient,
-  checkMillieSendCap,
+  checkAdamSendCap,
   looksLikeMessageAddress,
   resolveNativeMessageContact,
   emailTriageSignals,
@@ -10132,8 +10132,7 @@ module.exports.buildQuickTurnContext = buildQuickTurnContext;
 module.exports.buildBackgroundSystemPrompt = buildBackgroundSystemPrompt;
 module.exports.buildChatContext = buildChatContext;
 module.exports.buildMorningBriefing = buildMorningBriefing;
-module.exports.buildIntervalBriefing = buildIntervalBriefing;
-module.exports.checkMillieSendCap = checkMillieSendCap;
+module.exports.checkAdamSendCap = checkAdamSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
 module.exports.delegatedRunLifecycle = delegatedRunLifecycle;
 module.exports.delegatedRunRouteHandlers = delegatedRunRouteHandlers;

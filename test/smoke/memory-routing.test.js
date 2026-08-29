@@ -21,7 +21,7 @@ test('specific memory statements use durable action contracts', () => {
 
 test('explicit memory requests keep the useful fact and remove the command', () => {
   assert.equal(
-    parseExplicitMemoryRequest('Millie, remember that my usual station is Birmingham New Street.'),
+    parseExplicitMemoryRequest('Adam, remember that my usual station is Birmingham New Street.'),
     'my usual station is Birmingham New Street'
   );
   assert.equal(

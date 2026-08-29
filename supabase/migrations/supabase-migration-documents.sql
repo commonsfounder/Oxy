@@ -44,7 +44,7 @@ create table documents (
 
   source text not null check (source in ('upload', 'email_attachment', 'browser_download', 'generated')),
   -- Where it actually came from: the URL it was downloaded from, the provider message id
-  -- it was attached to. Provenance is what lets Millie answer "why do I have this file",
+  -- it was attached to. Provenance is what lets Adam answer "why do I have this file",
   -- which matters more for a file than for a chat message.
   source_ref text,
 

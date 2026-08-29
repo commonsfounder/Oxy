@@ -40,7 +40,7 @@ function fakeSupabase() {
 test('getOrCreateConversation creates a new open conversation for a new participant', async () => {
   const supabase = fakeSupabase();
   const { conversation, created } = await getOrCreateConversation(supabase, {
-    userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1'
+    userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1'
   });
   assert.equal(created, true);
   assert.equal(conversation.status, 'open');
@@ -49,8 +49,8 @@ test('getOrCreateConversation creates a new open conversation for a new particip
 
 test('getOrCreateConversation reuses the existing open conversation for the same participant+request', async () => {
   const supabase = fakeSupabase();
-  const first = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
-  const second = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
+  const first = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
+  const second = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
   assert.equal(second.created, false);
   assert.equal(second.conversation.id, first.conversation.id);
 });
@@ -60,7 +60,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
   process.env.OXY_TOKEN_ENCRYPTION_KEY = 'a'.repeat(64); // 32-byte hex
   try {
     const supabase = fakeSupabase();
-    const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1' });
+    const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1' });
     await appendEvent(supabase, {
       conversationId: conversation.id,
       channelType: 'email',
@@ -85,7 +85,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
     assert.equal(events[1].needs_decision, true);
 
     // Not read by anything yet, but must be tracked from day one — a future follow-up
-    // scheduler needs to know when Millie last sent vs. last heard back, separately.
+    // scheduler needs to know when Adam last sent vs. last heard back, separately.
     const updatedConversation = supabase._state.external_conversations.find(c => c.id === conversation.id);
     assert.ok(updatedConversation.last_outbound_at, 'last_outbound_at must be set after an outbound event');
     assert.ok(updatedConversation.last_inbound_at, 'last_inbound_at must be set after an inbound event');
@@ -97,7 +97,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
 
 test('findOpenConversationsForParticipant returns only open/awaiting_reply conversations', async () => {
   const supabase = fakeSupabase();
-  const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-2' });
+  const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-2' });
   const open = await findOpenConversationsForParticipant(supabase, 'p-2');
   assert.equal(open.length, 1);
   assert.equal(open[0].id, conversation.id);

@@ -48,12 +48,12 @@ test('artifact rows are bounded and never include file contents', () => {
     sessionId: 'session-1',
     taskId: 'task-1',
     kind: 'file',
-    path: 'projects/milgrain/brief.md',
-    title: 'Milgrain brief',
+    path: 'projects/adam/brief.md',
+    title: 'Adam brief',
     summary: 'Created the project brief.',
     content: 'This must never be stored in the artifact receipt.'
   });
-  assert.equal(row.path, 'projects/milgrain/brief.md');
+  assert.equal(row.path, 'projects/adam/brief.md');
   assert.equal(row.content, undefined);
   assert.ok(row.summary.length <= 600);
 });

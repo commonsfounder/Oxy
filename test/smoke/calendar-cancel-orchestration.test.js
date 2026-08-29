@@ -70,9 +70,9 @@ function event(id, title, opts = {}) {
 }
 
 // ── Resolution ─────────────────────────────────────────────────────────────────────────
-test('cancelling by title deletes the real event, not a Millie-side hide', async () => {
-  installFakeCalendar([event('e1', 'Millie test block')]);
-  const result = await app.executeAction(USER_ID, 'cancel_calendar_event', { title: 'Millie test' });
+test('cancelling by title deletes the real event, not a Adam-side hide', async () => {
+  installFakeCalendar([event('e1', 'Adam test block')]);
+  const result = await app.executeAction(USER_ID, 'cancel_calendar_event', { title: 'Adam test' });
   assert.equal(result.success, true);
   assert.equal(result.eventId, 'e1');
   assert.deepEqual(calendar.deleted, ['e1']);

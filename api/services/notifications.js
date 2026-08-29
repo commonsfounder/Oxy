@@ -218,7 +218,7 @@ function formatNotificationEmail(event) {
   const body = clean(event.body, 1500);
   return {
     subject: title,
-    text: `${body}\n\n— Millie\n\nYou're getting this because you asked to be told about ${normalizeCategory(event.category).replace('_', ' ')} updates. Reply "stop <category>" or change it in the app.`
+    text: `${body}\n\n— Adam\n\nYou're getting this because you asked to be told about ${normalizeCategory(event.category).replace('_', ' ')} updates. Reply "stop <category>" or change it in the app.`
   };
 }
 

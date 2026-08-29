@@ -4,7 +4,7 @@ const test = require('node:test');
 const { resolveTaskReference } = require('../../api/services/task-context');
 
 const tasks = [
-  { id: 'website', goal: 'Build the Milgrain website landing page', status: 'paused', updated_at: '2026-08-05T09:00:00Z' },
+  { id: 'website', goal: 'Build the Adam website landing page', status: 'paused', updated_at: '2026-08-05T09:00:00Z' },
   { id: 'flights', goal: 'Watch for cheaper flights to Turkey', status: 'paused', updated_at: '2026-08-05T10:00:00Z' }
 ];
 

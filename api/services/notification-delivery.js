@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // flight. Real sends take seconds; this is generous, because reclaiming early duplicates a send.
 const CLAIM_STALE_MS = 5 * 60 * 1000;
 
-// Which transport carries an email. Resend goes first when configured, sending from Millie's own
+// Which transport carries an email. Resend goes first when configured, sending from Adam's own
 // identity; otherwise a connected Google account already grants messages.send, so delivery works
 // with no extra credential. That path leaves the user's own mailbox, so it only ever reaches them.
 function resolveEmailProvider({ env = process.env, mailboxCanSend = false } = {}) {

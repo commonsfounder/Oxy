@@ -27,7 +27,7 @@ test/bench/baseline-*.json
 # Dev e2e runs — screenshots/results can contain real checkout PII
 test/dev/e2e-run-*/
 test/dev/jl-e2e-shots/
-test/dev/milgrain-benchmark-*.json
+test/dev/adam-benchmark-*.json
 test/dev/remaining8-run-*/
 
 # Scratchpad — local prod drivers / throwaway harnesses (may read prod secrets)

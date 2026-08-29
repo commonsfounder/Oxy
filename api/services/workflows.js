@@ -7,6 +7,9 @@
 // company, or moving from the browser to email must none of them lose the thread, which is why
 // browser state is a JSON column describing where we got to and never a live handle.
 //
+// `actor` is stored as 'millie' — a live CHECK constraint over existing rows, not a label
+// anyone reads. Changing it needs a migration plus a backfill.
+//
 // One shape for every kind of work — goal, documents, correspondence, checkpoints, deadline,
 // evidence. `type` is a presentation label, never a branch.
 
@@ -47,7 +50,7 @@ async function updateWorkflow(supabase, userId, workflowId, patch = {}, { summar
     next.closed_at = new Date().toISOString();
   }
   // Reopening: a workflow that comes back to life must not keep a closed_at, or "what did
-  // Millie finish" starts counting things that are still running.
+  // Adam finish" starts counting things that are still running.
   if (patch.status && ACTIVE_STATUSES.includes(patch.status) && before.closed_at) {
     next.closed_at = null;
   }

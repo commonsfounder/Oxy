@@ -72,7 +72,7 @@ the webhook's atomic claim-and-clear already do the right thing; the client is j
 
 ## iOS: Payments screen
 
-New entry in `MainTabView.MoreDestination` (`case payments`), added to the "Milgrain" menu
+New entry in `MainTabView.MoreDestination` (`case payments`), added to the "Adam" menu
 group next to Pendant and Connections:
 `AppRow(title: "Payments", subtitle: <dynamic status>)` — subtitle shows "Visa •••• 4242" when
 linked, "No card linked" otherwise (same convention as the Connections row's capability

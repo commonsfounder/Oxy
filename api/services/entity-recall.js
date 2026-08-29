@@ -7,7 +7,7 @@ const THAT_PATTERN = /\bthat (\w+)\b/i;
 
 // The dominant real shape a shopping follow-up takes — "add it to my basket", "order that",
 // "how much is it" — has no noun for the two patterns above to capture at all: the product was
-// already named by Millie one turn ago, so the user just says "it". Scoped tightly to a
+// already named by Adam one turn ago, so the user just says "it". Scoped tightly to a
 // commerce action verb or an explicit price question (the same order-intent vocabulary
 // ORDER_GOAL_PATTERN in browser-task.js already uses) so an unrelated "it" — "what time is
 // it", "is it going to rain" — never resolves to a stale product.

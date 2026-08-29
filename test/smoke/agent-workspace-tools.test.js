@@ -64,7 +64,7 @@ test('workspace_write persists through to the workspace service', async (t) => {
 
 test('workspace_write records a bounded artifact for a durable runtime session', async (t) => {
   t.after(restore);
-  agentWorkspace.writeWorkspaceFile = async () => ({ id: 'file-1', path: 'projects/milgrain/brief.md', version: 3 });
+  agentWorkspace.writeWorkspaceFile = async () => ({ id: 'file-1', path: 'projects/adam/brief.md', version: 3 });
   const calls = [];
   agentRuntime.writeFileArtifact = async (_db, userId, input) => {
     calls.push({ userId, input });
@@ -75,7 +75,7 @@ test('workspace_write records a bounded artifact for a durable runtime session',
   };
 
   const result = await executeAction('user-1', 'workspace_write', {
-    path: 'projects/milgrain/brief.md',
+    path: 'projects/adam/brief.md',
     content: 'private project content'
   }, { runtimeSessionId: 'session-1', persistedTaskId: 'task-1' });
 

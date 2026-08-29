@@ -83,7 +83,7 @@ function configuredProject(projectRef) {
   const catalog = parseProjectCatalog();
   const config = catalog[ref];
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    throw new Error(`Project "${ref}" is not configured for Millie.`);
+    throw new Error(`Project "${ref}" is not configured for Adam.`);
   }
   const source = String(config.source || '').trim();
   if (!source) throw new Error(`Project "${ref}" has no configured source.`);
@@ -343,8 +343,8 @@ async function commitProjectChanges(userId, taskId, projectRef, message) {
   const staged = await run('git', ['add', '--all', '--', '.'], workspace.root);
   if (staged.code !== 0) throw new Error(`Could not stage ${workspace.displayName}: ${cleanText(staged.stderr, 'git add failed')}`);
   const committed = await run('git', [
-    '-c', 'user.name=Millie',
-    '-c', 'user.email=millie@oxy.local',
+    '-c', 'user.name=Adam',
+    '-c', 'user.email=adam@oxy.local',
     '-c', 'core.hooksPath=/dev/null',
     'commit', '--message', commitMessage
   ], workspace.root, 60_000);

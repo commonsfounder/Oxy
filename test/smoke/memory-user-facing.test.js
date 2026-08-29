@@ -45,7 +45,7 @@ test('classifies identity/work/relationship/goal statements as durable profile f
   assert.equal(isDurableProfileFact('I work at KPMG'), true);
   assert.equal(isDurableProfileFact('I live in Birmingham'), true);
   assert.equal(isDurableProfileFact('My wife is called Sam'), true);
-  assert.equal(isDurableProfileFact("I'm building a startup called Milgrain"), true);
+  assert.equal(isDurableProfileFact("I'm building a startup called Adam"), true);
   assert.equal(isDurableProfileFact('Working on the auth flow this week'), true);
 });
 

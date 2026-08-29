@@ -35,14 +35,14 @@ test('clear outbound requests reach the review-gated action with bounded inputs'
     actions: [{ type: 'send_message', input: { contact: 'Alex', message: 'I am running ten minutes late.' } }]
   });
   assert.deepEqual(inferOutboundCommunicationAction('Text the courier company and ask where my delivery is.'), {
-    reason: 'send_millie_sms',
+    reason: 'send_adam_sms',
     spoken: 'I’ll prepare that message for review.',
-    actions: [{ type: 'send_millie_sms', input: { to: 'the courier company', body: 'where my delivery is.' } }]
+    actions: [{ type: 'send_adam_sms', input: { to: 'the courier company', body: 'where my delivery is.' } }]
   });
   assert.deepEqual(inferOutboundCommunicationAction('Email the restaurant and ask whether they can move our booking to 8pm.'), {
-    reason: 'send_millie_email',
+    reason: 'send_adam_email',
     spoken: 'I’ll prepare that message for review.',
-    actions: [{ type: 'send_millie_email', input: { to: 'the restaurant', body: 'whether they can move our booking to 8pm.' } }]
+    actions: [{ type: 'send_adam_email', input: { to: 'the restaurant', body: 'whether they can move our booking to 8pm.' } }]
   });
   assert.deepEqual(inferOutboundCommunicationAction('Call the dentist and ask for their next available appointment.'), {
     reason: 'make_call',
@@ -82,8 +82,8 @@ test('a request to email a restaurant about a booking does not become a nearby-p
   );
 });
 
-test('"email the restaurant and ask if they can move us to 8" reaches Millie\'s review boundary', () => {
-  assert.equal(inferDeterministicAction('email the restaurant and ask if they can move us to 8').actions[0].type, 'send_millie_email');
+test('"email the restaurant and ask if they can move us to 8" reaches Adam\'s review boundary', () => {
+  assert.equal(inferDeterministicAction('email the restaurant and ask if they can move us to 8').actions[0].type, 'send_adam_email');
 });
 
 test('"text the restaurant" and "contact the restaurant" also defer, not just "email"', () => {
@@ -136,7 +136,7 @@ test('a bare place-category mention with no locating language defers, with no ex
 });
 
 test('clear flight price watches become bounded daily background checks', () => {
-  const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
+  const routed = inferDeterministicAction('Adam, watch flight prices to Turkey and tell me when a cheaper option appears');
   assert.equal(routed.reason, 'durable_price_watch');
   assert.equal(routed.actions[0].type, 'create_scheduled_task');
   assert.deepEqual(routed.actions[0].input, {
@@ -165,7 +165,7 @@ test('a one-time price check does not become a durable watch', () => {
 });
 
 test('clear watch cancellation becomes a safe stop action', () => {
-  const routed = inferDeterministicAction('Millie, stop watching flight prices to Turkey');
+  const routed = inferDeterministicAction('Adam, stop watching flight prices to Turkey');
   assert.equal(routed.reason, 'stop_durable_watch');
   assert.deepEqual(routed.actions, [{
     type: 'cancel_scheduled_task',
@@ -176,13 +176,13 @@ test('clear watch cancellation becomes a safe stop action', () => {
 
 test('an appointment request starts the appointment flow when a real provider is connected', () => {
   const routed = inferDeterministicAction(
-    'Millie, get me a dentist appointment next week after work',
+    'Adam, get me a dentist appointment next week after work',
     { appointmentProviderConnected: true }
   );
   assert.equal(routed.reason, 'appointment_booking');
   assert.deepEqual(routed.actions, [{
     type: 'find_appointment_options',
-    input: { request: 'Millie, get me a dentist appointment next week after work' }
+    input: { request: 'Adam, get me a dentist appointment next week after work' }
   }]);
 });
 
@@ -190,7 +190,7 @@ test('an appointment request starts the appointment flow when a real provider is
 // appointmentProviderConnected — routing to it regardless turns every real booking request into
 // a scripted dead end without the model getting a turn.
 test('an appointment request falls through to the model when no provider is connected (no options passed at all)', () => {
-  const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');
+  const routed = inferDeterministicAction('Adam, get me a dentist appointment next week after work');
   assert.equal(routed, null);
 });
 

@@ -31,7 +31,7 @@ async function ensureWorkspace(supabase, userId) {
     .maybeSingle();
   if (existing.data) return existing.data;
   const created = await supabase.from('agent_workspaces')
-    .insert({ user_id: userId, name: 'Millie workspace', metadata: {} })
+    .insert({ user_id: userId, name: 'Adam workspace', metadata: {} })
     .select('id, user_id, name, metadata, created_at, updated_at')
     .single();
   if (created.error) throw created.error;

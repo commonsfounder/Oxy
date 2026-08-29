@@ -195,7 +195,7 @@ test('label_emails marks a message read by removing UNREAD, verified against rea
 
 // Gmail's own labels are their own ids; every label the USER made is an opaque id like
 // Label_1, and the display name is rejected wherever a labelId is expected. This was found
-// against the real account: "label this Millie Test" failed 100% of the time while INBOX
+// against the real account: "label this Adam Test" failed 100% of the time while INBOX
 // worked, because every name was simply uppercased and passed through as an id.
 test('label_emails resolves a custom label name to its real Gmail id', async () => {
   seedMessage('m1', { labelIds: ['INBOX'] });

@@ -413,11 +413,11 @@ const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`;
 
-const output = fs.createWriteStream('Milgrain.shortcut');
+const output = fs.createWriteStream('Adam.shortcut');
 const archive = archiver('zip', { zlib: { level: 9 } });
 
 output.on('close', () => {
-  console.log('Created Milgrain.shortcut');
+  console.log('Created Adam.shortcut');
 });
 
 archive.pipe(output);

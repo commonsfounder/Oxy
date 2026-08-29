@@ -7,7 +7,7 @@
 // copies drift on a limit that exists to stop the agent messaging people repeatedly.
 
 async function sendMessage({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, checkMillieSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
+  const { supabase, checkAdamSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
   const contact = String(params?.contact || '').trim();
   const message = String(params?.message || '').trim();
   if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
@@ -35,7 +35,7 @@ async function sendMessage({ userId, action, params, enrichedParams, context, de
   if (!resolvedContact.value) {
     return {
       success: false,
-      error: `I need a phone number for ${contact}. Turn on Contacts access for Milgrain or include the number.`
+      error: `I need a phone number for ${contact}. Turn on Contacts access for Adam or include the number.`
     };
   }
   return {
@@ -49,36 +49,36 @@ async function sendMessage({ userId, action, params, enrichedParams, context, de
   };
 }
 
-async function sendMillieEmail({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, checkMillieSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
+async function sendAdamEmail({ userId, action, params, enrichedParams, context, deps, helpers }) {
+  const { supabase, checkAdamSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
   const to = String(params?.to || '').trim();
   const body = String(params?.body || '').trim();
-  if (!to || !body) return { success: false, error: 'send_millie_email requires a recipient and a message' };
+  if (!to || !body) return { success: false, error: 'send_adam_email requires a recipient and a message' };
   if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(to)) {
     return { success: false, error: `I need ${to}'s email address — that doesn't look like one.` };
   }
 
-  const { ensureMillieIdentity, getActiveHandle } = require('../services/millie-identity');
+  const { ensureAdamIdentity, getActiveHandle } = require('../services/adam-identity');
   const { findOrCreateParticipant } = require('../services/participants');
   const { getOrCreateConversation, appendEvent } = require('../services/external-conversations');
-  const { sendMillieEmail } = require('../../connectors/millie-email-resend');
+  const { sendAdamEmail } = require('../../connectors/adam-email-resend');
 
-  const cap = await checkMillieSendCap(userId, 'email');
+  const cap = await checkAdamSendCap(userId, 'email');
   if (!cap.allowed) return { success: false, error: cap.message };
 
-  const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+  const { identity, handles } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
   const emailHandle = handles.find(h => h.channel_type === 'email') || await getActiveHandle(supabase, userId, 'email');
-  if (!emailHandle) return { success: false, error: 'Millie does not have an email address set up yet.' };
+  if (!emailHandle) return { success: false, error: 'Adam does not have an email address set up yet.' };
 
   const { participant, address } = await findOrCreateParticipant(supabase, userId, {
     displayName: to, channelType: 'email', addressValue: to
   });
   const requestTaskId = params?.request_task_id || null;
   const { conversation } = await getOrCreateConversation(supabase, {
-    userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+    userId, adamIdentityId: identity.id, participantId: participant.id, requestTaskId
   });
 
-  const subject = String(params?.subject || '').trim() || 'A message from Millie';
+  const subject = String(params?.subject || '').trim() || 'A message from Adam';
 
   // Attachments are resolved by document id only — never by filename. See
   // document-attachments.js for why: a fuzzy name match is one step from emailing
@@ -101,7 +101,7 @@ async function sendMillieEmail({ userId, action, params, enrichedParams, context
 
   let sendResult;
   try {
-    sendResult = await sendMillieEmail({ from: emailHandle.handle_value, to, subject, body, attachments });
+    sendResult = await sendAdamEmail({ from: emailHandle.handle_value, to, subject, body, attachments });
   } catch (err) {
     return { success: false, error: `Couldn't send that: ${err.message}` };
   }
@@ -111,7 +111,7 @@ async function sendMillieEmail({ userId, action, params, enrichedParams, context
     channelType: 'email',
     direction: 'outbound',
     participantAddressId: address.id,
-    millieIdentityHandleId: emailHandle.id,
+    adamIdentityHandleId: emailHandle.id,
     providerEventId: sendResult.providerMessageId,
     subject,
     body
@@ -121,8 +121,8 @@ async function sendMillieEmail({ userId, action, params, enrichedParams, context
   return {
     success: true,
     text: attachmentNames.length
-      ? `Sent to ${to} from Millie's email, with ${attachmentNames.join(', ')}.`
-      : `Sent to ${to} from Millie's email.`,
+      ? `Sent to ${to} from Adam's email, with ${attachmentNames.join(', ')}.`
+      : `Sent to ${to} from Adam's email.`,
     // Every filename is named on the card: the review gate is the last place a wrong
     // attachment can be caught by a human, so it must not be summarised away.
     cardText: `To ${to} · ${body}${attachmentNames.length ? ` · Attaching: ${attachmentNames.join(', ')}` : ''}`,
@@ -131,33 +131,33 @@ async function sendMillieEmail({ userId, action, params, enrichedParams, context
   };
 }
 
-async function sendMillieSms({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, checkMillieSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
+async function sendAdamSms({ userId, action, params, enrichedParams, context, deps, helpers }) {
+  const { supabase, checkAdamSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
   const to = String(params?.to || '').trim();
   const body = String(params?.body || '').trim();
-  if (!to || !body) return { success: false, error: 'send_millie_sms requires a recipient phone number and a message' };
+  if (!to || !body) return { success: false, error: 'send_adam_sms requires a recipient phone number and a message' };
   if (!looksLikeMessageAddress(to)) {
     return { success: false, error: `I need a phone number for ${to} — that doesn't look like one.` };
   }
 
-  const { ensureMillieIdentity, getActiveHandle } = require('../services/millie-identity');
+  const { ensureAdamIdentity, getActiveHandle } = require('../services/adam-identity');
   const { findOrCreateParticipant } = require('../services/participants');
   const { getOrCreateConversation, appendEvent } = require('../services/external-conversations');
   const { sendSms } = require('../../connectors/phone-provider');
 
-  const cap = await checkMillieSendCap(userId, 'phone_sms');
+  const cap = await checkAdamSendCap(userId, 'phone_sms');
   if (!cap.allowed) return { success: false, error: cap.message };
 
-  const { identity } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+  const { identity } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
   const phoneHandle = await getActiveHandle(supabase, userId, 'phone_sms');
-  if (!phoneHandle) return { success: false, error: 'Millie does not have a phone number set up yet.' };
+  if (!phoneHandle) return { success: false, error: 'Adam does not have a phone number set up yet.' };
 
   const { participant, address } = await findOrCreateParticipant(supabase, userId, {
     displayName: to, channelType: 'phone_sms', addressValue: to
   });
   const requestTaskId = params?.request_task_id || null;
   const { conversation } = await getOrCreateConversation(supabase, {
-    userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+    userId, adamIdentityId: identity.id, participantId: participant.id, requestTaskId
   });
 
   let sendResult;
@@ -174,14 +174,14 @@ async function sendMillieSms({ userId, action, params, enrichedParams, context, 
     channelType: 'phone_sms',
     direction: 'outbound',
     participantAddressId: address.id,
-    millieIdentityHandleId: phoneHandle.id,
+    adamIdentityHandleId: phoneHandle.id,
     providerEventId: sendResult.providerMessageId,
     body
   });
 
   return {
     success: true,
-    text: `Sent to ${to} from Millie's number.`,
+    text: `Sent to ${to} from Adam's number.`,
     cardText: `To ${to} · ${body}`,
     actionSummary: 'Message sent',
     conversationId: conversation.id
@@ -189,7 +189,7 @@ async function sendMillieSms({ userId, action, params, enrichedParams, context, 
 }
 
 async function makeCall({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, checkMillieSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
+  const { supabase, checkAdamSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
   const contact = String(params?.contact || '').trim();
   if (!contact) return { success: false, error: 'make_call requires a contact' };
   return {
@@ -204,8 +204,8 @@ async function makeCall({ userId, action, params, enrichedParams, context, deps,
 module.exports = {
   handlers: {
     send_message: sendMessage,
-    send_millie_email: sendMillieEmail,
-    send_millie_sms: sendMillieSms,
+    send_adam_email: sendAdamEmail,
+    send_adam_sms: sendAdamSms,
     make_call: makeCall
   }
 };

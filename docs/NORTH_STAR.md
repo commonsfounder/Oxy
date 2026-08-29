@@ -30,7 +30,7 @@ software work comes first.
    - Over-the-air firmware updates.
 
 2. **Agent Operating System**
-   - Persistent agent identity: Millie.
+   - Persistent agent identity: Adam.
    - Long-term memory.
    - User profile and preferences.
    - Goals.
@@ -87,7 +87,7 @@ software work comes first.
    - Monitoring.
    - Follow-ups.
    - Notifications.
-   - Example: Millie checks flight prices on a schedule and alerts the user when she finds a better option.
+   - Example: Adam checks flight prices on a schedule and alerts the user when she finds a better option.
 
 10. **Voice Intelligence**
     - Natural conversation.
@@ -104,7 +104,7 @@ software work comes first.
     - Laptop companion.
     - Car integration.
     - Wearable.
-    - The same Millie identity everywhere.
+    - The same Adam identity everywhere.
 
 12. **Security and Trust**
     - Encryption.
@@ -153,7 +153,7 @@ report taken on trust.
    (`agent_runtime_approvals`) now backs this in production, verified with a real
    write today. A permission-policy and audit-log screen ("Trust") is now reachable
    from Settings. Coverage across every action type is not audited.
-9. **Agent Execution Engine — Partly built.** Background watches ("Millie is
+9. **Agent Execution Engine — Partly built.** Background watches ("Adam is
    watching…") now surface as real cards on Home and in the task list, not just
    backend state. Dependable follow-through and notifications across a full week of
    real use is not proven.
@@ -171,7 +171,7 @@ report taken on trust.
 
 ## Core outcome
 
-The user can ask Millie, “What matters?” She knows their emails, calendar,
+The user can ask Adam, “What matters?” She knows their emails, calendar,
 projects, goals, and ongoing tasks. The user can ask her to handle a request,
 negotiate with someone, and create follow-up tasks while they carry on with life.
 
@@ -188,8 +188,8 @@ Every screen must pass this test:
 
 Use human outcomes as the main language:
 
-- “Millie is watching this.”
-- “Millie handled this.”
+- “Adam is watching this.”
+- “Adam handled this.”
 - “This needs your OK.”
 - “Here is what matters today.”
 

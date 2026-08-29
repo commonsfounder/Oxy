@@ -1,4 +1,4 @@
-// Shared language for text that can reach the person using Millie.
+// Shared language for text that can reach the person using Adam.
 // Provider names, action ids, and server errors stay behind this boundary.
 
 const ACTION_NAMES = Object.freeze({
@@ -10,8 +10,8 @@ const ACTION_NAMES = Object.freeze({
   search_outlook_emails: 'Email',
   send_message: 'Message',
   send_telegram: 'Message',
-  send_millie_email: 'Message',
-  send_millie_sms: 'Message',
+  send_adam_email: 'Message',
+  send_adam_sms: 'Message',
   make_call: 'Call',
   create_reminder: 'Reminder',
   update_reminder: 'Reminder',
@@ -117,15 +117,15 @@ function formatActionFailure(action, rawError = '') {
 function formatProviderFailure(rawError = '') {
   const error = String(rawError || '').replace(/\s+/g, ' ').trim();
   if (/\b(?:401|403)\b|incorrect api key|invalid api key|authentication failed|not authorised|not authorized/i.test(error)) {
-    return 'Millie is unavailable right now. Try again later.';
+    return 'Adam is unavailable right now. Try again later.';
   }
   if (/\b(?:404)\b.*model|model.*(?:not found|does not exist|not available)|unsupported model|does not support this model/i.test(error)) {
-    return 'Millie needs a model connection before she can answer. Try again later.';
+    return 'Adam needs a model connection before answering. Try again later.';
   }
   if (/timeout|timed out|aborted|deadline exceeded/i.test(error)) {
     return 'That took too long. Try again.';
   }
-  return 'Millie could not answer right now. Try again later.';
+  return 'Adam could not answer right now. Try again later.';
 }
 
 function approvalTitle(action) {

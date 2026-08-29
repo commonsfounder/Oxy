@@ -28,7 +28,7 @@ struct RoutinesListView: View {
                         Group {
                             VStack(alignment: .leading, spacing: 20) {
                                 if composerExpanded {
-                                    MilgrainSectionHeader(title: "New Routine")
+                                    SettingsSectionHeader(title: "New Routine")
                                     composer
                                 } else {
                                     Button {
@@ -38,10 +38,10 @@ struct RoutinesListView: View {
                                     } label: {
                                         HStack(spacing: 12) {
                                             AppIcon("plus", size: 14)
-                                                .foregroundStyle(Color.mgSecondary)
+                                                .foregroundStyle(Color.appMuted)
                                             Text("Add a routine…")
                                                 .font(.appBody(15))
-                                                .foregroundStyle(Color.mgSecondary)
+                                                .foregroundStyle(Color.appMuted)
                                             Spacer(minLength: 0)
                                         }
                                         .padding(.vertical, 14)
@@ -53,18 +53,18 @@ struct RoutinesListView: View {
                             .padding(.top, 12)
                             .padding(.bottom, composerExpanded ? 36 : 24)
 
-                            MilgrainSectionHeader(title: "Saved Routines")
+                            SettingsSectionHeader(title: "Saved Routines")
                                 .padding(.bottom, 12)
 
                             if isLoading {
                                 ForEach(0..<3, id: \.self) { _ in
                                     OxySkeletonCard(height: 44, cornerRadius: 0)
-                                    MilgrainDivider()
+                                    SettingsDivider()
                                 }
                             } else if routines.isEmpty {
                                 Text("No routines yet.")
                                     .font(.appBody(14))
-                                    .foregroundStyle(Color.mgSecondary)
+                                    .foregroundStyle(Color.appMuted)
                                     .padding(.vertical, 20)
                             }
                         }
@@ -83,10 +83,10 @@ struct RoutinesListView: View {
                                     } label: {
                                         Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
                                     }
-                                    .tint(Color.mgDestructive)
+                                    .tint(Color.appDestructive)
                                 }
 
-                            MilgrainDivider()
+                            SettingsDivider()
                                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
@@ -136,7 +136,7 @@ struct RoutinesListView: View {
                 if let saveMessage {
                     Text(saveMessage)
                         .font(.appBody(12, weight: .medium))
-                        .foregroundStyle(Color.mgDestructive)
+                        .foregroundStyle(Color.appDestructive)
                 }
                 Spacer()
                 Button {
@@ -148,7 +148,7 @@ struct RoutinesListView: View {
                 } label: {
                     Text("Cancel")
                         .font(.appBody(12, weight: .semibold))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                 }
                 .buttonStyle(.appScale)
 
@@ -159,13 +159,13 @@ struct RoutinesListView: View {
                         if isSaving {
                             ProgressView()
                                 .scaleEffect(0.6)
-                                .tint(Color.mgSecondary)
+                                .tint(Color.appMuted)
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.appBody(12, weight: .semibold))
                             .tracking(0.4)
                     }
-                    .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
+                    .foregroundStyle(canSave ? Color.appInk : Color.appMuted)
                 }
                 .buttonStyle(.appScale)
                 .disabled(!canSave)
@@ -263,7 +263,7 @@ private struct RoutineRow: View {
             HStack(spacing: 8) {
                 Text(routine.name)
                     .font(.appBody(15))
-                    .foregroundStyle(routine.isEnabled ? Color.mgHeading : Color.mgSecondary)
+                    .foregroundStyle(routine.isEnabled ? Color.appInk : Color.appMuted)
                     .lineLimit(1)
                 // An imported routine that isn't running must never read as if it is — the
                 // original is still live wherever it came from.
@@ -271,37 +271,37 @@ private struct RoutineRow: View {
                     Text(routine.isImported ? "Off · imported" : "Off")
                         .font(.appBody(10, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.mgSecondary.opacity(0.12), in: Capsule())
+                        .background(Color.appMuted.opacity(0.12), in: Capsule())
                 } else if routine.isFailing {
                     Text("Failing")
                         .font(.appBody(10, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundStyle(Color.mgDestructive)
+                        .foregroundStyle(Color.appDestructive)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.mgDestructive.opacity(0.12), in: Capsule())
+                        .background(Color.appDestructive.opacity(0.12), in: Capsule())
                 } else if let cadenceLabel {
                     Text(cadenceLabel)
                         .font(.appBody(10, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.mgSecondary.opacity(0.12), in: Capsule())
+                        .background(Color.appMuted.opacity(0.12), in: Capsule())
                 }
             }
             Text(routine.prompt)
                 .font(.appBody(12))
-                .foregroundStyle(Color.mgSecondary)
+                .foregroundStyle(Color.appMuted)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if routine.isFailing, let lastRunError = routine.lastRunError, !lastRunError.isEmpty {
                 Text(lastRunError)
                     .font(.appBody(11))
-                    .foregroundStyle(Color.mgDestructive)
+                    .foregroundStyle(Color.appDestructive)
                     .lineLimit(2)
                     .truncationMode(.tail)
             }

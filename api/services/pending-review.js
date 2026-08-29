@@ -142,8 +142,8 @@ function reviewDetailForAction(action, cardInfo = null) {
       return [input.issue, input.body].filter(Boolean).join(' · ');
     case 'send_message':
     case 'send_telegram':
-    case 'send_millie_email':
-    case 'send_millie_sms':
+    case 'send_adam_email':
+    case 'send_adam_sms':
       return [input.to || input.contact, input.body || input.message].filter(Boolean).join(' · ');
     case 'book_uber':
       return input.destination ? `Destination: ${input.destination}` : '';
@@ -166,7 +166,7 @@ function buildPendingReviewResult(action, cardInfo = null) {
   const contract = getActionContract(action?.type) || {};
   const prompt = action?.type === 'send_message'
     ? 'Check the message, then tap Send.'
-    : ['send_millie_email', 'send_millie_sms'].includes(action?.type)
+    : ['send_adam_email', 'send_adam_sms'].includes(action?.type)
       ? 'Check the message, then confirm to send it.'
       : ['send_email', 'send_outlook_email'].includes(action?.type)
         ? 'Check the email, then tap Send.'

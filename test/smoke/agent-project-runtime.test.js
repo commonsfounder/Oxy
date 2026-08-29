@@ -29,7 +29,7 @@ test('project runtime provisions a task-isolated clone and exposes bounded proje
     await git(['init', '-q'], source);
     await git(['config', 'user.email', 'test@oxy.local'], source);
     await git(['config', 'user.name', 'Oxy Test'], source);
-    await fs.writeFile(path.join(source, 'README.md'), '# Milgrain\n', 'utf8');
+    await fs.writeFile(path.join(source, 'README.md'), '# Adam\n', 'utf8');
     await fs.writeFile(path.join(source, 'package.json'), JSON.stringify({
       name: 'runtime-test-project',
       scripts: { test: 'node -e "process.stdout.write(\'ok\')"' }
@@ -38,52 +38,52 @@ test('project runtime provisions a task-isolated clone and exposes bounded proje
     await git(['commit', '-qm', 'initial'], source);
 
     process.env.OXY_AGENT_PROJECTS_JSON = JSON.stringify({
-      milgrain: { source, displayName: 'Milgrain' }
+      adam: { source, displayName: 'Adam' }
     });
     process.env.OXY_AGENT_PROJECT_DATA_ROOT = dataRoot;
     process.env.OXY_AGENT_PROJECT_CHECKS_ENABLED = '1';
     delete process.env.OXY_AGENT_PROJECT_PUBLISH_ENABLED;
 
-    const status = await runtime.gitStatus('user-1', 'task-123', 'milgrain');
-    assert.equal(status.projectName, 'Milgrain');
+    const status = await runtime.gitStatus('user-1', 'task-123', 'adam');
+    assert.equal(status.projectName, 'Adam');
     assert.match(status.branch, /^oxy\/task-/);
     assert.equal(status.dirty, false);
 
     const file = await runtime.writeProjectFile(
       'user-1',
       'task-123',
-      'milgrain',
+      'adam',
       'notes/decision.md',
       'Use account credit for referral rewards.\n'
     );
     assert.equal(file.path, 'notes/decision.md');
-    assert.equal(file.projectRef, 'milgrain');
+    assert.equal(file.projectRef, 'adam');
 
-    const diff = await runtime.gitDiff('user-1', 'task-123', 'milgrain');
+    const diff = await runtime.gitDiff('user-1', 'task-123', 'adam');
     assert.match(diff.diff, /notes\/decision\.md/);
     assert.match(diff.diff, /account credit/);
 
-    const check = await runtime.runProjectCheck('user-1', 'task-123', 'milgrain', 'test');
+    const check = await runtime.runProjectCheck('user-1', 'task-123', 'adam', 'test');
     assert.equal(check.success, true);
     assert.match(check.output, /ok/);
 
     const commit = await runtime.commitProjectChanges(
       'user-1',
       'task-123',
-      'milgrain',
+      'adam',
       'Add referral credit decision'
     );
     assert.match(commit.commit, /^[0-9a-f]{40}$/);
     assert.match(commit.branch, /^oxy\/task-/);
-    assert.equal((await runtime.gitDiff('user-1', 'task-123', 'milgrain')).diff, '');
+    assert.equal((await runtime.gitDiff('user-1', 'task-123', 'adam')).diff, '');
 
-    await runtime.writeProjectFile('user-1', 'task-123', 'milgrain', 'notes/temporary.md', 'discard me');
-    const rollback = await runtime.rollbackProjectChanges('user-1', 'task-123', 'milgrain');
+    await runtime.writeProjectFile('user-1', 'task-123', 'adam', 'notes/temporary.md', 'discard me');
+    const rollback = await runtime.rollbackProjectChanges('user-1', 'task-123', 'adam');
     assert.match(rollback.text, /Rolled back/);
-    assert.equal((await runtime.gitDiff('user-1', 'task-123', 'milgrain')).diff, '');
+    assert.equal((await runtime.gitDiff('user-1', 'task-123', 'adam')).diff, '');
 
     await assert.rejects(
-      runtime.writeProjectFile('user-1', 'task-123', 'milgrain', '../outside.md', 'nope'),
+      runtime.writeProjectFile('user-1', 'task-123', 'adam', '../outside.md', 'nope'),
       /Invalid project path/
     );
     await assert.rejects(
@@ -91,7 +91,7 @@ test('project runtime provisions a task-isolated clone and exposes bounded proje
       /not configured/
     );
     await assert.rejects(
-      runtime.publishProjectBranch('user-1', 'task-123', 'milgrain'),
+      runtime.publishProjectBranch('user-1', 'task-123', 'adam'),
       /synchronization is disabled/
     );
   } finally {

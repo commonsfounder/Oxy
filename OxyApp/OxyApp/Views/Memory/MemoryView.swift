@@ -51,7 +51,7 @@ struct MemoryView: View {
                     Group {
                         VStack(alignment: .leading, spacing: 20) {
                             if composerExpanded {
-                                MilgrainSectionHeader(title: "Remember")
+                                SettingsSectionHeader(title: "Remember")
                                 MemoryDropBox(
                                     draft: $draft,
                                     isSaving: isSaving,
@@ -68,10 +68,10 @@ struct MemoryView: View {
                                 } label: {
                                     HStack(spacing: 12) {
                                         AppIcon("plus", size: 14)
-                                            .foregroundStyle(Color.mgSecondary)
+                                            .foregroundStyle(Color.appMuted)
                                         Text("Remember something…")
                                             .font(.appBody(15))
-                                            .foregroundStyle(Color.mgSecondary)
+                                            .foregroundStyle(Color.appMuted)
                                         Spacer(minLength: 0)
                                     }
                                     .padding(.vertical, 14)
@@ -84,12 +84,12 @@ struct MemoryView: View {
                         .padding(.bottom, composerExpanded ? 36 : 24)
 
                         HStack {
-                            MilgrainSectionHeader(title: "Saved Memories")
+                            SettingsSectionHeader(title: "Saved Memories")
                             Spacer()
                             if !items.isEmpty {
                                 Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
                                     .font(.appBody(13))
-                                    .foregroundStyle(Color.mgSecondary)
+                                    .foregroundStyle(Color.appMuted)
                                     .contentTransition(.numericText())
                                     .animation(.appStandard, value: items.count)
                             }
@@ -104,17 +104,17 @@ struct MemoryView: View {
                         if isLoading {
                             ForEach(0..<4, id: \.self) { _ in
                                 OxySkeletonCard(height: 44, cornerRadius: 0)
-                                MilgrainDivider()
+                                SettingsDivider()
                             }
                         } else if items.isEmpty {
                             Text("Nothing saved yet.")
                                 .font(.appBody(14))
-                                .foregroundStyle(Color.mgSecondary)
+                                .foregroundStyle(Color.appMuted)
                                 .padding(.vertical, 20)
                         } else if groupedItems.isEmpty {
                             Text("No memories match \"\(search)\".")
                                 .font(.appBody(14))
-                                .foregroundStyle(Color.mgSecondary)
+                                .foregroundStyle(Color.appMuted)
                                 .padding(.vertical, 20)
                         }
                     }
@@ -125,7 +125,7 @@ struct MemoryView: View {
                     ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
                         Text(group.title)
                             .font(.appBody(18, weight: .semibold))
-                            .foregroundStyle(Color.mgHeading)
+                            .foregroundStyle(Color.appInk)
                             .padding(.top, index == 0 ? 16 : 30)
                             .padding(.bottom, 4)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -145,10 +145,10 @@ struct MemoryView: View {
                                     }
                                     // The app's accent tint (mint/etc.) otherwise bleeds into
                                     // swipe actions, overriding the system's destructive red.
-                                    .tint(Color.mgDestructive)
+                                    .tint(Color.appDestructive)
                                 }
 
-                            MilgrainDivider()
+                            SettingsDivider()
                                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
@@ -162,7 +162,7 @@ struct MemoryView: View {
                         } label: {
                             Text("Clear all memories")
                                 .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(Color.mgDestructive)
+                                .foregroundStyle(Color.appDestructive)
                                 .padding(.vertical, 18)
                         }
                         .buttonStyle(.appScale(0.98))
@@ -324,18 +324,18 @@ private struct MemoryRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.content)
                         .font(.appBody(15))
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     // Quiet provenance cue — "Saved" (typed by hand) vs "Learned"
                     // (picked up from conversation) — never shouted.
                     Text(item.sourceLabel)
                         .font(.appBody(11))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                 }
                 Spacer(minLength: 8)
                 AppIcon("chevron-right", size: 13)
-                    .foregroundStyle(Color.mgSecondary.opacity(0.5))
+                    .foregroundStyle(Color.appMuted.opacity(0.5))
                     .padding(.top, 2)
                     .padding(.trailing, 24)
             }
@@ -356,11 +356,11 @@ private struct MemorySearchField: View {
     var body: some View {
         HStack(spacing: 8) {
             AppIcon("search", size: 15)
-                .foregroundStyle(Color.mgSecondary)
+                .foregroundStyle(Color.appMuted)
             TextField("Search memories…", text: $text)
                 .font(.appBody(14))
-                .foregroundStyle(Color.mgHeading)
-                .tint(Color.mgSecondary)
+                .foregroundStyle(Color.appInk)
+                .tint(Color.appMuted)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($isFocused)
@@ -369,7 +369,7 @@ private struct MemorySearchField: View {
                     text = ""
                 } label: {
                     AppIcon("xmark-circle", size: 15)
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
@@ -421,11 +421,11 @@ private struct MemoryEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { onSave(content) }
-                        .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
+                        .foregroundStyle(canSave ? Color.appInk : Color.appMuted)
                         .disabled(!canSave)
                 }
             }
@@ -453,12 +453,12 @@ private struct MemoryDropBox: View {
                 // Didot here was the one place the mg dialect borrowed the display serif.
                 Text("Add it once. It's kept for later.")
                     .font(.appBody(17, weight: .semibold))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
                 Spacer(minLength: 8)
                 if let onCollapse {
                     Button(action: onCollapse) {
                         AppIcon("chevron-up", size: 14)
-                            .foregroundStyle(Color.mgSecondary)
+                            .foregroundStyle(Color.appMuted)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
@@ -478,7 +478,7 @@ private struct MemoryDropBox: View {
                 if let message {
                     Text(message)
                         .font(.appBody(12, weight: .medium))
-                        .foregroundStyle(message == "Saved." ? Color.mgHeading : Color.mgDestructive)
+                        .foregroundStyle(message == "Saved." ? Color.appInk : Color.appDestructive)
                 }
                 Spacer()
                 Button(action: onSave) {
@@ -486,13 +486,13 @@ private struct MemoryDropBox: View {
                         if isSaving {
                             ProgressView()
                                 .scaleEffect(0.6)
-                                .tint(Color.mgSecondary)
+                                .tint(Color.appMuted)
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.appBody(12, weight: .semibold))
                             .tracking(0.4)
                     }
-                    .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
+                    .foregroundStyle(canSave ? Color.appInk : Color.appMuted)
                 }
                 .buttonStyle(.appScale)
                 .disabled(!canSave)

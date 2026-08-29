@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The durable identity layer: a readable view of what Millie knows and what she
+/// The durable identity layer: a readable view of what Adam knows and what they
 /// is currently carrying forward between conversations.
 struct AgentOSView: View {
     @Environment(AppState.self) private var appState
@@ -77,7 +77,7 @@ struct AgentOSView: View {
 
         if !visible.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("What Millie knows")
+                Text("What Adam knows")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 VStack(alignment: .leading, spacing: 0) {
@@ -96,7 +96,7 @@ struct AgentOSView: View {
                         }
                         .padding(.vertical, 12)
                         if group.0 != visible.last?.0 {
-                            MilgrainDivider()
+                            SettingsDivider()
                         }
                     }
                 }
@@ -104,7 +104,7 @@ struct AgentOSView: View {
                 .background { MissionGlassPlate() }
             }
         } else {
-            emptySection(title: "What Millie knows")
+            emptySection(title: "What Adam knows")
         }
     }
 
@@ -236,12 +236,12 @@ struct AgentOSView: View {
 
 #if DEBUG
     private static let demoContext = AgentContextSnapshot(
-        agent: AgentIdentity(name: "Millie", role: "personal companion", continuity: "always here"),
+        agent: AgentIdentity(name: "Adam", role: "personal companion", continuity: "always here"),
         profile: AgentProfile(
             text: "",
             sections: [
                 "identity": ["Based in Birmingham"],
-                "work": ["Building Milgrain"],
+                "work": ["Building Adam"],
                 "relationships": ["Your supplier"],
                 "goals": ["A calmer home and more time back"],
                 "context": ["You prefer direct communication"]

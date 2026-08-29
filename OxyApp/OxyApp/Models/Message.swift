@@ -626,7 +626,7 @@ struct LifeBriefingItem: Codable, Identifiable, Equatable {
         let lower = trimmed.lowercased()
         guard !trimmed.isEmpty,
               !lower.contains("needs your attention"),
-              !lower.contains("millie can continue") else {
+              !lower.contains("adam can continue") else {
             return nil
         }
         return trimmed

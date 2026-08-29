@@ -476,44 +476,29 @@ extension View {
     func swipeToDismiss() -> some View { modifier(SwipeToDismissModifier()) }
 }
 
-// MARK: - Milgrain tokens (settings family)
+// MARK: - Settings-family tokens
 //
-// A harder, purer greyscale for the settings-family screens (Settings, Connectors,
-// Pendant, Memory) per the Milgrain spec: a flat #0A0A0A canvas, dark #1A1A1A
-// hairlines, pure-white headings, and a #888/#555/#333 grey ramp. Kept separate from
-// the softer app-wide `app*` tokens (off-black canvas, warm off-white ink, translucent
-// titanium hairlines) so Chat / Today / Onboarding are left untouched.
+// The settings-family screens (Settings, Connectors, Pendant, Memory) used to carry
+// their own pure-black ramp; it failed on-device legibility QA and they now share the
+// app-wide `app*` tokens. Only these two values are still their own.
 
 extension Color {
-    // The settings-family screens now share the app-wide tokens; the old pure-black
-    // + dim grey ramp (#0A0A0A / #888 / #555 / #333) failed on-device legibility QA.
-    static let mgBg = Color.appBackground
-    static let mgDivider = Color.appHairline
-    static let mgHeading = Color.appInk
-    static let mgSecondary = Color.appMuted
-    static let mgCaption = Color.appMuted
-    static let mgOff = Color.appAdaptive(dark: .white, light: .black).opacity(0.25)
-    /// Fixed both finishes — system red reads on black and white alike.
-    static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
+    /// Unselected toggle track.
+    static let appToggleOff = Color.appAdaptive(dark: .white, light: .black).opacity(0.25)
+    /// System red — reads on black and white alike, unlike the softer `appDanger` coral.
+    static let appDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
 }
 
-extension Font {
-    /// Legacy alias — settings-family headers now use the app-wide display face.
-    static func mgDidot(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .appDisplay(size, weight: .semibold)
-    }
-}
-
-/// Full-bleed dark hairline (#1A1A1A, 0.5pt) — the Milgrain row separator.
-struct MilgrainDivider: View {
+/// Full-bleed dark hairline (#1A1A1A, 0.5pt) — the Adam row separator.
+struct SettingsDivider: View {
     var body: some View {
-        Rectangle().fill(Color.mgDivider).frame(height: 0.5)
+        Rectangle().fill(Color.appHairline).frame(height: 0.5)
     }
 }
 
 /// Editorial section header — a Didot title in editorial ink, Title-case, left-aligned,
 /// no background. The settings-family counterpart to `AppSectionTitle`.
-struct MilgrainSectionHeader: View {
+struct SettingsSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
@@ -524,7 +509,7 @@ struct MilgrainSectionHeader: View {
 }
 
 /// White-on / #333-off capsule toggle, no glow or halo.
-struct MilgrainToggle: View {
+struct SettingsToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
@@ -532,11 +517,11 @@ struct MilgrainToggle: View {
             withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.appAccent : Color.mgOff)
+                .fill(isOn ? Color.appAccent : Color.appToggleOff)
                 .frame(width: 30, height: 16)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.white : Color.mgSecondary)
+                        .fill(isOn ? Color.white : Color.appMuted)
                         .frame(width: 12, height: 12)
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
@@ -589,7 +574,7 @@ struct AppSegmented: View {
     }
 }
 
-typealias MilgrainSegmentedControl = AppSegmented
+typealias SettingsSegmentedControl = AppSegmented
 
 // MARK: - Today tab: light/dark glass language
 //

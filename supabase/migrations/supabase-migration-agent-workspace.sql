@@ -1,10 +1,10 @@
--- Controlled, user-scoped workspace for Millie's persistent agent sessions.
+-- Controlled, user-scoped workspace for Adam's persistent agent sessions.
 -- Content is text-only in the first slice; binary assets belong in object storage.
 
 CREATE TABLE IF NOT EXISTS agent_workspaces (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
-  name TEXT NOT NULL DEFAULT 'Millie workspace',
+  name TEXT NOT NULL DEFAULT 'Adam workspace',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

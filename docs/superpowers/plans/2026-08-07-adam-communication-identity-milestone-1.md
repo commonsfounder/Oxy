@@ -1,10 +1,10 @@
-# Millie Communication Identity — Milestone 1 Implementation Plan
+# Adam Communication Identity — Milestone 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give every user a persistent Millie-owned communication identity (one email handle, one phone handle) and a channel-agnostic conversation model, with real outbound/inbound **email** working end-to-end and phone/SMS provisioned and working where straightforward — no WhatsApp, Telegram, or voice calling in this milestone.
+**Goal:** Give every user a persistent Adam-owned communication identity (one email handle, one phone handle) and a channel-agnostic conversation model, with real outbound/inbound **email** working end-to-end and phone/SMS provisioned and working where straightforward — no WhatsApp, Telegram, or voice calling in this milestone.
 
-**Architecture:** One `millie_identities` row per user owns zero-or-more `millie_identity_handles` (one per channel type — `email`, `phone_sms`). A `participants` directory (with `participant_addresses` across channels) represents the businesses/people Millie talks to. `external_conversations` is the channel-agnostic thread — `(millie_identity, participant, optional request)` — and `external_conversation_events` is the append-only log of individual sends/receives, each tagged with its own `channel_type`. Outbound goes through the existing action-contract + pending-review pipeline (`api/action-contracts.js` → `api/services/action-runner.js` → `executeAction`). Inbound arrives via two new thin webhook routes that normalize a provider payload, match it to a conversation, append an event, and classify it (surface-only vs. needs-a-decision) via a new small `reply-policy` module — never auto-reply.
+**Architecture:** One `millie_identities` row per user owns zero-or-more `millie_identity_handles` (one per channel type — `email`, `phone_sms`). A `participants` directory (with `participant_addresses` across channels) represents the businesses/people Adam talks to. `external_conversations` is the channel-agnostic thread — `(millie_identity, participant, optional request)` — and `external_conversation_events` is the append-only log of individual sends/receives, each tagged with its own `channel_type`. Outbound goes through the existing action-contract + pending-review pipeline (`api/action-contracts.js` → `api/services/action-runner.js` → `executeAction`). Inbound arrives via two new thin webhook routes that normalize a provider payload, match it to a conversation, append an event, and classify it (surface-only vs. needs-a-decision) via a new small `reply-policy` module — never auto-reply.
 
 **Tech Stack:** Existing stack only — Node/Express, Supabase (Postgres, service-role client, no RLS — see Global Constraints), `axios` for provider HTTP calls (no new SDK dependencies). New providers: **Resend** for email (already integrated in this codebase for transactional mail — reused, not replaced), **Twilio** for phone number + SMS (net-new, plain REST via `axios`, no `twilio` npm package).
 
@@ -12,17 +12,17 @@
 
 - **No RLS, no `auth.uid()` policies on new tables.** This app's real auth is a homegrown session system (`api/index.js`'s `hashPassword`/session tokens) — Supabase Auth is never used, so `auth.uid()` is always null and any RLS policy referencing it is dead on arrival. Access control is enforced entirely in the Node backend via `requireMatchingUser`/session checks before the service-role Supabase client is ever touched. This is a proven, deliberate pattern in this codebase (see `supabase/migrations/supabase-migration-fix-user-id-fk.sql`) — do not add RLS to the new tables.
 - **`user_id` columns are `text references users(user_id)`, never `uuid references auth.users(id)`.** This exact bug (wrong FK target) has broken five tables in this codebase before and silently dropped every write. Every new table's `user_id` column must match this pattern exactly.
-- **No user-facing jargon.** Nothing in copy shown to the user should say "channel," "webhook," "identity," "adapter," "routing," "conversation thread," etc. Internally these are the right words; externally it's "Millie can contact people for me."
-- **No auto-reply in this milestone.** Every outbound send in this milestone is either the user's direct instruction or the user's explicit confirmation of a suggested reply. Nothing is composed and sent by Millie without a human step in between.
+- **No user-facing jargon.** Nothing in copy shown to the user should say "channel," "webhook," "identity," "adapter," "routing," "conversation thread," etc. Internally these are the right words; externally it's "Adam can contact people for me."
+- **No auto-reply in this milestone.** Every outbound send in this milestone is either the user's direct instruction or the user's explicit confirmation of a suggested reply. Nothing is composed and sent by Adam without a human step in between.
 - **Outreach must be grounded in a user-authorised goal — three distinct concepts, only one of them built now:**
   1. **User-triggered outreach** — explicitly requested in this turn. **Allowed in Milestone 1** — this is the entire scope of Tasks 6 and 11.
-  2. **Proactive continuation** — communication necessary to continue a request the user has *already* delegated (e.g. "sort out this restaurant booking" → the restaurant never replies → Millie may need to follow up, because finishing that communication *is* the job she was asked to do). **Not implemented in Milestone 1** — no code sends anything without a fresh, explicit user instruction or confirmation this milestone. But the data model must retain enough state (below) that adding scheduled follow-up later is an additive service, not a schema redesign.
+  2. **Proactive continuation** — communication necessary to continue a request the user has *already* delegated (e.g. "sort out this restaurant booking" → the restaurant never replies → Adam may need to follow up, because finishing that communication *is* the job she was asked to do). **Not implemented in Milestone 1** — no code sends anything without a fresh, explicit user instruction or confirmation this milestone. But the data model must retain enough state (below) that adding scheduled follow-up later is an additive service, not a schema redesign.
   3. **Unsolicited cold outreach** — contacting someone with no connection to any user-authorised goal. **Prohibited outright**, not just deferred — this is not a "later" feature, it's out of scope permanently unless a future product decision explicitly revisits it.
 
-  The operating principle for this milestone: *Millie does not initiate unrelated outreach on her own. Communication must be grounded in a user-authorised goal. In this milestone, every outbound send still requires a direct user instruction or explicit confirmation.*
+  The operating principle for this milestone: *Adam does not initiate unrelated outreach on her own. Communication must be grounded in a user-authorised goal. In this milestone, every outbound send still requires a direct user instruction or explicit confirmation.*
 - **Consequential sends stay review-gated.** Every new outbound action type gets `executionMode: 'review'` in its action contract — this is a config value, not a code path to build; `action-runner.js` already routes any contract with that flag through the existing approval flow unconditionally.
 - **Inbound content is untrusted.** Inbound message bodies are stored and displayed as data, never treated as instructions, never concatenated into a prompt in a way that could be mistaken for a system or user directive.
-- **Millie identifies herself.** Every outbound message is composed with an explicit signature/identifier line — enforced in the sending code, not left to model discretion.
+- **Adam identifies herself.** Every outbound message is composed with an explicit signature/identifier line — enforced in the sending code, not left to model discretion.
 - **Encrypt message bodies at rest**, reusing `api/services/token-crypto.js`'s existing `encryptTokens`/`decryptTokens` (AES-256-GCM, same `OXY_TOKEN_ENCRYPTION_KEY`) rather than inventing new crypto.
 
 ---
@@ -42,7 +42,7 @@
 ### Task 1: Migration — identity, participants, conversations, events
 
 **Files:**
-- Create: `supabase/migrations/supabase-migration-millie-identity.sql`
+- Create: `supabase/migrations/supabase-migration-adam-identity.sql`
 - Test: manual verification via Supabase MCP `execute_sql` after applying (schema-only migration; no app code to unit-test yet)
 
 **Interfaces:**
@@ -51,7 +51,7 @@
 - [ ] **Step 1: Write the migration SQL**
 
 ```sql
--- Millie's own persistent communication identity — one identity per user, with one
+-- Adam's own persistent communication identity — one identity per user, with one
 -- handle per channel type. Channel is scoped to email + phone_sms in this milestone;
 -- adding 'whatsapp'/'telegram_bot' later is a one-line ALTER on the two check
 -- constraints below, not a redesign.
@@ -64,7 +64,7 @@
 create table millie_identities (
   id uuid primary key default gen_random_uuid(),
   user_id text not null unique references users(user_id) on delete cascade,
-  display_name text not null default 'Millie',
+  display_name text not null default 'Adam',
   created_at timestamptz not null default now()
 );
 
@@ -176,30 +176,30 @@ Expected: 1 row.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/supabase-migration-millie-identity.sql
-git commit -m "feat(millie-identity): add schema for Millie's persistent communication identity"
+git add supabase/migrations/supabase-migration-adam-identity.sql
+git commit -m "feat(adam-identity): add schema for Adam's persistent communication identity"
 ```
 
 ---
 
-### Task 2: `api/services/millie-identity.js` — identity + handle provisioning
+### Task 2: `api/services/adam-identity.js` — identity + handle provisioning
 
 **Files:**
-- Create: `api/services/millie-identity.js`
-- Test: Create: `test/smoke/millie-identity.test.js`
+- Create: `api/services/adam-identity.js`
+- Test: Create: `test/smoke/adam-identity.test.js`
 
 **Interfaces:**
 - Consumes: a Supabase client (service-role, passed in — same convention as `task-entities.js`), `encryptTokens`/`decryptTokens` from `token-crypto.js` (not needed here — handles don't hold secrets, provider credentials are env vars, not per-user tokens).
-- Produces: `ensureMillieIdentity(supabase, userId) -> Promise<{identity, handles}>`, `getMillieIdentity(supabase, userId) -> Promise<{identity, handles} | null>`, `getActiveHandle(supabase, userId, channelType) -> Promise<handleRow | null>`. Later tasks (3, 6, 11) call `getActiveHandle` to find "the" email/phone address to send from.
+- Produces: `ensureAdamIdentity(supabase, userId) -> Promise<{identity, handles}>`, `getAdamIdentity(supabase, userId) -> Promise<{identity, handles} | null>`, `getActiveHandle(supabase, userId, channelType) -> Promise<handleRow | null>`. Later tasks (3, 6, 11) call `getActiveHandle` to find "the" email/phone address to send from.
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// test/smoke/millie-identity.test.js
+// test/smoke/adam-identity.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { ensureMillieIdentity, getMillieIdentity, getActiveHandle, buildEmailHandleValue } = require('../../api/services/millie-identity');
+const { ensureAdamIdentity, getAdamIdentity, getActiveHandle, buildEmailHandleValue } = require('../../api/services/adam-identity');
 
 function fakeSupabase(seed = {}) {
   const state = {
@@ -228,9 +228,9 @@ function fakeSupabase(seed = {}) {
   return { from: table, _state: state };
 }
 
-test('ensureMillieIdentity creates an identity and an email handle for a new user', async () => {
+test('ensureAdamIdentity creates an identity and an email handle for a new user', async () => {
   const supabase = fakeSupabase();
-  const result = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  const result = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   assert.equal(result.identity.user_id, 'chizi');
   const emailHandle = result.handles.find(h => h.channel_type === 'email');
   assert.ok(emailHandle, 'expected an email handle to be created');
@@ -238,10 +238,10 @@ test('ensureMillieIdentity creates an identity and an email handle for a new use
   assert.equal(emailHandle.status, 'active');
 });
 
-test('ensureMillieIdentity is idempotent — calling twice does not create a second identity', async () => {
+test('ensureAdamIdentity is idempotent — calling twice does not create a second identity', async () => {
   const supabase = fakeSupabase();
-  const first = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
-  const second = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  const first = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
+  const second = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   assert.equal(first.identity.id, second.identity.id);
   assert.equal(supabase._state.millie_identities.length, 1);
 });
@@ -259,7 +259,7 @@ test('buildEmailHandleValue produces a stable per-user address under the configu
 
 test('getActiveHandle returns null when no handle of that channel exists', async () => {
   const supabase = fakeSupabase();
-  await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   const phone = await getActiveHandle(supabase, 'chizi', 'phone_sms');
   assert.equal(phone, null);
 });
@@ -267,18 +267,18 @@ test('getActiveHandle returns null when no handle of that channel exists', async
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-identity.test.js`
-Expected: FAIL — `Cannot find module '../../api/services/millie-identity'`
+Run: `node --test test/smoke/adam-identity.test.js`
+Expected: FAIL — `Cannot find module '../../api/services/adam-identity'`
 
 - [ ] **Step 3: Write the implementation**
 
 ```javascript
-// api/services/millie-identity.js
+// api/services/adam-identity.js
 'use strict';
 
-// Millie's own persistent communication identity. One row per user in
+// Adam's own persistent communication identity. One row per user in
 // millie_identities; one row per channel in millie_identity_handles. Provisioning
-// is idempotent and safe to call repeatedly — ensureMillieIdentity always returns
+// is idempotent and safe to call repeatedly — ensureAdamIdentity always returns
 // the existing identity/handles if they're already there, never duplicates them.
 //
 // Phone provisioning can fail (Twilio not configured, no numbers available in the
@@ -297,7 +297,7 @@ function buildEmailHandleValue(userId) {
   return `${normalizeUserIdForAddress(userId)}@${domain}`;
 }
 
-async function getMillieIdentity(supabase, userId) {
+async function getAdamIdentity(supabase, userId) {
   const { data: identities, error } = await supabase
     .from('millie_identities')
     .select('*')
@@ -313,7 +313,7 @@ async function getMillieIdentity(supabase, userId) {
 }
 
 async function getActiveHandle(supabase, userId, channelType) {
-  const existing = await getMillieIdentity(supabase, userId);
+  const existing = await getAdamIdentity(supabase, userId);
   if (!existing) return null;
   return existing.handles.find(h => h.channel_type === channelType && h.status === 'active') || null;
 }
@@ -344,13 +344,13 @@ async function ensurePhoneHandle(supabase, identityId, userId, provisionPhoneNum
     }).select().single();
     return data;
   } catch (err) {
-    console.warn('[millie-identity] phone provisioning failed, continuing without it:', err.message);
+    console.warn('[adam-identity] phone provisioning failed, continuing without it:', err.message);
     return null;
   }
 }
 
-async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, provisionPhoneNumber } = {}) {
-  const existing = await getMillieIdentity(supabase, userId);
+async function ensureAdamIdentity(supabase, userId, { attemptPhone = true, provisionPhoneNumber } = {}) {
+  const existing = await getAdamIdentity(supabase, userId);
   if (existing) {
     // Fill in any missing handle (e.g. phone provisioning was skipped or failed before).
     const handles = [...existing.handles];
@@ -367,9 +367,9 @@ async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, pro
 
   const { data: identity, error } = await supabase.from('millie_identities').insert({
     user_id: userId,
-    display_name: 'Millie'
+    display_name: 'Adam'
   }).select().single();
-  if (error) throw new Error(`Failed to create Millie identity: ${error.message}`);
+  if (error) throw new Error(`Failed to create Adam identity: ${error.message}`);
 
   const handles = [];
   const emailHandle = await ensureEmailHandle(supabase, identity.id, userId);
@@ -381,37 +381,37 @@ async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, pro
   return { identity, handles };
 }
 
-module.exports = { ensureMillieIdentity, getMillieIdentity, getActiveHandle, buildEmailHandleValue };
+module.exports = { ensureAdamIdentity, getAdamIdentity, getActiveHandle, buildEmailHandleValue };
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-identity.test.js`
+Run: `node --test test/smoke/adam-identity.test.js`
 Expected: PASS, 4/4
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add api/services/millie-identity.js test/smoke/millie-identity.test.js
-git commit -m "feat(millie-identity): add identity/handle provisioning service"
+git add api/services/adam-identity.js test/smoke/adam-identity.test.js
+git commit -m "feat(adam-identity): add identity/handle provisioning service"
 ```
 
 ---
 
-### Task 3: `connectors/millie-email-resend.js` — email provider adapter
+### Task 3: `connectors/adam-email-resend.js` — email provider adapter
 
 **Files:**
-- Create: `connectors/millie-email-resend.js`
-- Test: Create: `test/smoke/millie-email-resend.test.js`
+- Create: `connectors/adam-email-resend.js`
+- Test: Create: `test/smoke/adam-email-resend.test.js`
 
 **Interfaces:**
 - Consumes: `axios` (mocked in tests, same pattern as `test/smoke/geocoding.test.js`).
-- Produces: `sendMillieEmail({ from, to, subject, body, inReplyTo, references }) -> Promise<{providerMessageId}>`; `parseInboundPayload(payload) -> {fromAddress, toAddress, subject, body, providerMessageId, inReplyTo, references} | null`; `MILLIE_EMAIL_SIGNATURE_LINE` (exported constant, used by Task 6 to enforce self-identification).
+- Produces: `sendAdamEmail({ from, to, subject, body, inReplyTo, references }) -> Promise<{providerMessageId}>`; `parseInboundPayload(payload) -> {fromAddress, toAddress, subject, body, providerMessageId, inReplyTo, references} | null`; `MILLIE_EMAIL_SIGNATURE_LINE` (exported constant, used by Task 6 to enforce self-identification).
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// test/smoke/millie-email-resend.test.js
+// test/smoke/adam-email-resend.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const Module = require('node:module');
@@ -422,10 +422,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') return mockAxios;
   return originalLoad.call(this, request, parent, isMain);
 };
-const { sendMillieEmail, parseInboundPayload, MILLIE_EMAIL_SIGNATURE_LINE } = require('../../connectors/millie-email-resend');
+const { sendAdamEmail, parseInboundPayload, MILLIE_EMAIL_SIGNATURE_LINE } = require('../../connectors/adam-email-resend');
 Module._load = originalLoad;
 
-test('sendMillieEmail posts to Resend with the from/to/subject/body and appends the signature line', async () => {
+test('sendAdamEmail posts to Resend with the from/to/subject/body and appends the signature line', async () => {
   const oldKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = 'test-key';
   let captured;
@@ -435,7 +435,7 @@ test('sendMillieEmail posts to Resend with the from/to/subject/body and appends 
     return { data: { id: 'resend-msg-1' } };
   };
   try {
-    const result = await sendMillieEmail({
+    const result = await sendAdamEmail({
       from: 'chizi@millie.oxy.app',
       to: 'reservations@bistro.example',
       subject: 'Booking change',
@@ -480,33 +480,33 @@ test('parseInboundPayload returns null for a payload with no usable from address
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-email-resend.test.js`
+Run: `node --test test/smoke/adam-email-resend.test.js`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write the implementation**
 
 ```javascript
-// connectors/millie-email-resend.js
+// connectors/adam-email-resend.js
 'use strict';
 const axios = require('axios');
 
-// Millie's own outbound/inbound email, sent through the same Resend account this
+// Adam's own outbound/inbound email, sent through the same Resend account this
 // platform already uses for transactional mail (api/services/email.js) — a
 // sibling integration, not a new vendor relationship. Inbound requires Resend's
 // inbound-receiving feature to be configured on MILLIE_EMAIL_DOMAIN with a webhook
 // pointed at POST /webhooks/millie-email (Task 7) — verify current availability/
 // pricing on the Resend plan in use before relying on this in production.
 
-const MILLIE_EMAIL_SIGNATURE_LINE = "— sent by Millie, an assistant, on behalf of the person who asked";
+const MILLIE_EMAIL_SIGNATURE_LINE = "— sent by Adam, an assistant, on behalf of the person who asked";
 
 function extractAddress(value) {
   const match = String(value || '').match(/<([^>]+)>/);
   return (match ? match[1] : String(value || '')).trim().toLowerCase();
 }
 
-async function sendMillieEmail({ from, to, subject, body, inReplyTo, references }) {
+async function sendAdamEmail({ from, to, subject, body, inReplyTo, references }) {
   const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error('RESEND_API_KEY is not configured — Millie cannot send email yet.');
+  if (!key) throw new Error('RESEND_API_KEY is not configured — Adam cannot send email yet.');
   const text = `${body}\n\n${MILLIE_EMAIL_SIGNATURE_LINE}`;
   const headers = {};
   if (inReplyTo) headers['In-Reply-To'] = inReplyTo;
@@ -540,19 +540,19 @@ function parseInboundPayload(payload) {
   };
 }
 
-module.exports = { sendMillieEmail, parseInboundPayload, MILLIE_EMAIL_SIGNATURE_LINE };
+module.exports = { sendAdamEmail, parseInboundPayload, MILLIE_EMAIL_SIGNATURE_LINE };
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-email-resend.test.js`
+Run: `node --test test/smoke/adam-email-resend.test.js`
 Expected: PASS, 3/3
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add connectors/millie-email-resend.js test/smoke/millie-email-resend.test.js
-git commit -m "feat(millie-identity): add Resend email adapter for Millie's own address"
+git add connectors/adam-email-resend.js test/smoke/adam-email-resend.test.js
+git commit -m "feat(adam-identity): add Resend email adapter for Adam's own address"
 ```
 
 ---
@@ -649,7 +649,7 @@ Expected: FAIL — module not found
 // api/services/participants.js
 'use strict';
 
-// The people/businesses Millie talks to on the user's behalf. A participant is
+// The people/businesses Adam talks to on the user's behalf. A participant is
 // channel-agnostic (participants.js, not "email_contacts.js") — participant_addresses
 // is where the channel-specific reachability lives, since one participant (a
 // restaurant) may have both a phone number and an email address.
@@ -713,7 +713,7 @@ Expected: PASS, 4/4
 
 ```bash
 git add api/services/participants.js test/smoke/participants.test.js
-git commit -m "feat(millie-identity): add participant directory with cross-channel address matching"
+git commit -m "feat(adam-identity): add participant directory with cross-channel address matching"
 ```
 
 ---
@@ -726,7 +726,7 @@ git commit -m "feat(millie-identity): add participant directory with cross-chann
 
 **Interfaces:**
 - Consumes: `encryptTokens`/`decryptTokens` from `api/services/token-crypto.js`.
-- Produces: `findOpenConversationsForParticipant(supabase, participantId) -> Promise<conversationRow[]>`, `getOrCreateConversation(supabase, { userId, millieIdentityId, participantId, requestTaskId }) -> Promise<{conversation, created}>`, `appendEvent(supabase, { conversationId, channelType, direction, participantAddressId, millieIdentityHandleId, providerEventId, subject, body, needsDecision, rawProviderPayload }) -> Promise<eventRow>`, `getConversationEvents(supabase, conversationId) -> Promise<decryptedEventRow[]>`.
+- Produces: `findOpenConversationsForParticipant(supabase, participantId) -> Promise<conversationRow[]>`, `getOrCreateConversation(supabase, { userId, adamIdentityId, participantId, requestTaskId }) -> Promise<{conversation, created}>`, `appendEvent(supabase, { conversationId, channelType, direction, participantAddressId, adamIdentityHandleId, providerEventId, subject, body, needsDecision, rawProviderPayload }) -> Promise<eventRow>`, `getConversationEvents(supabase, conversationId) -> Promise<decryptedEventRow[]>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -774,7 +774,7 @@ function fakeSupabase() {
 test('getOrCreateConversation creates a new open conversation for a new participant', async () => {
   const supabase = fakeSupabase();
   const { conversation, created } = await getOrCreateConversation(supabase, {
-    userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1'
+    userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1'
   });
   assert.equal(created, true);
   assert.equal(conversation.status, 'open');
@@ -783,8 +783,8 @@ test('getOrCreateConversation creates a new open conversation for a new particip
 
 test('getOrCreateConversation reuses the existing open conversation for the same participant+request', async () => {
   const supabase = fakeSupabase();
-  const first = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
-  const second = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
+  const first = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
+  const second = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1', requestTaskId: 'task-1' });
   assert.equal(second.created, false);
   assert.equal(second.conversation.id, first.conversation.id);
 });
@@ -794,7 +794,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
   process.env.OXY_TOKEN_ENCRYPTION_KEY = 'a'.repeat(64); // 32-byte hex
   try {
     const supabase = fakeSupabase();
-    const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-1' });
+    const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-1' });
     await appendEvent(supabase, {
       conversationId: conversation.id,
       channelType: 'email',
@@ -819,7 +819,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
     assert.equal(events[1].needs_decision, true);
 
     // Not read by anything yet, but must be tracked from day one — a future follow-up
-    // scheduler needs to know when Millie last sent vs. last heard back, separately.
+    // scheduler needs to know when Adam last sent vs. last heard back, separately.
     const updatedConversation = supabase._state.external_conversations.find(c => c.id === conversation.id);
     assert.ok(updatedConversation.last_outbound_at, 'last_outbound_at must be set after an outbound event');
     assert.ok(updatedConversation.last_inbound_at, 'last_inbound_at must be set after an inbound event');
@@ -831,7 +831,7 @@ test('appendEvent encrypts the body and getConversationEvents decrypts it back',
 
 test('findOpenConversationsForParticipant returns only open/awaiting_reply conversations', async () => {
   const supabase = fakeSupabase();
-  const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', millieIdentityId: 'id-1', participantId: 'p-2' });
+  const { conversation } = await getOrCreateConversation(supabase, { userId: 'chizi', adamIdentityId: 'id-1', participantId: 'p-2' });
   const open = await findOpenConversationsForParticipant(supabase, 'p-2');
   assert.equal(open.length, 1);
   assert.equal(open[0].id, conversation.id);
@@ -865,7 +865,7 @@ async function findOpenConversationsForParticipant(supabase, participantId) {
   return data.filter(c => c.status === 'open' || c.status === 'awaiting_reply');
 }
 
-async function getOrCreateConversation(supabase, { userId, millieIdentityId, participantId, requestTaskId = null }) {
+async function getOrCreateConversation(supabase, { userId, adamIdentityId, participantId, requestTaskId = null }) {
   const open = await findOpenConversationsForParticipant(supabase, participantId);
   const matching = requestTaskId
     ? open.find(c => c.request_task_id === requestTaskId)
@@ -874,7 +874,7 @@ async function getOrCreateConversation(supabase, { userId, millieIdentityId, par
 
   const { data: conversation, error } = await supabase.from('external_conversations').insert({
     user_id: userId,
-    millie_identity_id: millieIdentityId,
+    millie_identity_id: adamIdentityId,
     participant_id: participantId,
     request_task_id: requestTaskId,
     status: 'open',
@@ -885,7 +885,7 @@ async function getOrCreateConversation(supabase, { userId, millieIdentityId, par
 }
 
 async function appendEvent(supabase, {
-  conversationId, channelType, direction, participantAddressId = null, millieIdentityHandleId = null,
+  conversationId, channelType, direction, participantAddressId = null, adamIdentityHandleId = null,
   providerEventId = null, subject = '', body, needsDecision = false, rawProviderPayload = null
 }) {
   const bodyEncrypted = encryptTokens({ subject, body });
@@ -894,7 +894,7 @@ async function appendEvent(supabase, {
     channel_type: channelType,
     direction,
     participant_address_id: participantAddressId,
-    millie_identity_handle_id: millieIdentityHandleId,
+    millie_identity_handle_id: adamIdentityHandleId,
     provider_event_id: providerEventId,
     body_encrypted: bodyEncrypted,
     needs_decision: needsDecision,
@@ -945,30 +945,30 @@ Expected: PASS, 4/4
 
 ```bash
 git add api/services/external-conversations.js test/smoke/external-conversations.test.js
-git commit -m "feat(millie-identity): add channel-agnostic conversation + encrypted event log"
+git commit -m "feat(adam-identity): add channel-agnostic conversation + encrypted event log"
 ```
 
 ---
 
-### Task 6: `send_millie_email` action — outbound flow, wired into the review gate
+### Task 6: `send_adam_email` action — outbound flow, wired into the review gate
 
 **Files:**
-- Modify: `api/action-contracts.js` — add the `send_millie_email` contract
+- Modify: `api/action-contracts.js` — add the `send_adam_email` contract
 - Modify: `api/services/pending-review.js` — add the review-detail/prompt copy
 - Modify: `api/services/user-facing-copy.js` — add the action label
-- Modify: `api/index.js` — add `case 'send_millie_email'` to `executeAction`
-- Test: Create: `test/smoke/millie-email-action.test.js`
+- Modify: `api/index.js` — add `case 'send_adam_email'` to `executeAction`
+- Test: Create: `test/smoke/adam-email-action.test.js`
 
 **Interfaces:**
-- Consumes: `ensureMillieIdentity`/`getActiveHandle` (Task 2), `findOrCreateParticipant` (Task 4), `getOrCreateConversation`/`appendEvent` (Task 5), `sendMillieEmail` (Task 3).
-- Produces: the `send_millie_email` action, reachable via `executeAction(userId, 'send_millie_email', { to, subject, body, request_task_id? }, context)`.
+- Consumes: `ensureAdamIdentity`/`getActiveHandle` (Task 2), `findOrCreateParticipant` (Task 4), `getOrCreateConversation`/`appendEvent` (Task 5), `sendAdamEmail` (Task 3).
+- Produces: the `send_adam_email` action, reachable via `executeAction(userId, 'send_adam_email', { to, subject, body, request_task_id? }, context)`.
 
 - [ ] **Step 1: Add the action contract**
 
 In `api/action-contracts.js`, add alongside the existing `send_email` entry (do not modify `send_email` itself):
 
 ```javascript
-  send_millie_email: {
+  send_adam_email: {
     risk: 'medium',
     required: ['to', 'body'],
     optional: ['subject', 'request_task_id'],
@@ -979,7 +979,7 @@ In `api/action-contracts.js`, add alongside the existing `send_email` entry (do 
       body: 'the message to send, on the user\'s behalf',
       request_task_id: 'optional id of the ongoing request this belongs to'
     },
-    successSummary: 'Message sent from Millie',
+    successSummary: 'Message sent from Adam',
     failureSummary: 'Message failed to send',
     confirmation: 'review_required',
     executionMode: 'review'
@@ -993,18 +993,18 @@ In `api/services/pending-review.js`, extend the existing `switch` in `reviewDeta
 ```javascript
     case 'send_message':
     case 'send_telegram':
-    case 'send_millie_email':
+    case 'send_adam_email':
       return [input.to || input.contact, input.body || input.message].filter(Boolean).join(' · ');
 ```
 
-(This changes the existing case block's fallthrough list to include `'send_millie_email'` — the body of the case is unchanged.)
+(This changes the existing case block's fallthrough list to include `'send_adam_email'` — the body of the case is unchanged.)
 
 And extend the prompt-text ternary in `buildPendingReviewResult`:
 
 ```javascript
   const prompt = action?.type === 'send_message'
     ? 'Check the message, then tap Send.'
-    : action?.type === 'send_millie_email'
+    : action?.type === 'send_adam_email'
       ? 'Check the message, then confirm to send it.'
       : ['send_email', 'send_outlook_email'].includes(action?.type)
         ? 'Check the email, then tap Send.'
@@ -1026,20 +1026,20 @@ And extend the prompt-text ternary in `buildPendingReviewResult`:
 In `api/services/user-facing-copy.js`, add next to `send_message: 'Message'`:
 
 ```javascript
-  send_millie_email: 'Message',
+  send_adam_email: 'Message',
 ```
 
 - [ ] **Step 4: Write the failing test**
 
 ```javascript
-// test/smoke/millie-email-action.test.js
+// test/smoke/adam-email-action.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { executeAction } = require('../../api/index');
 
-test('send_millie_email requires to and body', async () => {
-  const result = await executeAction('demo-test-user', 'send_millie_email', { body: 'hi' }, {});
+test('send_adam_email requires to and body', async () => {
+  const result = await executeAction('demo-test-user', 'send_adam_email', { body: 'hi' }, {});
   assert.equal(result.success, false);
   assert.match(result.error, /to|recipient/i);
 });
@@ -1049,46 +1049,46 @@ test('send_millie_email requires to and body', async () => {
 
 - [ ] **Step 5: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-email-action.test.js`
-Expected: FAIL — `send_millie_email requires contact and message` doesn't exist as a case, falls through to the switch's default (likely `{success: false, error: 'Unknown action: send_millie_email'}` or similar) — confirm it fails for the *right* reason (case missing), then proceed.
+Run: `node --test test/smoke/adam-email-action.test.js`
+Expected: FAIL — `send_adam_email requires contact and message` doesn't exist as a case, falls through to the switch's default (likely `{success: false, error: 'Unknown action: send_adam_email'}` or similar) — confirm it fails for the *right* reason (case missing), then proceed.
 
 - [ ] **Step 6: Add the executeAction case**
 
 In `api/index.js`, add near the existing `case 'send_message'` block:
 
 ```javascript
-    case 'send_millie_email': {
+    case 'send_adam_email': {
       const to = String(params?.to || '').trim();
       const body = String(params?.body || '').trim();
-      if (!to || !body) return { success: false, error: 'send_millie_email requires a recipient and a message' };
+      if (!to || !body) return { success: false, error: 'send_adam_email requires a recipient and a message' };
       if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(to)) {
         return { success: false, error: `I need ${to}'s email address — that doesn't look like one.` };
       }
 
-      const { ensureMillieIdentity, getActiveHandle } = require('./services/millie-identity');
+      const { ensureAdamIdentity, getActiveHandle } = require('./services/adam-identity');
       const { findOrCreateParticipant } = require('./services/participants');
       const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
-      const { sendMillieEmail } = require('../connectors/millie-email-resend');
+      const { sendAdamEmail } = require('../connectors/adam-email-resend');
 
-      const cap = await checkMillieSendCap(userId, 'email');
+      const cap = await checkAdamSendCap(userId, 'email');
       if (!cap.allowed) return { success: false, error: cap.message };
 
-      const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+      const { identity, handles } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
       const emailHandle = handles.find(h => h.channel_type === 'email') || await getActiveHandle(supabase, userId, 'email');
-      if (!emailHandle) return { success: false, error: 'Millie does not have an email address set up yet.' };
+      if (!emailHandle) return { success: false, error: 'Adam does not have an email address set up yet.' };
 
       const { participant, address } = await findOrCreateParticipant(supabase, userId, {
         displayName: to, channelType: 'email', addressValue: to
       });
       const requestTaskId = params?.request_task_id || null;
       const { conversation } = await getOrCreateConversation(supabase, {
-        userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+        userId, adamIdentityId: identity.id, participantId: participant.id, requestTaskId
       });
 
-      const subject = String(params?.subject || '').trim() || 'A message from Millie';
+      const subject = String(params?.subject || '').trim() || 'A message from Adam';
       let sendResult;
       try {
-        sendResult = await sendMillieEmail({ from: emailHandle.handle_value, to, subject, body });
+        sendResult = await sendAdamEmail({ from: emailHandle.handle_value, to, subject, body });
       } catch (err) {
         return { success: false, error: `Couldn't send that: ${err.message}` };
       }
@@ -1098,7 +1098,7 @@ In `api/index.js`, add near the existing `case 'send_message'` block:
         channelType: 'email',
         direction: 'outbound',
         participantAddressId: address.id,
-        millieIdentityHandleId: emailHandle.id,
+        adamIdentityHandleId: emailHandle.id,
         providerEventId: sendResult.providerMessageId,
         subject,
         body
@@ -1106,7 +1106,7 @@ In `api/index.js`, add near the existing `case 'send_message'` block:
 
       return {
         success: true,
-        text: `Sent to ${to} from Millie's email.`,
+        text: `Sent to ${to} from Adam's email.`,
         cardText: `To ${to} · ${body}`,
         actionSummary: 'Message sent',
         conversationId: conversation.id
@@ -1118,8 +1118,8 @@ Add the case directly after the existing `case 'send_message': { ... }` block (d
 
 - [ ] **Step 7: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-email-action.test.js`
-Expected: PASS — the validation-only test passes without needing `checkMillieSendCap`/DB calls to be reached (they're gated behind the `to`/`body` presence check, which fails first).
+Run: `node --test test/smoke/adam-email-action.test.js`
+Expected: PASS — the validation-only test passes without needing `checkAdamSendCap`/DB calls to be reached (they're gated behind the `to`/`body` presence check, which fails first).
 
 - [ ] **Step 8: Run the full existing suite to confirm no regressions**
 
@@ -1129,11 +1129,11 @@ Expected: all prior tests still pass (this task only adds a new switch case and 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add api/action-contracts.js api/services/pending-review.js api/services/user-facing-copy.js api/index.js test/smoke/millie-email-action.test.js
-git commit -m "feat(millie-identity): add send_millie_email action, review-gated like every other consequential send"
+git add api/action-contracts.js api/services/pending-review.js api/services/user-facing-copy.js api/index.js test/smoke/adam-email-action.test.js
+git commit -m "feat(adam-identity): add send_adam_email action, review-gated like every other consequential send"
 ```
 
-*(Note: `checkMillieSendCap` is implemented in Task 12 — until that task lands, add a temporary local stub in this task's step 6 (`async function checkMillieSendCap() { return { allowed: true }; }` placed above the `switch`) and remove the stub when Task 12 supplies the real one. This is the one place in this plan where a stub is intentional and temporary, not a placeholder left unfinished — Task 12 replaces it in the same file.)*
+*(Note: `checkAdamSendCap` is implemented in Task 12 — until that task lands, add a temporary local stub in this task's step 6 (`async function checkAdamSendCap() { return { allowed: true }; }` placed above the `switch`) and remove the stub when Task 12 supplies the real one. This is the one place in this plan where a stub is intentional and temporary, not a placeholder left unfinished — Task 12 replaces it in the same file.)*
 
 ---
 
@@ -1143,7 +1143,7 @@ git commit -m "feat(millie-identity): add send_millie_email action, review-gated
 - Create: `api/services/reply-policy.js`
 - Modify: `api/index.js` — add the webhook route
 - Test: Create: `test/smoke/reply-policy.test.js`
-- Test: Create: `test/smoke/millie-email-webhook.test.js`
+- Test: Create: `test/smoke/adam-email-webhook.test.js`
 
 **Interfaces:**
 - Consumes: `parseInboundPayload` (Task 3), `findOrCreateParticipant` (Task 4), `getOrCreateConversation`/`appendEvent`/`findOpenConversationsForParticipant` (Task 5).
@@ -1187,7 +1187,7 @@ Expected: FAIL — module not found
 'use strict';
 
 // Milestone 1 has exactly two tiers: 'ask' (the reply implies a decision — a
-// different time, a price, a question back — Millie must check with the user
+// different time, a price, a question back — Adam must check with the user
 // before anything else happens) and 'surface' (purely informational, nothing to
 // decide). There is deliberately no 'auto-reply' tier yet — see Global Constraints
 // in the plan this file was built from.
@@ -1223,13 +1223,13 @@ Expected: PASS, 4/4
 
 ```bash
 git add api/services/reply-policy.js test/smoke/reply-policy.test.js
-git commit -m "feat(millie-identity): add reply-policy classifier (ask vs surface, no auto-reply)"
+git commit -m "feat(adam-identity): add reply-policy classifier (ask vs surface, no auto-reply)"
 ```
 
 - [ ] **Step 6: Write the failing webhook test**
 
 ```javascript
-// test/smoke/millie-email-webhook.test.js
+// test/smoke/adam-email-webhook.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const http = require('node:http');
@@ -1249,7 +1249,7 @@ function postJson(server, path, body) {
   });
 }
 
-test('POST /webhooks/millie-email with no matching Millie address returns 200 and does nothing destructive', async () => {
+test('POST /webhooks/millie-email with no matching Adam address returns 200 and does nothing destructive', async () => {
   const server = app.listen(0);
   try {
     const res = await postJson(server, '/webhooks/millie-email', {
@@ -1264,7 +1264,7 @@ test('POST /webhooks/millie-email with no matching Millie address returns 200 an
 
 - [ ] **Step 7: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-email-webhook.test.js`
+Run: `node --test test/smoke/adam-email-webhook.test.js`
 Expected: FAIL — 404 (route doesn't exist yet)
 
 - [ ] **Step 8: Add the route**
@@ -1277,7 +1277,7 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
   // inbound email is not the sender's problem to see an error for.
   res.status(200).json({ received: true });
   try {
-    const { parseInboundPayload } = require('../connectors/millie-email-resend');
+    const { parseInboundPayload } = require('../connectors/adam-email-resend');
     const normalized = parseInboundPayload(req.body);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
@@ -1313,7 +1313,7 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
     const conversation = openConversations.length
       ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
       : (await getOrCreateConversation(supabase, {
-        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+        userId: identity.user_id, adamIdentityId: identity.id, participantId: participant.id
       })).conversation;
 
     const decision = classifyReply(normalized.body);
@@ -1322,7 +1322,7 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
       channelType: 'email',
       direction: 'inbound',
       participantAddressId: address.id,
-      millieIdentityHandleId: handle.id,
+      adamIdentityHandleId: handle.id,
       providerEventId: normalized.providerMessageId,
       subject: normalized.subject,
       body: normalized.body,
@@ -1338,14 +1338,14 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
 
 - [ ] **Step 9: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-email-webhook.test.js`
+Run: `node --test test/smoke/adam-email-webhook.test.js`
 Expected: PASS
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add api/index.js test/smoke/millie-email-webhook.test.js
-git commit -m "feat(millie-identity): add inbound email webhook, matches replies to the right conversation"
+git add api/index.js test/smoke/adam-email-webhook.test.js
+git commit -m "feat(adam-identity): add inbound email webhook, matches replies to the right conversation"
 ```
 
 ---
@@ -1354,7 +1354,7 @@ git commit -m "feat(millie-identity): add inbound email webhook, matches replies
 
 **Files:**
 - Modify: `api/services/life-briefing.js`
-- Test: Modify: existing `test/smoke/life-briefing.test.js` if present, else create `test/smoke/life-briefing-millie-conversations.test.js`
+- Test: Modify: existing `test/smoke/life-briefing.test.js` if present, else create `test/smoke/life-briefing-adam-conversations.test.js`
 
 **Interfaces:**
 - Consumes: a list of conversation+latest-event rows (fetched by the caller, not by this file — matches the existing pattern where `buildLifeBriefing` takes already-fetched arrays).
@@ -1367,7 +1367,7 @@ Run: `ls test/smoke/ | grep life-briefing`
 - [ ] **Step 2: Write the failing test**
 
 ```javascript
-// test/smoke/life-briefing-millie-conversations.test.js
+// test/smoke/life-briefing-adam-conversations.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
@@ -1400,7 +1400,7 @@ test('buildLifeBriefing includes conversation updates alongside existing item ty
 
 - [ ] **Step 3: Run the test to verify it fails**
 
-Run: `node --test test/smoke/life-briefing-millie-conversations.test.js`
+Run: `node --test test/smoke/life-briefing-adam-conversations.test.js`
 Expected: FAIL — `normalizeConversationUpdate` is not exported, and `buildLifeBriefing` doesn't accept `conversationUpdates`
 
 - [ ] **Step 4: Read the current `buildLifeBriefing` and `normalizeEmail` to match the existing style exactly**
@@ -1413,7 +1413,7 @@ Add to `api/services/life-briefing.js`, following the existing `normalizeEmail`-
 
 ```javascript
 function normalizeConversationUpdate(update = {}) {
-  const name = cleanText(update.participantDisplayName, 'Someone Millie contacted');
+  const name = cleanText(update.participantDisplayName, 'Someone Adam contacted');
   const body = cleanText(update.latestEventBody, '', 240);
   return {
     kind: 'conversation_update',
@@ -1431,7 +1431,7 @@ Export `normalizeConversationUpdate` alongside the file's existing exports.
 
 - [ ] **Step 6: Run the test to verify it passes**
 
-Run: `node --test test/smoke/life-briefing-millie-conversations.test.js`
+Run: `node --test test/smoke/life-briefing-adam-conversations.test.js`
 Expected: PASS, 2/2
 
 - [ ] **Step 7: Run the full suite**
@@ -1442,8 +1442,8 @@ Expected: all pass, including any pre-existing `life-briefing` tests (this task 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add api/services/life-briefing.js test/smoke/life-briefing-millie-conversations.test.js
-git commit -m "feat(millie-identity): surface conversation updates on the existing Home briefing feed"
+git add api/services/life-briefing.js test/smoke/life-briefing-adam-conversations.test.js
+git commit -m "feat(adam-identity): surface conversation updates on the existing Home briefing feed"
 ```
 
 ---
@@ -1451,16 +1451,16 @@ git commit -m "feat(millie-identity): surface conversation updates on the existi
 ### Task 9: Identity provisioning wiring — signup + backfill
 
 **Files:**
-- Modify: `api/index.js` — call `ensureMillieIdentity` from `/auth/register`, add `POST /millie/provision`
-- Test: Create: `test/smoke/millie-provision-endpoint.test.js`
+- Modify: `api/index.js` — call `ensureAdamIdentity` from `/auth/register`, add `POST /millie/provision`
+- Test: Create: `test/smoke/adam-provision-endpoint.test.js`
 
 **Interfaces:**
-- Consumes: `ensureMillieIdentity` (Task 2).
+- Consumes: `ensureAdamIdentity` (Task 2).
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// test/smoke/millie-provision-endpoint.test.js
+// test/smoke/adam-provision-endpoint.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const http = require('node:http');
@@ -1496,7 +1496,7 @@ test('POST /millie/provision without auth is rejected', async () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-provision-endpoint.test.js`
+Run: `node --test test/smoke/adam-provision-endpoint.test.js`
 Expected: FAIL — 404 (route doesn't exist)
 
 - [ ] **Step 3: Add the backfill endpoint**
@@ -1508,14 +1508,14 @@ app.post('/millie/provision', async (req, res) => {
   try {
     const { userId } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
-    const { ensureMillieIdentity } = require('./services/millie-identity');
-    const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+    const { ensureAdamIdentity } = require('./services/adam-identity');
+    const { identity, handles } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
     res.json({
       success: true,
       email: handles.find(h => h.channel_type === 'email')?.handle_value || null
     });
   } catch (err) {
-    log('error', 'millie.provision.error', { error: err.message });
+    log('error', 'adam.provision.error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -1525,7 +1525,7 @@ app.post('/millie/provision', async (req, res) => {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-provision-endpoint.test.js`
+Run: `node --test test/smoke/adam-provision-endpoint.test.js`
 Expected: PASS
 
 - [ ] **Step 5: Wire provisioning into `/auth/register`**
@@ -1533,8 +1533,8 @@ Expected: PASS
 In `api/index.js`'s `/auth/register` handler, after the existing `log('info', 'auth.register', { userId });` line and before the welcome-email block, add (fire-and-forget, must never block or fail signup):
 
 ```javascript
-    require('./services/millie-identity').ensureMillieIdentity(supabase, userId, { attemptPhone: false })
-      .catch(err => log('warn', 'millie.provision.signup_failed', { userId, error: err.message }));
+    require('./services/adam-identity').ensureAdamIdentity(supabase, userId, { attemptPhone: false })
+      .catch(err => log('warn', 'adam.provision.signup_failed', { userId, error: err.message }));
 ```
 
 - [ ] **Step 6: Run the full suite**
@@ -1545,8 +1545,8 @@ Expected: all pass. (No existing registration test should break — this is a no
 - [ ] **Step 7: Commit**
 
 ```bash
-git add api/index.js test/smoke/millie-provision-endpoint.test.js
-git commit -m "feat(millie-identity): provision Millie's email identity at signup, plus a backfill endpoint"
+git add api/index.js test/smoke/adam-provision-endpoint.test.js
+git commit -m "feat(adam-identity): provision Adam's email identity at signup, plus a backfill endpoint"
 ```
 
 ---
@@ -1555,7 +1555,7 @@ git commit -m "feat(millie-identity): provision Millie's email identity at signu
 
 No new files — this task runs the real acceptance test against the real server, real Supabase, and (if configured) the real Resend account, per this project's established live-verification standard (a capability isn't "done" because unit tests pass).
 
-- [ ] **Step 1: Provision a real Millie email handle for `demo-test-user`**
+- [ ] **Step 1: Provision a real Adam email handle for `demo-test-user`**
 
 Start the local server with `NODE_ENV=development OXY_ENABLE_DEV_AUTH=true`, log in via `/auth/dev/demo-login`, then:
 ```bash
@@ -1563,13 +1563,13 @@ curl -s -X POST http://localhost:8091/millie/provision -H "Authorization: Bearer
 ```
 Expected: `{"success":true,"email":"demo-test-user@millie.oxy.app"}` (or whatever `MILLIE_EMAIL_DOMAIN` resolves to).
 
-- [ ] **Step 2: Ask Millie to contact a real test mailbox**
+- [ ] **Step 2: Ask Adam to contact a real test mailbox**
 
 Via `/chat`, send: `"Email test-business@<a real mailbox you control> and ask if they can move our booking to 8."` Confirm the resulting pending-review card via the existing approve flow (same as any other `review_required` action).
 
 - [ ] **Step 3: Verify the email actually arrives**
 
-Check the real test mailbox's inbox. Confirm: it's from the Millie handle (not the user's own address), the signature line is present, the content matches what was asked.
+Check the real test mailbox's inbox. Confirm: it's from the Adam handle (not the user's own address), the signature line is present, the content matches what was asked.
 
 - [ ] **Step 4: Reply from the test mailbox**
 
@@ -1604,22 +1604,22 @@ This step has no commit — it's verification, not a code change. If any step fa
 ### Task 11: Phone number provisioning + SMS (Twilio)
 
 **Files:**
-- Create: `connectors/millie-sms-twilio.js`
-- Modify: `api/services/millie-identity.js` — pass a real `provisionPhoneNumber` implementation
-- Modify: `api/action-contracts.js`, `api/services/pending-review.js`, `api/services/user-facing-copy.js`, `api/index.js` — mirror Task 6 exactly, for `send_millie_sms`
+- Create: `connectors/adam-sms-twilio.js`
+- Modify: `api/services/adam-identity.js` — pass a real `provisionPhoneNumber` implementation
+- Modify: `api/action-contracts.js`, `api/services/pending-review.js`, `api/services/user-facing-copy.js`, `api/index.js` — mirror Task 6 exactly, for `send_adam_sms`
 - Modify: `api/index.js` — add `POST /webhooks/millie-sms`, mirroring Task 7
 - Modify: `api/index.js` — update `/millie/provision` to attempt phone provisioning too
-- Test: Create: `test/smoke/millie-sms-twilio.test.js`
-- Test: Create: `test/smoke/millie-sms-action.test.js`
-- Test: Create: `test/smoke/millie-sms-webhook.test.js`
+- Test: Create: `test/smoke/adam-sms-twilio.test.js`
+- Test: Create: `test/smoke/adam-sms-action.test.js`
+- Test: Create: `test/smoke/adam-sms-webhook.test.js`
 
 **Interfaces:**
-- Produces: `provisionPhoneNumber(userId) -> Promise<{phoneNumber, providerRef}>`, `sendMillieSms({from, to, body}) -> Promise<{providerMessageId}>`, `parseInboundSmsPayload(payload) -> normalized shape` (same shape as the email adapter's `parseInboundPayload`, with `subject` always empty).
+- Produces: `provisionPhoneNumber(userId) -> Promise<{phoneNumber, providerRef}>`, `sendAdamSms({from, to, body}) -> Promise<{providerMessageId}>`, `parseInboundSmsPayload(payload) -> normalized shape` (same shape as the email adapter's `parseInboundPayload`, with `subject` always empty).
 
 - [ ] **Step 1: Write the failing test for the Twilio adapter**
 
 ```javascript
-// test/smoke/millie-sms-twilio.test.js
+// test/smoke/adam-sms-twilio.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const Module = require('node:module');
@@ -1630,10 +1630,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') return mockAxios;
   return originalLoad.call(this, request, parent, isMain);
 };
-const { sendMillieSms, parseInboundSmsPayload, provisionPhoneNumber, MILLIE_SMS_SIGNATURE_LINE } = require('../../connectors/millie-sms-twilio');
+const { sendAdamSms, parseInboundSmsPayload, provisionPhoneNumber, MILLIE_SMS_SIGNATURE_LINE } = require('../../connectors/adam-sms-twilio');
 Module._load = originalLoad;
 
-test('sendMillieSms posts to Twilio Messages API and appends the signature line', async () => {
+test('sendAdamSms posts to Twilio Messages API and appends the signature line', async () => {
   const oldSid = process.env.TWILIO_ACCOUNT_SID;
   const oldToken = process.env.TWILIO_AUTH_TOKEN;
   process.env.TWILIO_ACCOUNT_SID = 'ACtest';
@@ -1645,7 +1645,7 @@ test('sendMillieSms posts to Twilio Messages API and appends the signature line'
     return { data: { sid: 'SMtest1' } };
   };
   try {
-    const result = await sendMillieSms({ from: '+15551230000', to: '+15559876543', body: 'Can you move our booking to 8pm?' });
+    const result = await sendAdamSms({ from: '+15551230000', to: '+15559876543', body: 'Can you move our booking to 8pm?' });
     assert.match(captured.url, /Accounts\/ACtest\/Messages\.json$/);
     assert.match(captured.body.toString(), /Can you move our booking to 8pm\?/);
     assert.match(captured.body.toString(), new RegExp(MILLIE_SMS_SIGNATURE_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -1678,17 +1678,17 @@ test('provisionPhoneNumber throws a clear error when Twilio env vars are missing
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-sms-twilio.test.js`
+Run: `node --test test/smoke/adam-sms-twilio.test.js`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write the implementation**
 
 ```javascript
-// connectors/millie-sms-twilio.js
+// connectors/adam-sms-twilio.js
 'use strict';
 const axios = require('axios');
 
-// Millie's phone number and SMS, via Twilio's plain REST API (Basic Auth,
+// Adam's phone number and SMS, via Twilio's plain REST API (Basic Auth,
 // application/x-www-form-urlencoded) — no twilio npm SDK, matching this
 // codebase's existing pattern of calling provider REST APIs directly with axios
 // (see connectors/google.js). US numbers require A2P 10DLC brand+campaign
@@ -1697,7 +1697,7 @@ const axios = require('axios');
 // the number without it, but delivery may be filtered until registration
 // completes. This file does not attempt to detect or manage that registration.
 
-const MILLIE_SMS_SIGNATURE_LINE = '- Millie (assistant)';
+const MILLIE_SMS_SIGNATURE_LINE = '- Adam (assistant)';
 
 function twilioAuth() {
   const sid = process.env.TWILIO_ACCOUNT_SID;
@@ -1728,7 +1728,7 @@ async function provisionPhoneNumber(userId) {
   return { phoneNumber: purchase.data.phone_number, providerRef: purchase.data.sid };
 }
 
-async function sendMillieSms({ from, to, body }) {
+async function sendAdamSms({ from, to, body }) {
   const { sid, token } = twilioAuth();
   const text = `${body}\n${MILLIE_SMS_SIGNATURE_LINE}`;
   const response = await axios.post(
@@ -1753,19 +1753,19 @@ function parseInboundSmsPayload(payload) {
   };
 }
 
-module.exports = { provisionPhoneNumber, sendMillieSms, parseInboundSmsPayload, MILLIE_SMS_SIGNATURE_LINE };
+module.exports = { provisionPhoneNumber, sendAdamSms, parseInboundSmsPayload, MILLIE_SMS_SIGNATURE_LINE };
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-sms-twilio.test.js`
+Run: `node --test test/smoke/adam-sms-twilio.test.js`
 Expected: PASS, 3/3
 
 - [ ] **Step 5: Commit the adapter**
 
 ```bash
-git add connectors/millie-sms-twilio.js test/smoke/millie-sms-twilio.test.js
-git commit -m "feat(millie-identity): add Twilio phone number provisioning + SMS adapter"
+git add connectors/adam-sms-twilio.js test/smoke/adam-sms-twilio.test.js
+git commit -m "feat(adam-identity): add Twilio phone number provisioning + SMS adapter"
 ```
 
 - [ ] **Step 6: Wire phone provisioning into `/millie/provision`**
@@ -1777,9 +1777,9 @@ app.post('/millie/provision', async (req, res) => {
   try {
     const { userId } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
-    const { ensureMillieIdentity } = require('./services/millie-identity');
-    const { provisionPhoneNumber } = require('../connectors/millie-sms-twilio');
-    const { identity, handles } = await ensureMillieIdentity(supabase, userId, {
+    const { ensureAdamIdentity } = require('./services/adam-identity');
+    const { provisionPhoneNumber } = require('../connectors/adam-sms-twilio');
+    const { identity, handles } = await ensureAdamIdentity(supabase, userId, {
       attemptPhone: true,
       provisionPhoneNumber
     });
@@ -1789,32 +1789,32 @@ app.post('/millie/provision', async (req, res) => {
       phone: handles.find(h => h.channel_type === 'phone_sms')?.handle_value || null
     });
   } catch (err) {
-    log('error', 'millie.provision.error', { error: err.message });
+    log('error', 'adam.provision.error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
 ```
 
-- [ ] **Step 7: Run `test/smoke/millie-provision-endpoint.test.js` to confirm no regression**
+- [ ] **Step 7: Run `test/smoke/adam-provision-endpoint.test.js` to confirm no regression**
 
-Run: `node --test test/smoke/millie-provision-endpoint.test.js`
+Run: `node --test test/smoke/adam-provision-endpoint.test.js`
 Expected: PASS (the existing 401-without-auth test is unaffected by this change).
 
-- [ ] **Step 8: Add `send_millie_sms` contract, review copy, and label**
+- [ ] **Step 8: Add `send_adam_sms` contract, review copy, and label**
 
-Mirror Task 6 steps 1–3 exactly, substituting `send_millie_sms` for `send_millie_email`, `to`/`body` unchanged, and using `+E.164 phone number` in `inputExample.to` instead of an email address.
+Mirror Task 6 steps 1–3 exactly, substituting `send_adam_sms` for `send_adam_email`, `to`/`body` unchanged, and using `+E.164 phone number` in `inputExample.to` instead of an email address.
 
 - [ ] **Step 9: Write the failing test**
 
 ```javascript
-// test/smoke/millie-sms-action.test.js
+// test/smoke/adam-sms-action.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { executeAction } = require('../../api/index');
 
-test('send_millie_sms requires to and body', async () => {
-  const result = await executeAction('demo-test-user', 'send_millie_sms', { body: 'hi' }, {});
+test('send_adam_sms requires to and body', async () => {
+  const result = await executeAction('demo-test-user', 'send_adam_sms', { body: 'hi' }, {});
   assert.equal(result.success, false);
   assert.match(result.error, /to|recipient|number/i);
 });
@@ -1822,40 +1822,40 @@ test('send_millie_sms requires to and body', async () => {
 
 - [ ] **Step 10: Add the `executeAction` case**
 
-Mirror Task 6 Step 6's `case 'send_millie_email'` structure exactly, with these substitutions: validate `to` as `looksLikeMessageAddress`-style (reuse the existing `looksLikeMessageAddress` function already defined in `api/index.js` for `send_message`, rather than the email-shape regex), use `getActiveHandle(supabase, userId, 'phone_sms')`, `findOrCreateParticipant(..., { channelType: 'phone_sms', addressValue: to })`, `sendMillieSms` instead of `sendMillieEmail`, `channelType: 'phone_sms'` in `appendEvent`, and no `subject`.
+Mirror Task 6 Step 6's `case 'send_adam_email'` structure exactly, with these substitutions: validate `to` as `looksLikeMessageAddress`-style (reuse the existing `looksLikeMessageAddress` function already defined in `api/index.js` for `send_message`, rather than the email-shape regex), use `getActiveHandle(supabase, userId, 'phone_sms')`, `findOrCreateParticipant(..., { channelType: 'phone_sms', addressValue: to })`, `sendAdamSms` instead of `sendAdamEmail`, `channelType: 'phone_sms'` in `appendEvent`, and no `subject`.
 
 ```javascript
-    case 'send_millie_sms': {
+    case 'send_adam_sms': {
       const to = String(params?.to || '').trim();
       const body = String(params?.body || '').trim();
-      if (!to || !body) return { success: false, error: 'send_millie_sms requires a recipient phone number and a message' };
+      if (!to || !body) return { success: false, error: 'send_adam_sms requires a recipient phone number and a message' };
       if (!looksLikeMessageAddress(to)) {
         return { success: false, error: `I need a phone number for ${to} — that doesn't look like one.` };
       }
 
-      const { ensureMillieIdentity, getActiveHandle } = require('./services/millie-identity');
+      const { ensureAdamIdentity, getActiveHandle } = require('./services/adam-identity');
       const { findOrCreateParticipant } = require('./services/participants');
       const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
-      const { sendMillieSms } = require('../connectors/millie-sms-twilio');
+      const { sendAdamSms } = require('../connectors/adam-sms-twilio');
 
-      const cap = await checkMillieSendCap(userId, 'phone_sms');
+      const cap = await checkAdamSendCap(userId, 'phone_sms');
       if (!cap.allowed) return { success: false, error: cap.message };
 
-      const { identity } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+      const { identity } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
       const phoneHandle = await getActiveHandle(supabase, userId, 'phone_sms');
-      if (!phoneHandle) return { success: false, error: 'Millie does not have a phone number set up yet.' };
+      if (!phoneHandle) return { success: false, error: 'Adam does not have a phone number set up yet.' };
 
       const { participant, address } = await findOrCreateParticipant(supabase, userId, {
         displayName: to, channelType: 'phone_sms', addressValue: to
       });
       const requestTaskId = params?.request_task_id || null;
       const { conversation } = await getOrCreateConversation(supabase, {
-        userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+        userId, adamIdentityId: identity.id, participantId: participant.id, requestTaskId
       });
 
       let sendResult;
       try {
-        sendResult = await sendMillieSms({ from: phoneHandle.handle_value, to, body });
+        sendResult = await sendAdamSms({ from: phoneHandle.handle_value, to, body });
       } catch (err) {
         return { success: false, error: `Couldn't send that: ${err.message}` };
       }
@@ -1865,14 +1865,14 @@ Mirror Task 6 Step 6's `case 'send_millie_email'` structure exactly, with these 
         channelType: 'phone_sms',
         direction: 'outbound',
         participantAddressId: address.id,
-        millieIdentityHandleId: phoneHandle.id,
+        adamIdentityHandleId: phoneHandle.id,
         providerEventId: sendResult.providerMessageId,
         body
       });
 
       return {
         success: true,
-        text: `Sent to ${to} from Millie's number.`,
+        text: `Sent to ${to} from Adam's number.`,
         cardText: `To ${to} · ${body}`,
         actionSummary: 'Message sent',
         conversationId: conversation.id
@@ -1882,18 +1882,18 @@ Mirror Task 6 Step 6's `case 'send_millie_email'` structure exactly, with these 
 
 - [ ] **Step 11: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-sms-action.test.js`
+Run: `node --test test/smoke/adam-sms-action.test.js`
 Expected: PASS
 
 - [ ] **Step 12: Add the inbound SMS webhook**
 
-Mirror Task 7 Step 8's route exactly, substituting `/webhooks/millie-sms`, `parseInboundSmsPayload` from `connectors/millie-sms-twilio`, `channel_type: 'phone_sms'` in the handle lookup and `appendEvent` call, and no `subject`. Twilio POSTs `application/x-www-form-urlencoded`, not JSON — use `express.urlencoded({ extended: false })` as this route's body parser instead of `express.json()`.
+Mirror Task 7 Step 8's route exactly, substituting `/webhooks/millie-sms`, `parseInboundSmsPayload` from `connectors/adam-sms-twilio`, `channel_type: 'phone_sms'` in the handle lookup and `appendEvent` call, and no `subject`. Twilio POSTs `application/x-www-form-urlencoded`, not JSON — use `express.urlencoded({ extended: false })` as this route's body parser instead of `express.json()`.
 
 ```javascript
 app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async (req, res) => {
   res.status(200).send('<Response></Response>'); // Twilio expects TwiML or empty 200
   try {
-    const { parseInboundSmsPayload } = require('../connectors/millie-sms-twilio');
+    const { parseInboundSmsPayload } = require('../connectors/adam-sms-twilio');
     const normalized = parseInboundSmsPayload(req.body);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
@@ -1924,7 +1924,7 @@ app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async 
     const conversation = openConversations.length
       ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
       : (await getOrCreateConversation(supabase, {
-        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+        userId: identity.user_id, adamIdentityId: identity.id, participantId: participant.id
       })).conversation;
 
     const decision = classifyReply(normalized.body);
@@ -1933,7 +1933,7 @@ app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async 
       channelType: 'phone_sms',
       direction: 'inbound',
       participantAddressId: address.id,
-      millieIdentityHandleId: handle.id,
+      adamIdentityHandleId: handle.id,
       providerEventId: normalized.providerMessageId,
       body: normalized.body,
       needsDecision: decision === 'ask',
@@ -1949,14 +1949,14 @@ app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async 
 - [ ] **Step 13: Write the failing webhook test**
 
 ```javascript
-// test/smoke/millie-sms-webhook.test.js
+// test/smoke/adam-sms-webhook.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const http = require('node:http');
 
 const app = require('../../api/index');
 
-test('POST /webhooks/millie-sms with no matching Millie number returns 200', async () => {
+test('POST /webhooks/millie-sms with no matching Adam number returns 200', async () => {
   const server = app.listen(0);
   try {
     const body = new URLSearchParams({ From: '+15559876543', To: '+15550000000', Body: 'hi', MessageSid: 'SMtest' });
@@ -1978,7 +1978,7 @@ test('POST /webhooks/millie-sms with no matching Millie number returns 200', asy
 
 - [ ] **Step 14: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-sms-webhook.test.js`
+Run: `node --test test/smoke/adam-sms-webhook.test.js`
 Expected: PASS
 
 - [ ] **Step 15: Run the full suite**
@@ -1989,8 +1989,8 @@ Expected: all pass.
 - [ ] **Step 16: Commit**
 
 ```bash
-git add api/index.js api/action-contracts.js api/services/pending-review.js api/services/user-facing-copy.js test/smoke/millie-sms-action.test.js test/smoke/millie-sms-webhook.test.js
-git commit -m "feat(millie-identity): add send_millie_sms action + inbound SMS webhook, mirrors the email path"
+git add api/index.js api/action-contracts.js api/services/pending-review.js api/services/user-facing-copy.js test/smoke/adam-sms-action.test.js test/smoke/adam-sms-webhook.test.js
+git commit -m "feat(adam-identity): add send_adam_sms action + inbound SMS webhook, mirrors the email path"
 ```
 
 ---
@@ -1998,33 +1998,33 @@ git commit -m "feat(millie-identity): add send_millie_sms action + inbound SMS w
 ### Task 12: Rate limiting and abuse guard
 
 **Files:**
-- Modify: `api/index.js` — add `checkMillieSendCap`, use it in both `send_millie_email` and `send_millie_sms` (replacing the Task 6 stub)
-- Test: Create: `test/smoke/millie-send-cap.test.js`
+- Modify: `api/index.js` — add `checkAdamSendCap`, use it in both `send_adam_email` and `send_adam_sms` (replacing the Task 6 stub)
+- Test: Create: `test/smoke/adam-send-cap.test.js`
 
 **Interfaces:**
-- Produces: `checkMillieSendCap(userId, channelType) -> Promise<{allowed: boolean, message?: string}>`.
+- Produces: `checkAdamSendCap(userId, channelType) -> Promise<{allowed: boolean, message?: string}>`.
 
 **Why a DB-backed check, not the existing in-memory `createRateLimiter`:** `createRateLimiter`'s in-memory `Map` doesn't survive a restart and isn't shared across Cloud Run instances if the service scales beyond one — fine for a soft per-minute chat limit, not fine for a hard daily abuse cap. This counts real rows instead.
 
 - [ ] **Step 1: Write the failing test**
 
 ```javascript
-// test/smoke/millie-send-cap.test.js
+// test/smoke/adam-send-cap.test.js
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { checkMillieSendCap } = require('../../api/index');
+const { checkAdamSendCap } = require('../../api/index');
 
-test('checkMillieSendCap allows sending when under the daily cap', async () => {
-  const result = await checkMillieSendCap.__testOverride(async () => 3, 'demo-test-user', 'email');
+test('checkAdamSendCap allows sending when under the daily cap', async () => {
+  const result = await checkAdamSendCap.__testOverride(async () => 3, 'demo-test-user', 'email');
   assert.equal(result.allowed, true);
 });
 
-test('checkMillieSendCap blocks sending at or above the daily cap', async () => {
+test('checkAdamSendCap blocks sending at or above the daily cap', async () => {
   const oldCap = process.env.MILLIE_DAILY_SEND_CAP;
   process.env.MILLIE_DAILY_SEND_CAP = '5';
   try {
-    const result = await checkMillieSendCap.__testOverride(async () => 5, 'demo-test-user', 'email');
+    const result = await checkAdamSendCap.__testOverride(async () => 5, 'demo-test-user', 'email');
     assert.equal(result.allowed, false);
     assert.match(result.message, /today/i);
   } finally {
@@ -2036,10 +2036,10 @@ test('checkMillieSendCap blocks sending at or above the daily cap', async () => 
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --test test/smoke/millie-send-cap.test.js`
-Expected: FAIL — `checkMillieSendCap` is not exported
+Run: `node --test test/smoke/adam-send-cap.test.js`
+Expected: FAIL — `checkAdamSendCap` is not exported
 
-- [ ] **Step 3: Implement `checkMillieSendCap`**
+- [ ] **Step 3: Implement `checkAdamSendCap`**
 
 In `api/index.js`, define near the other helper functions used by `executeAction` (and remove the Task 6 temporary stub):
 
@@ -2047,7 +2047,7 @@ In `api/index.js`, define near the other helper functions used by `executeAction
 // Testable without hitting Supabase: __testOverride lets tests inject the count
 // function directly, matching this file's existing convention of exposing a narrow
 // test seam rather than mocking the module's own `supabase` client.
-async function countMillieSendsToday(userId, channelType) {
+async function countAdamSendsToday(userId, channelType) {
   const since = new Date();
   since.setUTCHours(0, 0, 0, 0);
   const { data: identities } = await supabase.from('millie_identities').select('id').eq('user_id', userId).limit(1);
@@ -2065,33 +2065,33 @@ async function countMillieSendsToday(userId, channelType) {
   return count || 0;
 }
 
-async function checkMillieSendCap(userId, channelType, countFn = countMillieSendsToday) {
+async function checkAdamSendCap(userId, channelType, countFn = countAdamSendsToday) {
   const cap = Number(process.env.MILLIE_DAILY_SEND_CAP) || 20;
   const sentToday = await countFn(userId, channelType);
   if (sentToday >= cap) {
-    return { allowed: false, message: `Millie has reached her sending limit for today (${cap}). Try again tomorrow.` };
+    return { allowed: false, message: `Adam has reached her sending limit for today (${cap}). Try again tomorrow.` };
   }
   return { allowed: true };
 }
-checkMillieSendCap.__testOverride = (countFn, userId, channelType) => checkMillieSendCap(userId, channelType, countFn);
+checkAdamSendCap.__testOverride = (countFn, userId, channelType) => checkAdamSendCap(userId, channelType, countFn);
 ```
 
-Then in both `case 'send_millie_email'` and `case 'send_millie_sms'`, the existing line:
+Then in both `case 'send_adam_email'` and `case 'send_adam_sms'`, the existing line:
 ```javascript
-      const cap = await checkMillieSendCap(userId, 'email'); // or 'phone_sms'
+      const cap = await checkAdamSendCap(userId, 'email'); // or 'phone_sms'
 ```
 now calls this real implementation instead of the Task 6 stub — delete the stub function added in Task 6.
 
-- [ ] **Step 4: Export `checkMillieSendCap`**
+- [ ] **Step 4: Export `checkAdamSendCap`**
 
 Add to the existing `module.exports.` block at the bottom of `api/index.js`:
 ```javascript
-module.exports.checkMillieSendCap = checkMillieSendCap;
+module.exports.checkAdamSendCap = checkAdamSendCap;
 ```
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `node --test test/smoke/millie-send-cap.test.js`
+Run: `node --test test/smoke/adam-send-cap.test.js`
 Expected: PASS, 2/2
 
 - [ ] **Step 6: Run the full suite**
@@ -2102,8 +2102,8 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add api/index.js test/smoke/millie-send-cap.test.js
-git commit -m "feat(millie-identity): add a real daily send cap — Millie's identity has no human tap-to-send safety net"
+git add api/index.js test/smoke/adam-send-cap.test.js
+git commit -m "feat(adam-identity): add a real daily send cap — Adam's identity has no human tap-to-send safety net"
 ```
 
 ---
@@ -2140,7 +2140,7 @@ Expected: FAIL
 
 In `api/services/data-retention.js`, add to the existing `RETENTION_POLICY` object:
 ```javascript
-  external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Millie has sent or received on your behalf: deleted after 180 days.' },
+  external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Adam has sent or received on your behalf: deleted after 180 days.' },
 ```
 
 Identity, handle, participant, and conversation *records* are relationship metadata, not message content, and are intentionally left out of this policy — only the event bodies (the actual correspondence) get a retention clock, mirroring how `conversations` (chat) has one but `connectors` (the relationship, not its content) does not.
@@ -2159,32 +2159,32 @@ Expected: all pass.
 
 ```bash
 git add api/services/data-retention.js <the test file found in Step 1>
-git commit -m "feat(millie-identity): enforce retention on Millie's conversation events"
+git commit -m "feat(adam-identity): enforce retention on Adam's conversation events"
 ```
 
 ---
 
 ## Ordered commit summary
 
-1. `feat(millie-identity): add schema for Millie's persistent communication identity`
-2. `feat(millie-identity): add identity/handle provisioning service`
-3. `feat(millie-identity): add Resend email adapter for Millie's own address`
-4. `feat(millie-identity): add participant directory with cross-channel address matching`
-5. `feat(millie-identity): add channel-agnostic conversation + encrypted event log`
-6. `feat(millie-identity): add send_millie_email action, review-gated like every other consequential send`
-7. `feat(millie-identity): add reply-policy classifier (ask vs surface, no auto-reply)`
-8. `feat(millie-identity): add inbound email webhook, matches replies to the right conversation`
-9. `feat(millie-identity): surface conversation updates on the existing Home briefing feed`
-10. `feat(millie-identity): provision Millie's email identity at signup, plus a backfill endpoint`
+1. `feat(adam-identity): add schema for Adam's persistent communication identity`
+2. `feat(adam-identity): add identity/handle provisioning service`
+3. `feat(adam-identity): add Resend email adapter for Adam's own address`
+4. `feat(adam-identity): add participant directory with cross-channel address matching`
+5. `feat(adam-identity): add channel-agnostic conversation + encrypted event log`
+6. `feat(adam-identity): add send_adam_email action, review-gated like every other consequential send`
+7. `feat(adam-identity): add reply-policy classifier (ask vs surface, no auto-reply)`
+8. `feat(adam-identity): add inbound email webhook, matches replies to the right conversation`
+9. `feat(adam-identity): surface conversation updates on the existing Home briefing feed`
+10. `feat(adam-identity): provision Adam's email identity at signup, plus a backfill endpoint`
 11. *(Task 10 — live verification, no commit)*
-12. `feat(millie-identity): add Twilio phone number provisioning + SMS adapter`
-13. `feat(millie-identity): add send_millie_sms action + inbound SMS webhook, mirrors the email path`
-14. `feat(millie-identity): add a real daily send cap — Millie's identity has no human tap-to-send safety net`
-15. `feat(millie-identity): enforce retention on Millie's conversation events`
+12. `feat(adam-identity): add Twilio phone number provisioning + SMS adapter`
+13. `feat(adam-identity): add send_adam_sms action + inbound SMS webhook, mirrors the email path`
+14. `feat(adam-identity): add a real daily send cap — Adam's identity has no human tap-to-send safety net`
+15. `feat(adam-identity): enforce retention on Adam's conversation events`
 
 ## Environment variables this milestone introduces
 
-- `MILLIE_EMAIL_DOMAIN` — domain used for per-user Millie addresses (e.g. `millie.oxy.app`). Requires DNS/inbound routing configured with Resend once, not per-user.
+- `MILLIE_EMAIL_DOMAIN` — domain used for per-user Adam addresses (e.g. `millie.oxy.app`). Requires DNS/inbound routing configured with Resend once, not per-user.
 - `RESEND_WEBHOOK_SECRET` — verify against Resend's current inbound-webhook signing docs before Task 7's live step; not yet wired into the webhook route above pending that check (flagged, not silently skipped).
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` — Twilio credentials.
 - `TWILIO_NUMBER_COUNTRY` — defaults to `GB`.
@@ -2192,7 +2192,7 @@ git commit -m "feat(millie-identity): enforce retention on Millie's conversation
 
 ## Explicitly deferred (per this milestone's scope)
 
-**Reserved, not built — additive later, no redesign needed:** WhatsApp, Telegram, inbound/outbound voice, and **proactive continuation** (Millie following up on an already-authorised request when a reply doesn't arrive — chasing support, a refund, an application, a pre-deadline check, or retrying through another channel). The data model already carries what a future follow-up scheduler needs — `external_conversations.last_outbound_at`, `.last_inbound_at`, `.next_follow_up_at`, `.status`, and `.request_task_id` linking back to the authorising `agent_tasks` row — but nothing in this milestone reads or writes `next_follow_up_at`, and no code sends anything without a fresh, explicit user instruction or confirmation. Building proactive continuation later is a new scheduler service plus wiring those existing columns — not a schema change.
+**Reserved, not built — additive later, no redesign needed:** WhatsApp, Telegram, inbound/outbound voice, and **proactive continuation** (Adam following up on an already-authorised request when a reply doesn't arrive — chasing support, a refund, an application, a pre-deadline check, or retrying through another channel). The data model already carries what a future follow-up scheduler needs — `external_conversations.last_outbound_at`, `.last_inbound_at`, `.next_follow_up_at`, `.status`, and `.request_task_id` linking back to the authorising `agent_tasks` row — but nothing in this milestone reads or writes `next_follow_up_at`, and no code sends anything without a fresh, explicit user instruction or confirmation. Building proactive continuation later is a new scheduler service plus wiring those existing columns — not a schema change.
 
 **Prohibited outright, not deferred:** unsolicited cold outreach — contacting someone with no connection to any user-authorised goal. This isn't a "not yet," it's out of scope unless a future product decision explicitly revisits it.
 

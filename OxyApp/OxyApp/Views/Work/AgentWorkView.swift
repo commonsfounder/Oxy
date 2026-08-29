@@ -389,7 +389,7 @@ private struct AgentTaskRow: View {
     private var statusColor: Color {
         switch task.status.lowercased() {
         case "running": return Color(red: 0.18, green: 0.7, blue: 0.34)
-        case "failed": return Color.mgDestructive
+        case "failed": return Color.appDestructive
         case "completed": return Color(red: 0.18, green: 0.7, blue: 0.34)
         default: return Color.appAccent
         }
@@ -417,7 +417,7 @@ private struct AgentTaskRow: View {
                     if let interruptionMessage = task.interruptionMessage, task.status.lowercased() != "completed" {
                         Text(interruptionMessage)
                             .font(.appBody(12))
-                            .foregroundStyle(Color.mgDestructive)
+                            .foregroundStyle(Color.appDestructive)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -608,7 +608,7 @@ private struct AgentTaskDetailView: View {
                 .padding(16)
                 .background { MissionGlassPlate() }
             } else {
-                Text("Millie has not started this yet.")
+                Text("Adam has not started this yet.")
                     .font(.appBody(13))
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 4)
@@ -647,7 +647,7 @@ private struct AgentTaskDetailView: View {
                                 activity.pending ? "clock" : activity.inProgress ? "dotted" : activity.success ? "check-circle" : "alert-circle",
                                 size: 15
                             )
-                            .foregroundStyle(activity.pending || activity.inProgress ? Color.appAccent : activity.success ? Color.appSuccess : Color.mgDestructive)
+                            .foregroundStyle(activity.pending || activity.inProgress ? Color.appAccent : activity.success ? Color.appSuccess : Color.appDestructive)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(activity.action)
                                     .font(.appBody(12, weight: .semibold))
@@ -814,7 +814,7 @@ struct TrustCenterView: View {
                     .foregroundStyle(Color.appInk)
                 Text(entry.error ?? entry.status.capitalized)
                     .font(.appBody(12))
-                    .foregroundStyle(entry.error == nil ? Color.appMuted : Color.mgDestructive)
+                    .foregroundStyle(entry.error == nil ? Color.appMuted : Color.appDestructive)
             }
             Spacer(minLength: 0)
             Text(entry.risk.capitalized)

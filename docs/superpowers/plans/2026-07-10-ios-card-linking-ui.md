@@ -429,10 +429,10 @@ In the `switch dest` block (currently lines 181-187), add the new case:
                     case .payments: PaymentsView()
 ```
 
-In the `menuSection`'s "Milgrain" group (currently lines 292-303), add a row after the existing "Connections" row:
+In the `menuSection`'s "Adam" group (currently lines 292-303), add a row after the existing "Connections" row:
 
 ```swift
-            menuGroup("Milgrain") {
+            menuGroup("Adam") {
                 AppRow(title: "Pendant", subtitle: "The piece you wear", onTap: { destination = .pendant }) {
                     HStack(spacing: 8) {
                         AppStatusDot(kind: pendantDot, diameter: 5)

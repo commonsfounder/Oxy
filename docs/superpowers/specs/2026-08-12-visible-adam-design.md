@@ -1,7 +1,7 @@
-# Visible Millie — design
+# Visible Adam — design
 
 **Date:** 2026-08-12
-**Goal:** Millie is roughly 4× more capable than she looks. This pass closes that gap. Success is not "tests pass" — it is "I open the app and immediately notice it is more capable and more alive."
+**Goal:** Adam is roughly 4× more capable than she looks. This pass closes that gap. Success is not "tests pass" — it is "I open the app and immediately notice it is more capable and more alive."
 
 ## Audit findings (2026-08-12)
 
@@ -25,7 +25,7 @@ Also route-less and UI-less: `people`/`person_facts`, `occasions`, `notification
 
 ### Views that exist but are unreachable
 
-`RoutinesListView`, `ModelRoutingView`, `AgentWorkspaceView` have no call sites outside their own `#Preview`. `AgentWorkView` — titled "What Millie is handling" — is reachable only by tapping a mission card that happens to carry a `taskID`.
+`RoutinesListView`, `ModelRoutingView`, `AgentWorkspaceView` have no call sites outside their own `#Preview`. `AgentWorkView` — titled "What Adam is handling" — is reachable only by tapping a mission card that happens to carry a `taskID`.
 
 ### Home's information model
 
@@ -66,7 +66,7 @@ No new primitives. Every capability this pass makes visible already exists and i
 | `GET /agent/state` | `listActiveWorkflows`, `getPendingCheckpoints`, `findCommitments`, agent tasks | all four lanes in one call |
 | `GET /workflows/:id` | `getTimeline`, `getLinks` | the live timeline screen |
 | `POST /workflows/:id/checkpoints/:cid/resolve` | `resolveCheckpoint` | answering "Needs you" from the phone |
-| `GET /documents`, `GET /documents/:id/content` | `findDocuments`, `getDocumentBytes` | seeing files Millie made |
+| `GET /documents`, `GET /documents/:id/content` | `findDocuments`, `getDocumentBytes` | seeing files Adam made |
 | last-seen watermark | new column on `users` | makes "Changed" representable |
 
 ### 2. Home becomes the board
@@ -75,7 +75,7 @@ The flat `missions` list is replaced by four ordered lanes: **Needs you → Hand
 
 The existing Gleb chrome survives unchanged: greeting, pastel wash, composer, weather, edge-swipe to Chat. What changes is the substance between them. Today's inbox-mail card folds into **Needs you**, where it belongs.
 
-A live header (`Millie is handling 3 things`) animates while work is in flight. Poll interval drops from a flat 90s to 10s whenever anything is active.
+A live header (`Adam is handling 3 things`) animates while work is in flight. Poll interval drops from a flat 90s to 10s whenever anything is active.
 
 ### 3. The workflow timeline
 
@@ -83,7 +83,7 @@ Tapping anything in **Handling** opens a timeline that streams `workflow_events`
 
 ### 4. Demo — job application, watched live
 
-A job URL opens a durable responsibility. Millie pulls the CV from documents, authors a tailored cover letter as a real DOCX, drives the browser, opens a checkpoint that needs the user, resumes on their answer, and submits. Every stage lands on the timeline as it happens.
+A job URL opens a durable responsibility. Adam pulls the CV from documents, authors a tailored cover letter as a real DOCX, drives the browser, opens a checkpoint that needs the user, resumes on their answer, and submits. Every stage lands on the timeline as it happens.
 
 ### 5. Demo — inbox sweep with a receipt
 

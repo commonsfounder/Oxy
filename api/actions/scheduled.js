@@ -85,7 +85,7 @@ async function listScheduledTasksAction({ userId, action, params, enrichedParams
         const detail = watches.describeWatch(task);
         return `• ${task.title} · ${scheduledTasks.describeSchedule(task)}${detail ? ` · ${detail}` : ''}`;
       }).join('\n')
-      : 'Millie is not watching anything right now.',
+      : 'Adam is not watching anything right now.',
     actionSummary: `${tasks.length} watch${tasks.length === 1 ? '' : 'es'}`,
     scheduledTasks: tasks
   };

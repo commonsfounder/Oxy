@@ -3,7 +3,7 @@
 **Date:** 2026-08-10
 **Status:** Research + recommendation. No provider committed, no implementation started.
 
-This audit answers seven questions: (1) which phone provider, (2) what a number does and does not unlock across SMS/voice/WhatsApp/Telegram/iMessage, (3) the safe role of verification codes, (4) how far Millie's browser/work capability is from ChatGPT Work / Codex, (5) an outcome-level capability gap audit, (6) the small set of primitives that unlock the most, (7) the next implementation pass.
+This audit answers seven questions: (1) which phone provider, (2) what a number does and does not unlock across SMS/voice/WhatsApp/Telegram/iMessage, (3) the safe role of verification codes, (4) how far Adam's browser/work capability is from ChatGPT Work / Codex, (5) an outcome-level capability gap audit, (6) the small set of primitives that unlock the most, (7) the next implementation pass.
 
 ---
 
@@ -13,11 +13,11 @@ Facts established by reading the repo, not by memory:
 
 | Thing | State |
 |---|---|
-| `api/services/millie-identity.js` | Exists. Identity + per-channel handles, idempotent provisioning. |
-| `connectors/millie-email-resend.js` | Exists. Outbound + inbound parse + signature line. |
-| `connectors/millie-sms-twilio.js` | Exists. `provisionPhoneNumber`, `sendMillieSms`, `parseInboundSmsPayload`. 69 lines, plain REST. |
+| `api/services/adam-identity.js` | Exists. Identity + per-channel handles, idempotent provisioning. |
+| `connectors/adam-email-resend.js` | Exists. Outbound + inbound parse + signature line. |
+| `connectors/adam-sms-twilio.js` | Exists. `provisionPhoneNumber`, `sendAdamSms`, `parseInboundSmsPayload`. 69 lines, plain REST. |
 | `POST /webhooks/millie-email`, `POST /webhooks/millie-sms` | Both wired in `api/index.js` (lines 415, 496). |
-| `send_millie_email`, `send_millie_sms` actions | Both in `executeAction` (lines 2885, 2940), both review-gated. |
+| `send_adam_email`, `send_adam_sms` actions | Both in `executeAction` (lines 2885, 2940), both review-gated. |
 | `external_conversations` / `_events` | Built. Channel-agnostic thread, encrypted bodies, `last_inbound_at`/`last_outbound_at`/`next_follow_up_at` reserved. |
 | Twilio credentials | **Empty placeholders** in `cloudrun.env.example.yaml`. No account. |
 | `MILLIE_EMAIL_DOMAIN` | Not in the env example at all. No domain. |
@@ -25,7 +25,7 @@ Facts established by reading the repo, not by memory:
 
 **So: the phone identity is code-complete and provider-dead.** Nothing has ever been provisioned. That is the good news — we are choosing a provider with the abstraction already written, exactly the position the brief asked for.
 
-**Provider-lock risk that does exist:** `millie-identity.js` hardcodes `provider: 'twilio'` on the handle row, and `api/index.js` `require`s `../connectors/millie-sms-twilio` directly from the action case. That is one small seam away from being provider-agnostic, and it is the low-regret foundational work worth doing regardless of which provider wins.
+**Provider-lock risk that does exist:** `adam-identity.js` hardcodes `provider: 'twilio'` on the handle row, and `api/index.js` `require`s `../connectors/adam-sms-twilio` directly from the action case. That is one small seam away from being provider-agnostic, and it is the low-regret foundational work worth doing regardless of which provider wins.
 
 Other load-bearing facts about the current agent:
 
@@ -44,7 +44,7 @@ Other load-bearing facts about the current agent:
 Ranked by how much each affects the decision:
 
 1. **UK mobile (+447) numbers** — not local/national. Mobile numbers are the ones businesses text back without thinking, the ones application forms accept, and the ones with the least-bad OTP acceptance. A +4433 national number in a "mobile" field gets rejected or silently never contacted.
-2. **Two-way SMS, inbound-first.** The whole thesis is that Millie is *reachable*.
+2. **Two-way SMS, inbound-first.** The whole thesis is that Adam is *reachable*.
 3. **A voice path that isn't a dead end** — programmable voice, streaming media, DTMF, and transfer-to-human.
 4. **API provisioning + webhooks** — already assumed by the code.
 5. **Per-user economics that survive scale.**
@@ -88,9 +88,9 @@ Not "which vendor" — **how many numbers**.
 
 At $2.50/month/user, a dedicated UK mobile per user is ~$30/user/year in fixed cost before a single message. That is not obviously wrong for a premium product, but it is wrong to pay it for every user on day one.
 
-The insight: **a shared number works for everything Millie starts, and only fails for cold inbound.**
+The insight: **a shared number works for everything Adam starts, and only fails for cold inbound.**
 
-- When Millie texts a business first, the reply resolves cleanly — inbound from that number matches an open conversation with that participant. `participant_addresses_lookup_idx` already exists for exactly this lookup.
+- When Adam texts a business first, the reply resolves cleanly — inbound from that number matches an open conversation with that participant. `participant_addresses_lookup_idx` already exists for exactly this lookup.
 - It only breaks when a business contacts a number **cold** — because the user put it on an application form, gave it to a courier, or handed it to a recruiter. Then there's no prior thread, and a shared number can't tell which user it's for.
 
 So: **shared regional pool by default, promoted to a dedicated number when a workflow needs a stable contact number to hand out.** The promotion trigger is a real product event ("this application wants a phone number"), the cost lands only on users doing work that needs it, and the data model already supports both — a handle is a row, not a schema assumption.
@@ -103,16 +103,16 @@ Collision case to handle honestly: two users with open conversations to the *sam
 
 The brief was right to demand precision here. One number does **not** give us five channels.
 
-| Channel | Does Millie's own number unlock it? | Reality |
+| Channel | Does Adam's own number unlock it? | Reality |
 |---|---|---|
 | **SMS** | **Yes** | This is the real unlock. Two-way, inbound-first, works today with the existing code once a number exists. |
 | **Voice** | **Yes, eventually** | Same number, programmable voice. Inbound/outbound, DTMF, recording/transcription where lawful, streaming, transfer-to-human. Not blocked by the provider choice. |
-| **WhatsApp** | **Effectively no** | Two separate walls. (a) WhatsApp verification rejects VoIP/virtual numbers; a Twilio number *can* register only if it can receive the SMS/voice OTP, and numbers behind IVR/computer-operated systems can't complete it. (b) The policy wall is worse: from 21 May 2026 businesses must hold **opt-in before messaging anyone**, and every message outside the 24-hour service window must use a **Meta-approved template**. Millie cold-messaging a garage on a user's behalf is exactly what that policy forbids. WhatsApp is a channel for *businesses messaging their own customers* — it is not a channel for an assistant to contact arbitrary businesses. ([Twilio WhatsApp docs](https://www.twilio.com/docs/whatsapp/api), [opt-in policy](https://developers.facebook.com/documentation/business-messaging/whatsapp/getting-opt-in)) |
-| **Telegram** | **No — and it already works another way** | Bots need no phone number at all. Registering a Millie *user account* needs one, and Telegram flags/bans VoIP-originated numbers — that's exactly the "shady SIM farm" territory the brief rules out. **But we don't need to:** `connectors/telegram.js` is GramJS/MTProto logged into the *user's own* Telegram account. Telegram is already solved, decoupled from Millie's number, and should stay that way. Worth being clear internally: today's Telegram is a *user↔Millie* channel using the user's identity, not a *Millie↔business* channel. |
+| **WhatsApp** | **Effectively no** | Two separate walls. (a) WhatsApp verification rejects VoIP/virtual numbers; a Twilio number *can* register only if it can receive the SMS/voice OTP, and numbers behind IVR/computer-operated systems can't complete it. (b) The policy wall is worse: from 21 May 2026 businesses must hold **opt-in before messaging anyone**, and every message outside the 24-hour service window must use a **Meta-approved template**. Adam cold-messaging a garage on a user's behalf is exactly what that policy forbids. WhatsApp is a channel for *businesses messaging their own customers* — it is not a channel for an assistant to contact arbitrary businesses. ([Twilio WhatsApp docs](https://www.twilio.com/docs/whatsapp/api), [opt-in policy](https://developers.facebook.com/documentation/business-messaging/whatsapp/getting-opt-in)) |
+| **Telegram** | **No — and it already works another way** | Bots need no phone number at all. Registering a Adam *user account* needs one, and Telegram flags/bans VoIP-originated numbers — that's exactly the "shady SIM farm" territory the brief rules out. **But we don't need to:** `connectors/telegram.js` is GramJS/MTProto logged into the *user's own* Telegram account. Telegram is already solved, decoupled from Adam's number, and should stay that way. Worth being clear internally: today's Telegram is a *user↔Adam* channel using the user's identity, not a *Adam↔business* channel. |
 | **iMessage / Apple Messages for Business** | **No** | Not a number feature at all. Requires brand registration in Apple Business Register, an Apple-approved Messaging Service Provider, an admin + technical contact + sponsoring executive, and a commitment to provide **live human agents during business hours** — Apple explicitly prohibits bot-only solutions. It is also inbound-only by design: customers message the brand. Structurally incompatible with a personal agent. ([Apple MFB registration](https://register.apple.com/resources/messages/messaging-documentation/register-your-acct), [policies](https://register.apple.com/resources/messages/messaging-documentation/policies)) |
 | **RCS** | Not now | Same brand-verification shape as the above. Revisit only if SMS deliverability becomes a problem. |
 
-**The honest summary: a Millie number buys SMS and voice. That's it — and that is enough, because SMS and voice are the two channels the external world actually uses to reach a person.** Every business, courier, surgery, garage, recruiter and application portal in the UK can text or call a mobile number. None of them will WhatsApp you unprompted.
+**The honest summary: a Adam number buys SMS and voice. That's it — and that is enough, because SMS and voice are the two channels the external world actually uses to reach a person.** Every business, courier, surgery, garage, recruiter and application portal in the UK can text or call a mobile number. None of them will WhatsApp you unprompted.
 
 ---
 
@@ -120,7 +120,7 @@ The brief was right to demand precision here. One number does **not** give us fi
 
 The product concept is legitimate and worth stating precisely, because the difference between it and the prohibited thing is narrow:
 
-> **Allowed:** Millie receives a message sent to *Millie's own number*, and uses it to advance a workflow the user explicitly delegated in this session.
+> **Allowed:** Adam receives a message sent to *Adam's own number*, and uses it to advance a workflow the user explicitly delegated in this session.
 >
 > **Not this:** collecting the user's codes, reading codes from the user's own phone, or using a code to get past a control that exists to stop an agent.
 
@@ -129,7 +129,7 @@ The product concept is legitimate and worth stating precisely, because the diffe
 A code is only usable if **all** of these hold:
 
 1. There is an **active delegated workflow** in an explicit `awaiting_verification` state.
-2. That workflow **declared it was expecting a code** *before* the message arrived — the expectation is registered at the moment Millie submits the form, not inferred afterwards.
+2. That workflow **declared it was expecting a code** *before* the message arrived — the expectation is registered at the moment Adam submits the form, not inferred afterwards.
 3. It arrives inside a **short window** (10 minutes) of that declaration.
 4. The **sender plausibly matches** the service the workflow is transacting with.
 5. **Exactly one** workflow is waiting. Two candidates means ambiguous, means don't consume — surface it.
@@ -148,7 +148,7 @@ Unmatched code arrives → log **metadata only** (sender, arrival time, "looked 
 
 **Many platforms will reject a CPaaS number outright**, and no legitimate provider gets around that — the strict cases (banks especially) are structurally required to bind to carrier-registered SIM lines. UK mobile (+447) numbers on a reputable CPaaS are the *best available* posture, meaningfully better than local/national or a "virtual number" service, but coverage is partial and always will be.
 
-**We should never promise universal OTP compatibility.** The correct product framing is that Millie's number is a **contact number that also happens to be able to receive verification messages when the service allows it** — and when a service rejects it, Millie says so and asks the user to supply the code from their own phone. That failure mode is fine. It only becomes a problem if we designed as though it wouldn't happen.
+**We should never promise universal OTP compatibility.** The correct product framing is that Adam's number is a **contact number that also happens to be able to receive verification messages when the service allows it** — and when a service rejects it, Adam says so and asks the user to supply the code from their own phone. That failure mode is fine. It only becomes a problem if we designed as though it wouldn't happen.
 
 ---
 
@@ -156,7 +156,7 @@ Unmatched code arrives → log **metadata only** (sender, arrival time, "looked 
 
 The right question, per the brief, is not which API is missing. It's: *what can those environments do because they can manipulate a workspace?*
 
-| Capability class | Millie today | Gap |
+| Capability class | Adam today | Gap |
 |---|---|---|
 | Working through complex websites | `run_browser_task` — real, live-verified, with learned recipes and a platform-API fast path | **Shaped as a shopping loop.** `isOrder` latch, checkout profile, `ready_for_payment` state, retailer recipes. A 9-page insurance quote funnel is not an order and falls to the generic path. |
 | Creating/editing files | `workspace_write/read/list` — **text only**, stored as Postgres rows | No binary. No real files. |
@@ -174,7 +174,7 @@ The right question, per the brief, is not which API is missing. It's: *what can 
 
 **Two structural gaps, and they compound.**
 
-**Gap A — there are no files.** Not "we should add a file connector": there is no representation of a document anywhere in this system. Every one of the brief's examples runs into it. Insurance renewal produces a policy PDF and a certificate. A claim needs receipts and photos. An application needs a CV and proof of address. A return needs a label. Travel produces boarding passes and bookings. Millie can read the *email* that mentions a document and cannot touch the document.
+**Gap A — there are no files.** Not "we should add a file connector": there is no representation of a document anywhere in this system. Every one of the brief's examples runs into it. Insurance renewal produces a policy PDF and a certificate. A claim needs receipts and photos. An application needs a CV and proof of address. A return needs a label. Travel produces boarding passes and bookings. Adam can read the *email* that mentions a document and cannot touch the document.
 
 **Gap B — browser work is a sprint, not a project.** Twenty minutes, one goal, commerce-shaped. The brief's examples are all multi-day: apply → wait for a reply → upload something → wait → later stages. Nothing in the current design survives a wait.
 
@@ -186,7 +186,7 @@ The right question, per the brief, is not which API is missing. It's: *what can 
 
 Blocker key: **DOC** documents/files · **BRW** browser/computer depth · **PHN** phone identity · **VOI** voice · **PAY** payment · **ACC** external account · **MEM** state/memory · **SAF** review/safety
 
-| # | "Sort this out for me" | Millie can already | Blocked by | General or bespoke? | Value | Freq | Diff |
+| # | "Sort this out for me" | Adam can already | Blocked by | General or bespoke? | Value | Freq | Diff |
 |---|---|---|---|---|---|---|---|
 | 1 | **Sort out my car insurance renewal** | Find the renewal email, read the policy terms in-body, remember the date, search alternatives, hold payment | **DOC** (policy PDF, certificate, no-claims proof), **BRW** (multi-page quote funnels, aggregator bot-walls), **PHN** (quote forms require a number; insurers call back) | ~85% general | Very high (£100s) | 1×/yr per policy, 3–4 policies | Very high |
 | 2 | **Deal with this claim / dispute** | Reconstruct correspondence from Gmail, track case state, draft chases, track deadlines via commitments+watches | **DOC** (receipts, photos, letters), **PHN** (claim lines text updates), partly **MEM** (case state isn't linked to the user's own email threads) | ~90% general | Very high | Several/yr | Very high |
@@ -226,7 +226,7 @@ They are the highest-value, most-differentiated, and — critically — they sha
 
 **P3 — Communication identity (phone).** Inbound-first. A UK mobile number, shared-pool by default, promoted to dedicated when a workflow needs a number to hand out. The code exists; this is provider + seam + pool policy.
 
-**P4 — Responsibility state.** A durable "Millie owns this outcome" object that outlives the turn and owns: the goal, the correspondence, the documents, the deadlines, **who owes the next action**, and what would count as done. `agent_tasks` + `task_steps` + `external_conversations` + commitments + watches are ~70% of this already, sitting unassembled. This is mostly composition, not construction — and it's what turns "did a task" into "has responsibility."
+**P4 — Responsibility state.** A durable "Adam owns this outcome" object that outlives the turn and owns: the goal, the correspondence, the documents, the deadlines, **who owes the next action**, and what would count as done. `agent_tasks` + `task_steps` + `external_conversations` + commitments + watches are ~70% of this already, sitting unassembled. This is mostly composition, not construction — and it's what turns "did a task" into "has responsibility."
 
 **P5 — Voice.** Not now. The only requirement on this pass is that the provider choice doesn't box it out — Twilio's programmable voice + OpenAI Realtime SIP + warm transfer path satisfies that, so P5 costs us nothing today.
 
@@ -239,7 +239,7 @@ They are the highest-value, most-differentiated, and — critically — they sha
 Ordered so each step is independently useful and nothing is a bet on the step after it.
 
 **Pass A — Provider seam + provision one number** *(small, low-regret, unblocks the real learning)*
-1. Extract a phone-provider adapter interface; make `provider` on the handle row meaningful instead of a hardcoded `'twilio'`; move the direct `require('../connectors/millie-sms-twilio')` in `api/index.js` behind it.
+1. Extract a phone-provider adapter interface; make `provider` on the handle row meaningful instead of a hardcoded `'twilio'`; move the direct `require('../connectors/adam-sms-twilio')` in `api/index.js` behind it.
 2. Open a Twilio account, complete the UK Regulatory Compliance bundle (needs a government ID and a personal mobile that isn't CPaaS-issued — **this is on you, not me**), provision **one UK mobile number**, point both existing webhooks at it.
 3. Prove it end-to-end against a real phone: outbound send, inbound receive, thread matching. Live evidence, per AGENTS.md.
 4. In parallel, get Telnyx to confirm UK mobile inventory + two-way SMS + rates in writing.
@@ -262,7 +262,7 @@ Ordered so each step is independently useful and nothing is a bet on the step af
 ### What I need from you before Pass A
 
 - **Twilio account + UK RC bundle** requires your government ID and a personal mobile. I can write every line of the adapter; I cannot open the account.
-- **`MILLIE_EMAIL_DOMAIN` is still unset and there's no Resend domain.** Millie's email is code-complete and has never sent a message from her own address. Worth closing in the same pass — it's the cheaper half of the same identity.
+- **`MILLIE_EMAIL_DOMAIN` is still unset and there's no Resend domain.** Adam's email is code-complete and has never sent a message from her own address. Worth closing in the same pass — it's the cheaper half of the same identity.
 
 ---
 
@@ -287,7 +287,7 @@ Ordered so each step is independently useful and nothing is a bet on the step af
 
 ---
 
-# Addendum — Pass 1 complete: can Millie apply for a job?
+# Addendum — Pass 1 complete: can Adam apply for a job?
 
 **Date:** 2026-08-10, after the four Files/Documents commits
 (`c10d28ed`, `a27e3415`, `09df23c3`, `b705800a`).
@@ -378,7 +378,7 @@ The point of a primitive is leverage, so measured against the 14 outcomes in the
 1. **Nothing creates a workflow yet.** No chat path, no action contract. The primitive is proven by tests, not by a user sentence. Deliberate — a `create_workflow` contract is trivial, and doing it blind before the primitive settled would have been the wrong order.
 2. **`ready_for_payment` still exists** in the order loop. Checkpoints supersede the *idea*; the code path is untouched because rewriting the payment flow was not worth the regression risk in this pass.
 3. **The 20-minute session TTL is unchanged**, and now doesn't matter — the durable state is on the workflow. Removing it would be churn.
-4. **`summarizeForUser` has no UI.** The data behind "Millie is handling…" exists and is jargon-free (asserted); nothing renders it.
+4. **`summarizeForUser` has no UI.** The data behind "Adam is handling…" exists and is jargon-free (asserted); nothing renders it.
 5. **Vision extraction for images is injected but never wired** to a real model. `extractImage` fails softly with "no vision extractor configured", which is honest but means scanned documents are not yet readable.
 
 ## Next

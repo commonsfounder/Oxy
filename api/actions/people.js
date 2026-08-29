@@ -78,7 +78,7 @@ async function saveOccasion({ userId, action, params, enrichedParams, context, d
     const dueDate = computeReminderDueDate(month, day, offset, new Date());
     const isBirthday = occasionType === 'birthday';
     // Same composition pattern as the delivery-watch reminders: recurrence:'once' with a
-    // computed due_date, and the instruction tells Millie to re-arm itself for next year
+    // computed due_date, and the instruction tells Adam to re-arm itself for next year
     // after firing — no new scheduler cadence needed (isRecurringCadence only supports
     // daily/weekly today, and adding 'yearly' there is scheduler-internals work this pass
     // is explicitly not meant to spend time on).

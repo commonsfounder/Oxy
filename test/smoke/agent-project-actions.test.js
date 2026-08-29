@@ -31,43 +31,43 @@ test('project actions are declared, local, and route through the isolated adapte
   const calls = [];
   projectRuntime.gitStatus = async (...args) => {
     calls.push(['status', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', branch: 'oxy/task-123', dirty: false, files: [], truncated: false };
+    return { projectRef: 'adam', projectName: 'Adam', branch: 'oxy/task-123', dirty: false, files: [], truncated: false };
   };
   projectRuntime.gitDiff = async (...args) => {
     calls.push(['diff', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', diff: 'diff --git a/README.md b/README.md', truncated: false };
+    return { projectRef: 'adam', projectName: 'Adam', diff: 'diff --git a/README.md b/README.md', truncated: false };
   };
   projectRuntime.writeProjectFile = async (...args) => {
     calls.push(['write', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', path: 'README.md', bytes: 12 };
+    return { projectRef: 'adam', projectName: 'Adam', path: 'README.md', bytes: 12 };
   };
   projectRuntime.runProjectCheck = async (...args) => {
     calls.push(['check', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', check: 'test', success: true, exitCode: 0, output: 'ok', timedOut: false };
+    return { projectRef: 'adam', projectName: 'Adam', check: 'test', success: true, exitCode: 0, output: 'ok', timedOut: false };
   };
   projectRuntime.commitProjectChanges = async (...args) => {
     calls.push(['commit', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', branch: 'oxy/task-123', commit: 'a'.repeat(40), message: 'Save work', text: 'Saved.' };
+    return { projectRef: 'adam', projectName: 'Adam', branch: 'oxy/task-123', commit: 'a'.repeat(40), message: 'Save work', text: 'Saved.' };
   };
   projectRuntime.rollbackProjectChanges = async (...args) => {
     calls.push(['rollback', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', branch: 'oxy/task-123', text: 'Rolled back.' };
+    return { projectRef: 'adam', projectName: 'Adam', branch: 'oxy/task-123', text: 'Rolled back.' };
   };
   projectRuntime.publishProjectBranch = async (...args) => {
     calls.push(['sync', ...args]);
-    return { projectRef: 'milgrain', projectName: 'Milgrain', branch: 'oxy/task-123', published: true, text: 'Synchronized.' };
+    return { projectRef: 'adam', projectName: 'Adam', branch: 'oxy/task-123', published: true, text: 'Synchronized.' };
   };
 
   const context = { persistedTaskId: 'task-123' };
-  assert.equal((await executeAction('user-1', 'project_status', { project_ref: 'milgrain' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_diff', { project_ref: 'milgrain' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_write', { project_ref: 'milgrain', path: 'README.md', content: '# update' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_check', { project_ref: 'milgrain', check: 'test' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_commit', { project_ref: 'milgrain', message: 'Save work' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_rollback', { project_ref: 'milgrain' }, { ...context, bypassReview: true })).success, true);
-  assert.equal((await executeAction('user-1', 'project_sync', { project_ref: 'milgrain' }, { ...context, bypassReview: true })).success, true);
+  assert.equal((await executeAction('user-1', 'project_status', { project_ref: 'adam' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_diff', { project_ref: 'adam' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_write', { project_ref: 'adam', path: 'README.md', content: '# update' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_check', { project_ref: 'adam', check: 'test' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_commit', { project_ref: 'adam', message: 'Save work' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_rollback', { project_ref: 'adam' }, { ...context, bypassReview: true })).success, true);
+  assert.equal((await executeAction('user-1', 'project_sync', { project_ref: 'adam' }, { ...context, bypassReview: true })).success, true);
   assert.deepEqual(calls.map(call => call[0]), ['status', 'diff', 'write', 'check', 'commit', 'rollback', 'sync']);
-  assert.ok(calls.every(call => call[1] === 'user-1' && call[2] === 'task-123' && call[3] === 'milgrain'));
+  assert.ok(calls.every(call => call[1] === 'user-1' && call[2] === 'task-123' && call[3] === 'adam'));
 });
 
 test('project writes cannot detach from a durable task', async () => {
@@ -75,7 +75,7 @@ test('project writes cannot detach from a durable task', async () => {
   projectRuntime.writeProjectFile = async () => { called = true; };
   try {
     const result = await executeAction('user-1', 'project_write', {
-      project_ref: 'milgrain',
+      project_ref: 'adam',
       path: 'README.md',
       content: 'no task'
     });

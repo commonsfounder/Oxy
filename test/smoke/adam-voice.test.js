@@ -11,7 +11,7 @@ function phrase(text) {
   return new RegExp(text.trim().split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
 }
 
-test('Millie is framed as a presence, not a support agent or search tool', () => {
+test('Adam is framed as a presence, not a support agent or search tool', () => {
   assert.match(MILLIE_VOICE_PROMPT, phrase('not a support agent'));
   assert.match(MILLIE_VOICE_PROMPT, phrase('not a search box with a voice'));
   assert.doesNotMatch(CORE_SYSTEM_PROMPT, /^You are a full-service personal concierge/);

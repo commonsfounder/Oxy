@@ -9,7 +9,7 @@ async function main() {
   const calendar = createSandboxCalendar();
   const service = createAppointmentBookingService({ provider, calendar });
   const found = await service.findChoices({
-    request: 'Millie, get me a dentist appointment next week after work',
+    request: 'Adam, get me a dentist appointment next week after work',
     calendarEvents: [{ start: '2026-08-11T17:00:00.000Z', end: '2026-08-11T18:00:00.000Z' }],
     now: new Date('2026-08-05T12:00:00.000Z')
   });

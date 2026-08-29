@@ -1,4 +1,4 @@
-// The behavioural half of Millie's prompt: continuity, ownership, follow-through, proactivity,
+// The behavioural half of Adam's prompt: continuity, ownership, follow-through, proactivity,
 // ask-vs-act, autonomy awareness, failure ownership, and completion defined by the user's outcome
 // rather than a successful tool call. These pin that each concept sits where it belongs (chat and
 // background get the full set; briefing only continuity and truthfulness, having no tools); that
@@ -23,11 +23,11 @@ function nativeDescriptions() {
 }
 
 // ── 1. Continuity ────────────────────────────────────────────────────────────────────────
-test('continuity: Millie persists and is explicitly the same across chat, briefing, and background', () => {
+test('continuity: Adam persists and is explicitly the same across chat, briefing, and background', () => {
   for (const prompt of [CORE_SYSTEM_PROMPT, BACKGROUND_STATIC_PROMPT, BRIEFING_STATIC_PROMPT]) {
     assert.ok(prompt.includes('CONTINUITY:'), 'missing CONTINUITY section');
     assert.match(prompt, phrase('You persist'));
-    assert.match(prompt, phrase("You're the same Millie in this conversation, in a briefing, and in work you're doing right now in the background"));
+    assert.match(prompt, phrase("You're the same Adam in this conversation, in a briefing, and in work you're doing right now in the background"));
   }
 });
 
@@ -98,7 +98,7 @@ test('proactivity is bounded against engagement-bait and cold outreach, with a "
   assert.match(CORE_SYSTEM_PROMPT, phrase("If it's low-value or can wait, let it wait — most things can"));
 });
 
-test('proactivity explicitly does not touch what review/security rules apply — only when Millie may act, never what she may do unasked', () => {
+test('proactivity explicitly does not touch what review/security rules apply — only when Adam may act, never what she may do unasked', () => {
   assert.match(CORE_SYSTEM_PROMPT, phrase('The review and security rules for anything you send or do still apply exactly as they do in a live conversation'));
   assert.match(CORE_SYSTEM_PROMPT, phrase("being proactive changes when you act, never what you're allowed to do without asking first"));
 });
@@ -221,8 +221,8 @@ test('no scheduler/queue/orchestration/artifact jargon leaked into the composed 
 });
 
 test('"runtime"/"workflow" appear only in the pre-existing voice disclaimer (or a benign consumer sense), not as new internal-jargon vocabulary', () => {
-  // The voice section explicitly tells Millie NOT to expose "runtimes"/"workflows" to the user
-  // — that single disclaimer sentence is expected and already pinned by millie-voice.test.js.
+  // The voice section explicitly tells Adam NOT to expose "runtimes"/"workflows" to the user
+  // — that single disclaimer sentence is expected and already pinned by adam-voice.test.js.
   // "workflow" also appears once more in CAPABILITIES_SECTION in an ordinary consumer sense
   // ("when a workflow would benefit from a visual") that predates this commit. Neither commit-2
   // section should add a NEW occurrence of either word.

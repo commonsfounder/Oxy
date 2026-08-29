@@ -535,7 +535,7 @@ final class NativeIntegrationManager {
     private func stripWakeWord(from message: String) -> String {
         message
             .replacingOccurrences(
-                of: #"(?i)^\s*(?:hey|okay|ok)?\s*millie(?:\s*[:,;-]\s*|\s+)"#,
+                of: #"(?i)^\s*(?:hey|okay|ok)?\s*adam(?:\s*[:,;-]\s*|\s+)"#,
                 with: "",
                 options: .regularExpression
             )
@@ -827,7 +827,7 @@ final class NativeIntegrationManager {
         guard let recipient, !recipient.isEmpty else {
             return NativeLocalActionResult(
                 action: "send_message",
-                text: "I need a phone number for \(parsed.contact). Turn on Contacts access for Milgrain or include the number.",
+                text: "I need a phone number for \(parsed.contact). Turn on Contacts access for Adam or include the number.",
                 cardText: "No phone number found for \(parsed.contact)",
                 actionSummary: "Message needs contact",
                 deepLink: nil,
@@ -2168,8 +2168,8 @@ final class NativeIntegrationManager {
     private func noHealthDataResult(_ label: String) -> NativeLocalActionResult {
         NativeLocalActionResult(
             action: "check_health",
-            text: "I could not read \(label) from Health yet. Open Health permissions for Milgrain, then try again.",
-            cardText: "Enable Health access for Milgrain",
+            text: "I could not read \(label) from Health yet. Open Health permissions for Adam, then try again.",
+            cardText: "Enable Health access for Adam",
             actionSummary: "Health needs access",
             deepLink: "x-apple-health://"
         )

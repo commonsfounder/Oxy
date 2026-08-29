@@ -41,7 +41,7 @@ test('a workflow starts as a responsibility, not a task, and its creation is on 
   const timeline = await getTimeline(supabase, USER_ID, workflow.id);
   assert.equal(timeline.length, 1);
   assert.equal(timeline[0].kind, 'created');
-  assert.equal(timeline[0].actor, 'user', 'the user asked for this, Millie did not invent it');
+  assert.equal(timeline[0].actor, 'user', 'the user asked for this, Adam did not invent it');
 });
 
 test('another user cannot read someone else\'s piece of work', async () => {

@@ -8,10 +8,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') return mockAxios;
   return originalLoad.call(this, request, parent, isMain);
 };
-const { sendMillieSms, parseInboundSmsPayload, provisionPhoneNumber, MILLIE_SMS_SIGNATURE_LINE } = require('../../connectors/millie-sms-twilio');
+const { sendAdamSms, parseInboundSmsPayload, provisionPhoneNumber, MILLIE_SMS_SIGNATURE_LINE } = require('../../connectors/adam-sms-twilio');
 Module._load = originalLoad;
 
-test('sendMillieSms posts to Twilio Messages API and appends the signature line', async () => {
+test('sendAdamSms posts to Twilio Messages API and appends the signature line', async () => {
   const oldSid = process.env.TWILIO_ACCOUNT_SID;
   const oldToken = process.env.TWILIO_AUTH_TOKEN;
   process.env.TWILIO_ACCOUNT_SID = 'ACtest';
@@ -23,7 +23,7 @@ test('sendMillieSms posts to Twilio Messages API and appends the signature line'
     return { data: { sid: 'SMtest1' } };
   };
   try {
-    const result = await sendMillieSms({ from: '+15551230000', to: '+15559876543', body: 'Can you move our booking to 8pm?' });
+    const result = await sendAdamSms({ from: '+15551230000', to: '+15559876543', body: 'Can you move our booking to 8pm?' });
     assert.match(captured.url, /Accounts\/ACtest\/Messages\.json$/);
     // captured.body is a URLSearchParams instance — decode the actual field value
     // rather than pattern-matching its percent-encoded .toString() form.

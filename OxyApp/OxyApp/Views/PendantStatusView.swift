@@ -109,14 +109,14 @@ private struct PendantPairingSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            MilgrainSectionHeader(title: "Pairing")
+            SettingsSectionHeader(title: "Pairing")
                 .padding(.bottom, 10)
 
             VStack(spacing: 0) {
                 HStack {
                     Text("Status")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                     Spacer()
                     if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
                         ProgressView()
@@ -124,7 +124,7 @@ private struct PendantPairingSection: View {
                             .tint(Color.appMuted)
                             .padding(.trailing, 6)
                     }
-                    // Static sans label — no status dot, no pulse (Milgrain spec).
+                    // Static sans label — no status dot, no pulse (Adam spec).
                     Text(statusDescription)
                         .font(.appBody(15, weight: .semibold))
                         .foregroundStyle(statusColor)
@@ -141,31 +141,31 @@ private struct PendantPairingSection: View {
                 }
 
                 if let name = pendant.peripheralName, pendant.isConnected {
-                    MilgrainDivider()
+                    SettingsDivider()
                     HStack {
                         Text("Device")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color.mgHeading)
+                            .foregroundStyle(Color.appInk)
                         Spacer()
                         Text(name)
                             .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.mgCaption)
+                            .foregroundStyle(Color.appMuted)
                     }
                     .padding(.vertical, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if let error = pendant.lastError {
-                    MilgrainDivider()
+                    SettingsDivider()
                     Text(error)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(Color.mgDestructive)
+                        .foregroundStyle(Color.appDestructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                MilgrainDivider()
+                SettingsDivider()
 
                 HStack(spacing: 12) {
                     if pendant.isConnected {
@@ -173,7 +173,7 @@ private struct PendantPairingSection: View {
                             showUnpairConfirm = true
                         }
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.mgDestructive)
+                        .foregroundStyle(Color.appDestructive)
                         .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
                         Button("Cancel") {
@@ -187,7 +187,7 @@ private struct PendantPairingSection: View {
                             pendant.startScan()
                         }
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     }
                     Spacer()
@@ -217,9 +217,9 @@ private struct PendantPairingSection: View {
 
     private var statusColor: Color {
         switch pendant.connectionState {
-        case .connected: return Color.mgHeading
-        case .error: return Color.mgDestructive
-        default: return Color.mgSecondary
+        case .connected: return Color.appInk
+        case .error: return Color.appDestructive
+        default: return Color.appMuted
         }
     }
 }

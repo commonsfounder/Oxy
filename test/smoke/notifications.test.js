@@ -53,7 +53,7 @@ test('push with credentials but no registered device is not available', () => {
 test('a connected mailbox makes email available with no extra credential', () => {
   assert.equal(resolveEmailProvider({ env: {}, mailboxCanSend: false }), null);
   assert.equal(resolveEmailProvider({ env: {}, mailboxCanSend: true }), 'gmail');
-  // Resend stays first when it is genuinely configured: it sends from Millie's own identity
+  // Resend stays first when it is genuinely configured: it sends from Adam's own identity
   // rather than out of the user's mailbox.
   assert.equal(resolveEmailProvider({ env: { RESEND_API_KEY: 'k' }, mailboxCanSend: true }), 'resend');
 

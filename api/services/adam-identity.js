@@ -1,6 +1,6 @@
 'use strict';
 
-// Millie's own persistent communication identity: one row per user, one per channel.
+// Adam's own persistent communication identity: one row per user, one per channel.
 // Provisioning is idempotent, and each channel is attempted and recorded independently, so a
 // failed phone number never blocks email or signup. The phone vendor is injected, not baked in,
 // and the handle records which provider issued the number.
@@ -17,7 +17,7 @@ function buildEmailHandleValue(userId) {
   return `${normalizeUserIdForAddress(userId)}@${domain}`;
 }
 
-async function getMillieIdentity(supabase, userId) {
+async function getAdamIdentity(supabase, userId) {
   const { data: identities, error } = await supabase
     .from('millie_identities')
     .select('*')
@@ -33,7 +33,7 @@ async function getMillieIdentity(supabase, userId) {
 }
 
 async function getActiveHandle(supabase, userId, channelType) {
-  const existing = await getMillieIdentity(supabase, userId);
+  const existing = await getAdamIdentity(supabase, userId);
   if (!existing) return null;
   return existing.handles.find(h => h.channel_type === channelType && h.status === 'active') || null;
 }
@@ -67,13 +67,13 @@ async function ensurePhoneHandle(supabase, identityId, userId, provisionPhoneNum
     }).select().single();
     return data;
   } catch (err) {
-    console.warn('[millie-identity] phone provisioning failed, continuing without it:', err.message);
+    console.warn('[adam-identity] phone provisioning failed, continuing without it:', err.message);
     return null;
   }
 }
 
-async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, provisionPhoneNumber } = {}) {
-  const existing = await getMillieIdentity(supabase, userId);
+async function ensureAdamIdentity(supabase, userId, { attemptPhone = true, provisionPhoneNumber } = {}) {
+  const existing = await getAdamIdentity(supabase, userId);
   if (existing) {
     // Fill in any missing handle (e.g. phone provisioning was skipped or failed before).
     const handles = [...existing.handles];
@@ -90,9 +90,9 @@ async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, pro
 
   const { data: identity, error } = await supabase.from('millie_identities').insert({
     user_id: userId,
-    display_name: 'Millie'
+    display_name: 'Adam'
   }).select().single();
-  if (error) throw new Error(`Failed to create Millie identity: ${error.message}`);
+  if (error) throw new Error(`Failed to create Adam identity: ${error.message}`);
 
   const handles = [];
   const emailHandle = await ensureEmailHandle(supabase, identity.id, userId);
@@ -104,4 +104,4 @@ async function ensureMillieIdentity(supabase, userId, { attemptPhone = true, pro
   return { identity, handles };
 }
 
-module.exports = { ensureMillieIdentity, getMillieIdentity, getActiveHandle, buildEmailHandleValue };
+module.exports = { ensureAdamIdentity, getAdamIdentity, getActiveHandle, buildEmailHandleValue };

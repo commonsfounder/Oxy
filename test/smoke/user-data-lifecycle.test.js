@@ -264,7 +264,7 @@ test('route handlers preserve successful payloads and bounded export/delete fail
   const exportResponse = fakeResponse();
   await handlers.export({ params: { userId: 'u1' } }, exportResponse);
   assert.equal(exportResponse.statusCode, 200);
-  assert.equal(exportResponse.headers['Content-Disposition'], 'attachment; filename="milgrain-data-export.json"');
+  assert.equal(exportResponse.headers['Content-Disposition'], 'attachment; filename="adam-data-export.json"');
   assert.deepEqual(exportResponse.body, { exportedAt: 'now', userId: 'u1' });
   const deleteResponse = fakeResponse();
   await handlers.delete({ params: { userId: 'u1' } }, deleteResponse);

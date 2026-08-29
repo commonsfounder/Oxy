@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// One-off: point Millie's Telegram Bot at this deployment's webhook.
+// One-off: point Adam's Telegram Bot at this deployment's webhook.
 //
 //   TELEGRAM_BOT_TOKEN=... TELEGRAM_BOT_WEBHOOK_SECRET=... \
 //     node scripts/setup-telegram-bot-webhook.js https://milgrain-live-2026.fly.dev

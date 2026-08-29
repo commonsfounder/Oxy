@@ -2,23 +2,23 @@
 const axios = require('axios');
 const crypto = require('crypto');
 
-// Millie's own outbound/inbound email, sent through the same Resend account this
+// Adam's own outbound/inbound email, sent through the same Resend account this
 // platform already uses for transactional mail (api/services/email.js) — a
 // sibling integration, not a new vendor relationship. Inbound requires Resend's
 // inbound-receiving feature to be configured on MILLIE_EMAIL_DOMAIN with a webhook
 // pointed at POST /webhooks/millie-email — verify current availability/pricing on
 // the Resend plan in use before relying on this in production.
 
-const MILLIE_EMAIL_SIGNATURE_LINE = "— sent by Millie, an assistant, on behalf of the person who asked";
+const MILLIE_EMAIL_SIGNATURE_LINE = "— sent by Adam, an assistant, on behalf of the person who asked";
 
 function extractAddress(value) {
   const match = String(value || '').match(/<([^>]+)>/);
   return (match ? match[1] : String(value || '')).trim().toLowerCase();
 }
 
-async function sendMillieEmail({ from, to, subject, body, inReplyTo, references, attachments = [] }) {
+async function sendAdamEmail({ from, to, subject, body, inReplyTo, references, attachments = [] }) {
   const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error('RESEND_API_KEY is not configured — Millie cannot send email yet.');
+  if (!key) throw new Error('RESEND_API_KEY is not configured — Adam cannot send email yet.');
   const text = `${body}\n\n${MILLIE_EMAIL_SIGNATURE_LINE}`;
   const headers = {};
   if (inReplyTo) headers['In-Reply-To'] = inReplyTo;
@@ -105,4 +105,4 @@ function verifyResendWebhookSignature(rawBody, headers = {}, secret) {
   });
 }
 
-module.exports = { sendMillieEmail, parseInboundPayload, verifyResendWebhookSignature, MILLIE_EMAIL_SIGNATURE_LINE };
+module.exports = { sendAdamEmail, parseInboundPayload, verifyResendWebhookSignature, MILLIE_EMAIL_SIGNATURE_LINE };

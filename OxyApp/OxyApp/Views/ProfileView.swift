@@ -38,7 +38,7 @@ struct ProfileView: View {
                                 HStack {
                                     Text("Your Name")
                                         .font(.system(size: 15, weight: .regular))
-                                        .foregroundStyle(Color.mgHeading)
+                                        .foregroundStyle(Color.appInk)
                                     Spacer(minLength: 16)
                                     TextField(
                                         "",
@@ -46,20 +46,20 @@ struct ProfileView: View {
                                         prompt: Text("Not set — tap to add").foregroundStyle(Color.appMuted)
                                     )
                                         .font(.appBody(15))
-                                        .foregroundStyle(Color.mgHeading)
-                                        .tint(Color.mgSecondary)
+                                        .foregroundStyle(Color.appInk)
+                                        .tint(Color.appMuted)
                                         .multilineTextAlignment(.trailing)
                                         .textContentType(.givenName)
                                         .onChange(of: settings.userName) { _, _ in saveSettings() }
                                 }
                                 .padding(.vertical, 18)
 
-                                MilgrainDivider()
+                                SettingsDivider()
 
                                 HStack {
                                     Text("Assistant Name")
                                         .font(.system(size: 15, weight: .regular))
-                                        .foregroundStyle(Color.mgHeading)
+                                        .foregroundStyle(Color.appInk)
                                     Spacer(minLength: 16)
                                     TextField(
                                         "",
@@ -67,21 +67,21 @@ struct ProfileView: View {
                                         prompt: Text("Not set — tap to name").foregroundStyle(Color.appMuted)
                                     )
                                         .font(.appBody(15))
-                                        .foregroundStyle(Color.mgHeading)
-                                        .tint(Color.mgSecondary)
+                                        .foregroundStyle(Color.appInk)
+                                        .tint(Color.appMuted)
                                         .multilineTextAlignment(.trailing)
                                         .onChange(of: settings.name) { _, _ in saveSettings() }
                                 }
                                 .padding(.vertical, 18)
 
-                                MilgrainDivider()
+                                SettingsDivider()
 
                                 identityRow(label: "Account ID", value: appState.userId)
                             }
 
-                            section(title: "Millie") {
+                            section(title: "Adam") {
                                 actionRow(label: "About You", action: { profileDestination = .aboutYou })
-                                MilgrainDivider()
+                                SettingsDivider()
                                 actionRow(label: "Memory", action: { profileDestination = .memory })
                             }
 
@@ -100,7 +100,7 @@ struct ProfileView: View {
                                     action: { showSignOutConfirm = true }
                                 )
 
-                                MilgrainDivider()
+                                SettingsDivider()
 
                                 actionRow(
                                     label: isSigningOutAll ? "Signing Out…" : "Sign Out All Devices",
@@ -109,7 +109,7 @@ struct ProfileView: View {
                                 )
                                 .disabled(isSigningOutAll)
 
-                                MilgrainDivider()
+                                SettingsDivider()
 
                                 actionRow(
                                     label: isDeletingAccount ? "Deleting Account…" : "Delete Account",
@@ -119,10 +119,10 @@ struct ProfileView: View {
                                 .disabled(isExportingData || isDeletingAccount)
 
                                 if let accountStatusText {
-                                    MilgrainDivider()
+                                    SettingsDivider()
                                     Text(accountStatusText)
                                         .font(.system(size: 12, weight: .light))
-                                        .foregroundStyle(Color.mgSecondary)
+                                        .foregroundStyle(Color.appMuted)
                                         .lineSpacing(3)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.vertical, 14)
@@ -175,7 +175,7 @@ struct ProfileView: View {
 
     private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            MilgrainSectionHeader(title: title)
+            SettingsSectionHeader(title: title)
                 .padding(.bottom, 10)
             TodayCard { VStack(spacing: 0) { content() } }
         }
@@ -185,11 +185,11 @@ struct ProfileView: View {
         HStack {
             Text(label)
                 .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.mgHeading)
+                .foregroundStyle(Color.appInk)
             Spacer(minLength: 16)
             Text(value)
                 .font(.appMono(12))
-                .foregroundStyle(Color.mgSecondary)
+                .foregroundStyle(Color.appMuted)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -210,9 +210,9 @@ struct ProfileView: View {
                     .font(.system(size: 15, weight: .regular))
                 Spacer()
                 AppIcon("chevron-right", size: 14)
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
             }
-            .foregroundStyle(destructive ? Color.mgDestructive : Color.mgHeading)
+            .foregroundStyle(destructive ? Color.appDestructive : Color.appInk)
             .padding(.vertical, 16)
         }
         .buttonStyle(.appScale(0.98))

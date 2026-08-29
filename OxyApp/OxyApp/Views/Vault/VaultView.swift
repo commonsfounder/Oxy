@@ -118,7 +118,7 @@ struct VaultView: View {
         }
     }
 
-    // A saved password is only half the picture: the other half is when Millie may use it
+    // A saved password is only half the picture: the other half is when Adam may use it
     // without asking first. Those permissions existed as API only, so the one thing a person
     // most needs to be able to undo was the one thing they could not see.
     private var grantsSection: some View {
@@ -164,7 +164,7 @@ struct VaultView: View {
     }
 
     // Refusals are listed alongside successes on purpose. A denied row is what shows a page
-    // trying to steer Millie at a site you never permitted, and it is only visible if it is
+    // trying to steer Adam at a site you never permitted, and it is only visible if it is
     // shown even when nothing went wrong.
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -383,7 +383,7 @@ private struct VaultCredentialEntrySheet: View {
 // MARK: - Permission entry
 
 // Only standing permissions are created here. A task-scoped one binds to a single browsing
-// run and can only be granted in response to Millie asking during that run, so offering it
+// run and can only be granted in response to Adam asking during that run, so offering it
 // on this screen would produce a permission with nothing to attach to.
 private struct VaultGrantEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -433,7 +433,7 @@ private struct VaultGrantEntrySheet: View {
                         Stepper("At most \(maxUses)", value: $maxUses, in: 1...50)
                     }
                 } footer: {
-                    Text("Millie signs in to this site without asking, until it expires or you revoke it.")
+                    Text("Adam signs in to this site without asking, until it expires or you revoke it.")
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }

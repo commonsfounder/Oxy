@@ -2,7 +2,7 @@
 
 This document names the software seam behind the Ambient Delegation Device.
 
-Millie is the persistent agent identity. A runtime session is the durable execution identity
+Adam is the persistent agent identity. A runtime session is the durable execution identity
 for one delegated goal. The current home device, iOS companion, browser, and future devices are
 activation surfaces; they do not own the goal or its history.
 
@@ -65,7 +65,7 @@ full cloud agent machine: the host must provide `OXY_AGENT_PROJECT_DATA_ROOT` an
 `OXY_AGENT_PROJECTS_JSON` catalog such as:
 
 ```json
-{"milgrain":{"source":"/srv/projects/milgrain","displayName":"Milgrain"}}
+{"adam":{"source":"/srv/projects/adam","displayName":"Adam"}}
 ```
 
 The runtime hashes user/task identifiers into its storage path, clones each task separately, and

@@ -1,4 +1,4 @@
--- SECURITY FIX: the six tables added by the Millie-identity milestone shipped with RLS never
+-- SECURITY FIX: the six tables added by the Adam-identity milestone shipped with RLS never
 -- enabled, while every other table in this schema has it on. Because Supabase grants anon and
 -- authenticated full DML on public tables by default, RLS-off means the PUBLIC anon key could
 -- read and write them across users.

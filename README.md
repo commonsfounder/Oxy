@@ -1,8 +1,8 @@
 # Oxy
 
-**Note on naming:** the shipped product is called **Milgrain** — "Oxy" only survives as this repo's name and as internal identifiers (Xcode project/target, bundle ID `ai.oxy.app`, `oxy.app` email domain, code symbols like `OxySettings`). All user-facing UI, Shortcuts, and copy say Milgrain, not Oxy. The AI assistant itself is intentionally nameless — it doesn't refer to itself as "Milgrain" or "Oxy" in conversation.
+**Note on naming:** the shipped product is called **Adam** — "Oxy" only survives as this repo's name and as internal identifiers (Xcode project/target, bundle ID `ai.oxy.app`, `oxy.app` email domain, code symbols like `OxySettings`). All user-facing UI, Shortcuts, and copy say Adam, not Oxy. The AI assistant itself is intentionally nameless — it doesn't refer to itself as "Adam" or "Oxy" in conversation.
 
-Milgrain is a general-purpose agent runtime with a conversational front end — text or voice. You give it an outcome; it works out how to reach that outcome by composing general capabilities (browser, connectors, memory, communication, files, its own settings, long-running work, verification) inside deterministic safety boundaries.
+Adam is a general-purpose agent runtime with a conversational front end — text or voice. You give it an outcome; it works out how to reach that outcome by composing general capabilities (browser, connectors, memory, communication, files, its own settings, long-running work, verification) inside deterministic safety boundaries.
 
 The architecture hardcodes **capabilities and safety boundaries, never human tasks**. Email, calendar, rides, travel, shopping, forms, account admin and subscriptions are all applications of the same runtime rather than separate features — adding a new kind of task should not mean adding a new subsystem. See [AGENTS.md](AGENTS.md) for the architecture rules and `test/smoke/general-agency.test.js` for the capability tests that hold them in place.
 
@@ -206,7 +206,7 @@ Oxy/
 ├── scripts/                    # one-off/maintenance scripts
 ├── mcp-server.js               # Standalone MCP tool server (separate process)
 ├── create-shortcut.js          # Apple Shortcuts generator
-├── Milgrain.shortcut           # Pre-built Apple Shortcut file
+├── Adam.shortcut           # Pre-built Apple Shortcut file
 ├── proactive-job.js            # Scheduled proactive briefing/routine runner
 ├── retention-job.js            # Data retention enforcement job
 ├── AGENTS.md                   # Shared playbook for all coding agents in this repo

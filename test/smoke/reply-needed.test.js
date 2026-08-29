@@ -14,7 +14,7 @@ const {
 } = require('../../api/services/reply-needed');
 
 // The prompt is a template literal wrapped for readability, so a multi-word assertion must
-// tolerate a line break landing between words — same convention as millie-voice.test.js.
+// tolerate a line break landing between words — same convention as adam-voice.test.js.
 function phrase(text) {
   return new RegExp(text.trim().split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
 }

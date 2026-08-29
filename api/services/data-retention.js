@@ -26,12 +26,12 @@ const RETENTION_POLICY = {
   // only the event bodies (the actual correspondence) get a retention clock, mirroring
   // how conversations (chat) has one but connectors (the relationship, not its
   // content) does not.
-  external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Millie has sent or received on your behalf: deleted after 180 days.' },
+  external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Adam has sent or received on your behalf: deleted after 180 days.' },
   // Keyed on last_used_at, not created_at, and deliberately so: a passport scan uploaded
   // once and reused every few months would be deleted by an age-since-upload clock while
   // still being in active use. `storageBucket` tells the sweep the row has a blob behind it
   // that must go first — see the storage branch in runRetentionSweep.
-  documents: { maxAgeDays: 365, column: 'last_used_at', storageBucket: 'documents', label: 'Files you have given Millie, or that she has saved for you: deleted after 365 days without being used.' },
+  documents: { maxAgeDays: 365, column: 'last_used_at', storageBucket: 'documents', label: 'Files you have given Adam, or that they have saved for you: deleted after 365 days without being used.' },
 };
 
 // Pure: returns the ids of conversation rows that should be deleted.

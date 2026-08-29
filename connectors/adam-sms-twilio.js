@@ -1,11 +1,11 @@
 'use strict';
 const axios = require('axios');
 
-// Millie's phone number and SMS over Twilio's plain REST API, no SDK, like the other connectors
+// Adam's phone number and SMS over Twilio's plain REST API, no SDK, like the other connectors
 // here. US numbers need A2P 10DLC registration before carriers deliver reliably — an
 // account-level prerequisite this file neither detects nor manages; provisioning works without it.
 
-const MILLIE_SMS_SIGNATURE_LINE = '- Millie (assistant)';
+const MILLIE_SMS_SIGNATURE_LINE = '- Adam (assistant)';
 
 function twilioAuth() {
   const sid = process.env.TWILIO_ACCOUNT_SID;
@@ -36,7 +36,7 @@ async function provisionPhoneNumber(userId) {
   return { phoneNumber: purchase.data.phone_number, providerRef: purchase.data.sid };
 }
 
-async function sendMillieSms({ from, to, body }) {
+async function sendAdamSms({ from, to, body }) {
   const { sid, token } = twilioAuth();
   const text = `${body}\n${MILLIE_SMS_SIGNATURE_LINE}`;
   const response = await axios.post(
@@ -61,4 +61,4 @@ function parseInboundSmsPayload(payload) {
   };
 }
 
-module.exports = { provisionPhoneNumber, sendMillieSms, parseInboundSmsPayload, MILLIE_SMS_SIGNATURE_LINE };
+module.exports = { provisionPhoneNumber, sendAdamSms, parseInboundSmsPayload, MILLIE_SMS_SIGNATURE_LINE };

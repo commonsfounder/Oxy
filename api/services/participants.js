@@ -1,6 +1,6 @@
 'use strict';
 
-// The people/businesses Millie talks to on the user's behalf. A participant is
+// The people/businesses Adam talks to on the user's behalf. A participant is
 // channel-agnostic (participants.js, not "email_contacts.js") — participant_addresses
 // is where the channel-specific reachability lives, since one participant (a
 // restaurant) may have both a phone number and an email address.

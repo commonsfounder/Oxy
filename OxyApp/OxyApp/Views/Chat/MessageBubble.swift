@@ -345,11 +345,11 @@ private struct DisplayRenderSheet: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Choose a paired display")
                     .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(Color.mgHeading)
+                    .foregroundStyle(Color.appInk)
 
                 Text("This sends the reply as a short readable update.")
                     .font(.appBody(13))
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
 
                 if isLoading {
                     ProgressView()
@@ -358,7 +358,7 @@ private struct DisplayRenderSheet: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(errorMessage)
                             .font(.appBody(14))
-                            .foregroundStyle(Color.mgDestructive)
+                            .foregroundStyle(Color.appDestructive)
                         Button("Try again") {
                             Task { await loadDisplays() }
                         }
@@ -368,7 +368,7 @@ private struct DisplayRenderSheet: View {
                 } else if displays.isEmpty {
                     Text("No displays paired. Pair one in Settings.")
                         .font(.appBody(14))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                 } else {
                     VStack(spacing: 0) {
                         ForEach(displays) { display in
@@ -381,10 +381,10 @@ private struct DisplayRenderSheet: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(display.name)
                                             .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(Color.mgHeading)
+                                            .foregroundStyle(Color.appInk)
                                         Text("Paired")
                                             .font(.appBody(12))
-                                            .foregroundStyle(Color.mgSecondary)
+                                            .foregroundStyle(Color.appMuted)
                                     }
                                     Spacer()
                                     if sendingDisplayID == display.id {
@@ -401,7 +401,7 @@ private struct DisplayRenderSheet: View {
                             .disabled(sendingDisplayID != nil)
 
                             if display.id != displays.last?.id {
-                                MilgrainDivider()
+                                SettingsDivider()
                             }
                         }
                     }
@@ -412,7 +412,7 @@ private struct DisplayRenderSheet: View {
                 if !displays.isEmpty, let errorMessage {
                     Text(errorMessage)
                         .font(.appBody(12))
-                        .foregroundStyle(Color.mgDestructive)
+                        .foregroundStyle(Color.appDestructive)
                 }
 
                 Spacer()

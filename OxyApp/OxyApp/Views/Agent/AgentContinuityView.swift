@@ -33,7 +33,7 @@ struct AgentContinuityView: View {
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.system(size: 13))
-                                .foregroundStyle(Color.mgDestructive)
+                                .foregroundStyle(Color.appDestructive)
                         }
                         if let snapshot {
                             history(snapshot.imports)
@@ -69,7 +69,7 @@ struct AgentContinuityView: View {
             }
             Text("Import a .zip export. A .json includes conversations only.")
                 .font(.system(size: 13))
-                .foregroundStyle(Color.mgSecondary)
+                .foregroundStyle(Color.appMuted)
             Button {
                 showingImporter = true
             } label: {
@@ -103,45 +103,45 @@ struct AgentContinuityView: View {
                 ForEach(coverageRows(preview), id: \.label) { row in
                     HStack(spacing: 10) {
                         AppIcon(row.found ? "bolt" : "dotted", size: 12)
-                            .foregroundStyle(row.found ? Color.appAccent : Color.mgSecondary)
+                            .foregroundStyle(row.found ? Color.appAccent : Color.appMuted)
                         Text(row.label)
                             .font(.system(size: 13, weight: row.found ? .medium : .regular))
-                            .foregroundStyle(row.found ? Color.mgHeading : Color.mgSecondary)
+                            .foregroundStyle(row.found ? Color.appInk : Color.appMuted)
                         Spacer()
                         Text(row.detail)
                             .font(.system(size: 12))
-                            .foregroundStyle(Color.mgSecondary)
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
             }
 
             if !preview.workflows.isEmpty {
-                MilgrainDivider()
+                SettingsDivider()
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Automations")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.mgHeading)
+                        .foregroundStyle(Color.appInk)
                     Text("These arrive switched off. Turn each one off in \(preview.source.capitalized) before enabling it here, or it runs twice.")
                         .font(.system(size: 12))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appMuted)
                     ForEach(preview.workflows.prefix(8)) { workflow in
                         HStack(alignment: .top, spacing: 10) {
                             AppIcon(workflow.isScheduled ? "bolt" : "dotted", size: 12)
-                                .foregroundStyle(workflow.isScheduled ? Color.appAccent : Color.mgSecondary)
+                                .foregroundStyle(workflow.isScheduled ? Color.appAccent : Color.appMuted)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(workflow.name)
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color.mgHeading)
+                                    .foregroundStyle(Color.appInk)
                                 Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger — runs only when you ask")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(Color.mgSecondary)
+                                    .foregroundStyle(Color.appMuted)
                             }
                         }
                     }
                     if preview.workflows.count > 8 {
                         Text("and \(preview.workflows.count - 8) more")
                             .font(.system(size: 11))
-                            .foregroundStyle(Color.mgSecondary)
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
             }
@@ -162,7 +162,7 @@ struct AgentContinuityView: View {
 
                 Button("Cancel") { reset() }
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
                     .disabled(isWorking)
             }
         }
@@ -211,7 +211,7 @@ struct AgentContinuityView: View {
             if imports.isEmpty {
                 Text("Nothing imported yet.")
                     .font(.system(size: 13))
-                    .foregroundStyle(Color.mgSecondary)
+                    .foregroundStyle(Color.appMuted)
             } else {
                 ForEach(imports) { item in
                     VStack(alignment: .leading, spacing: 5) {
@@ -220,11 +220,11 @@ struct AgentContinuityView: View {
                             Spacer()
                             Text(item.status.capitalized)
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(item.status == "failed" ? Color.mgDestructive : Color.appAccent)
+                                .foregroundStyle(item.status == "failed" ? Color.appDestructive : Color.appAccent)
                         }
                         Text("\(item.conversationCount) conversations · \(item.messageCount) messages · \(item.memoryCount) memories")
                             .font(.system(size: 12))
-                            .foregroundStyle(Color.mgSecondary)
+                            .foregroundStyle(Color.appMuted)
                     }
                     .padding(.vertical, 12)
                 }

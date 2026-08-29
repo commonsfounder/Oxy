@@ -60,7 +60,7 @@ test('POST /webhooks/millie-email rejects a request with an invalid signature', 
   }
 });
 
-test('POST /webhooks/millie-email with a valid signature but no matching Millie address returns 200 and does nothing destructive', async () => {
+test('POST /webhooks/millie-email with a valid signature but no matching Adam address returns 200 and does nothing destructive', async () => {
   const oldSecret = process.env.RESEND_WEBHOOK_SECRET;
   process.env.RESEND_WEBHOOK_SECRET = TEST_SECRET;
   const server = app.listen(0);

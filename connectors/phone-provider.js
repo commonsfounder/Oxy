@@ -1,6 +1,6 @@
 'use strict';
 
-// The provider seam for Millie's phone identity, so the telecom vendor is one registration away
+// The provider seam for Adam's phone identity, so the telecom vendor is one registration away
 // from being swapped. Twilio is the current default, being the only one confirmed to sell UK
 // mobile numbers without UK proof-of-address.
 //
@@ -59,11 +59,11 @@ function inboundAck(provider) {
 // Twilio's connector keeps its own export names; the adapter shape is applied here so
 // the existing module (and its tests) stay untouched.
 
-const twilio = require('./millie-sms-twilio');
+const twilio = require('./adam-sms-twilio');
 
 registerProvider('twilio', {
   provisionPhoneNumber: (userId) => twilio.provisionPhoneNumber(userId),
-  sendSms: ({ from, to, body }) => twilio.sendMillieSms({ from, to, body }),
+  sendSms: ({ from, to, body }) => twilio.sendAdamSms({ from, to, body }),
   parseInboundSms: (payload) => twilio.parseInboundSmsPayload(payload),
   // Twilio expects TwiML or an empty 200 on the inbound webhook. That is a Twilio
   // quirk, so it lives with the Twilio adapter rather than in the shared route.

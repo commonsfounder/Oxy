@@ -197,7 +197,7 @@ struct ChatHomeView: View {
                                 }
                                 // The accent tint otherwise overrides the system's
                                 // destructive red on the swipe action.
-                                .tint(Color.mgDestructive)
+                                .tint(Color.appDestructive)
                             }
                         }
                     } header: {
@@ -528,7 +528,7 @@ private struct SidebarSearchResultRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(result.role == "user" ? "You" : "Millie")
+                Text(result.role == "user" ? "You" : "Adam")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
                 Spacer()

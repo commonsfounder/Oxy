@@ -21,10 +21,10 @@ function zipOf(files) {
 // instructions and memory before.
 const CHATGPT_EXPORT = {
   'conversations.json': [{
-    title: 'Milgrain planning',
+    title: 'Adam planning',
     create_time: 1,
     mapping: {
-      a: { message: { author: { role: 'user' }, content: { parts: ['I am building Milgrain and I prefer direct answers.'] }, create_time: 1 } },
+      a: { message: { author: { role: 'user' }, content: { parts: ['I am building Adam and I prefer direct answers.'] }, create_time: 1 } },
       b: { message: { author: { role: 'assistant' }, content: { parts: ['Understood.'] }, create_time: 2 } }
     }
   }],

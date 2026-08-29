@@ -48,7 +48,7 @@ create table workflows (
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  -- Set when status becomes terminal, so "what did Millie finish this month" is answerable
+  -- Set when status becomes terminal, so "what did Adam finish this month" is answerable
   -- without scanning the timeline.
   closed_at timestamptz,
 
@@ -65,7 +65,7 @@ create index workflows_user_all_idx on workflows (user_id, created_at desc);
 create index workflows_deadline_idx on workflows (deadline) where deadline is not null;
 
 -- The timeline. Append-only, and load-bearing for four separate things: debugging, the
--- user's trust that Millie did what she says, resuming after a gap, and explaining the
+-- user's trust that Adam did what they say, resuming after a gap, and explaining the
 -- current state without the user having to ask.
 create table workflow_events (
   id uuid primary key default gen_random_uuid(),
@@ -79,7 +79,8 @@ create table workflow_events (
   summary text not null,
 
   -- Who caused it. 'millie' | 'user' | 'external' — the timeline is much less useful if you
-  -- cannot tell what Millie did from what was done to her.
+  -- cannot tell what Adam did from what was done to it. The stored value stays 'millie':
+  -- it is a live CHECK constraint on existing rows, not a label anyone reads.
   actor text not null default 'millie' check (actor in ('millie', 'user', 'external', 'system')),
 
   -- Optional pointer to whatever this event is about, without a foreign key per entity type.
@@ -106,7 +107,7 @@ create table workflow_checkpoints (
 
   type text not null check (type in (
     'approval',                -- "confirm before I submit this"
-    'missing_information',     -- only Millie's user can supply it
+    'missing_information',     -- only Adam's user can supply it
     'authentication_required', -- a login or a verification code
     'legal_confirmation',      -- a declaration the user must actually make
     'payment_confirmation',    -- what ready_for_payment used to be

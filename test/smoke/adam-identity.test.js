@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { ensureMillieIdentity, getMillieIdentity, getActiveHandle, buildEmailHandleValue } = require('../../api/services/millie-identity');
+const { ensureAdamIdentity, getAdamIdentity, getActiveHandle, buildEmailHandleValue } = require('../../api/services/adam-identity');
 
 function fakeSupabase(seed = {}) {
   const state = {
@@ -30,9 +30,9 @@ function fakeSupabase(seed = {}) {
   return { from: table, _state: state };
 }
 
-test('ensureMillieIdentity creates an identity and an email handle for a new user', async () => {
+test('ensureAdamIdentity creates an identity and an email handle for a new user', async () => {
   const supabase = fakeSupabase();
-  const result = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  const result = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   assert.equal(result.identity.user_id, 'chizi');
   const emailHandle = result.handles.find(h => h.channel_type === 'email');
   assert.ok(emailHandle, 'expected an email handle to be created');
@@ -40,10 +40,10 @@ test('ensureMillieIdentity creates an identity and an email handle for a new use
   assert.equal(emailHandle.status, 'active');
 });
 
-test('ensureMillieIdentity is idempotent — calling twice does not create a second identity', async () => {
+test('ensureAdamIdentity is idempotent — calling twice does not create a second identity', async () => {
   const supabase = fakeSupabase();
-  const first = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
-  const second = await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  const first = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
+  const second = await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   assert.equal(first.identity.id, second.identity.id);
   assert.equal(supabase._state.millie_identities.length, 1);
 });
@@ -61,7 +61,7 @@ test('buildEmailHandleValue produces a stable per-user address under the configu
 
 test('getActiveHandle returns null when no handle of that channel exists', async () => {
   const supabase = fakeSupabase();
-  await ensureMillieIdentity(supabase, 'chizi', { attemptPhone: false });
+  await ensureAdamIdentity(supabase, 'chizi', { attemptPhone: false });
   const phone = await getActiveHandle(supabase, 'chizi', 'phone_sms');
   assert.equal(phone, null);
 });

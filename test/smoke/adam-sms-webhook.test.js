@@ -4,7 +4,7 @@ const http = require('node:http');
 
 const app = require('../../api/index');
 
-test('POST /webhooks/millie-sms with no matching Millie number returns 200', async () => {
+test('POST /webhooks/millie-sms with no matching Adam number returns 200', async () => {
   const server = app.listen(0);
   try {
     const body = new URLSearchParams({ From: '+15559876543', To: '+15550000000', Body: 'hi', MessageSid: 'SMtest' });

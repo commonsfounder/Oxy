@@ -1,5 +1,5 @@
 const DEFAULT_AGENT_IDENTITY = {
-  name: 'Millie',
+  name: 'Adam',
   role: 'personal agent',
   continuity: 'persistent'
 };
