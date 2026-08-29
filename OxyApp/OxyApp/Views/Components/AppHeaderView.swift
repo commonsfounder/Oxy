@@ -8,18 +8,13 @@ struct AppHeaderView: View {
     var onLeading: () -> Void = {}
     var onNewChat: (() -> Void)? = nil
 
-    private let circle: CGFloat = 38
+    private let circle = AppControl.Size.regular.chrome
 
     var body: some View {
         HStack {
-            Button(action: onLeading) {
-                AppIcon(showsBackButton ? "chevron-left" : "menu", size: 18)
-                    .foregroundColor(Color.appInk)
-                    .frame(width: circle, height: circle)
-                    .appGlass(Circle(), interactive: true)
-            }
-            .buttonStyle(.appScale)
-            .accessibilityLabel(showsBackButton ? "Home" : "History")
+            AppIconButton(showsBackButton ? "chevron-left" : "menu",
+                          label: showsBackButton ? "Home" : "History",
+                          style: .glass, action: onLeading)
 
             Spacer()
 
@@ -32,6 +27,7 @@ struct AppHeaderView: View {
                             .frame(width: 18, height: 18)
                             .frame(width: circle, height: circle)
                             .appGlass(Circle(), tint: isIncognito ? Color.appInk : nil, interactive: true)
+                            .appHitTarget()
                     }
                     .buttonStyle(.appScale)
                     .accessibilityLabel(isIncognito ? "Private chat on" : "Private chat off")
@@ -41,14 +37,8 @@ struct AppHeaderView: View {
                 }
 
                 if !isEmptyChat, let onNewChat {
-                    Button(action: onNewChat) {
-                        AppIcon("edit", size: 17)
-                            .foregroundColor(Color.appInk)
-                            .frame(width: circle, height: circle)
-                            .appGlass(Circle(), interactive: true)
-                    }
-                    .buttonStyle(.appScale)
-                    .accessibilityLabel("New conversation")
+                    AppIconButton("edit", label: "New conversation",
+                                  style: .glass, action: onNewChat)
                 }
             }
         }

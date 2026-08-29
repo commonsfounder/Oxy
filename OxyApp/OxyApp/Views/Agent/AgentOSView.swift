@@ -49,7 +49,7 @@ struct AgentOSView: View {
     private func identityCard(_ agent: AgentIdentity) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AppIcon("sparkles", size: 18)
+                AppIcon("sparkles", size: AppGlyphSize.medium)
                     .foregroundStyle(Color.appAccent)
                     .frame(width: 40, height: 40)
                     .background(Color.appAccent.opacity(0.12), in: Circle())
@@ -84,9 +84,7 @@ struct AgentOSView: View {
                     ForEach(Array(visible.enumerated()), id: \.offset) { _, group in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(group.0)
-                                .font(.appBody(AppText.micro, weight: .semibold))
-                                .tracking(0.8)
-                                .foregroundStyle(Color.appAccent)
+                                .appEyebrow(.appAccent)
                             ForEach(group.1, id: \.self) { line in
                                 Text(line)
                                     .font(.appBody(AppText.body))

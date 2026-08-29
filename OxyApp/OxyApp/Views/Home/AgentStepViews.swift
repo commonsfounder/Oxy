@@ -82,7 +82,7 @@ struct RideConfirmStepView: View {
             }
 
             HStack(spacing: 6) {
-                AppIcon("shield-check", size: 13)
+                AppIcon("shield-check", size: AppGlyphSize.small)
                 Text("Uber shows the final fare before you confirm.")
                     .font(.appBody(AppText.caption))
                     .fixedSize(horizontal: false, vertical: true)
@@ -128,7 +128,7 @@ struct LinkResultStepView: View {
                         if let url = URL(string: link.url) {
                             Link(destination: url) {
                                 HStack(spacing: 10) {
-                                    AppIcon("arrow-up-right", size: 13)
+                                    AppIcon("arrow-up-right", size: AppGlyphSize.small)
                                     Text(link.label)
                                         .font(.appBody(AppText.body, weight: .semibold))
                                     Spacer(minLength: 0)
@@ -146,7 +146,7 @@ struct LinkResultStepView: View {
             }
 
             HStack(spacing: 6) {
-                AppIcon("shield-check", size: 13)
+                AppIcon("shield-check", size: AppGlyphSize.small)
                 Text("Links from this email.")
                     .font(.appBody(AppText.caption))
                     .fixedSize(horizontal: false, vertical: true)
@@ -215,7 +215,7 @@ struct SubjectDetailStepView: View {
 
             if details.amountText == nil {
                 HStack(spacing: 6) {
-                    AppIcon("shield-check", size: 13)
+                    AppIcon("shield-check", size: AppGlyphSize.small)
                     Text("Final price is confirmed at checkout")
                         .font(.appBody(AppText.caption))
                 }
@@ -255,7 +255,7 @@ struct SubjectDetailStepView: View {
                 .fill(Color.appSurface2)
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
-            AppIcon("cube", size: 60)
+            AppIcon("cube", size: AppGlyphSize.hero)
                 .foregroundStyle(Color.appMuted)
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
         }
@@ -276,7 +276,7 @@ struct AssistantAskStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 10) {
-                AppIcon("sparkles", size: 16)
+                AppIcon("sparkles", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.appMuted)
                 Text(text)
                     .font(.appDisplay(AppText.title, weight: .medium))
@@ -296,21 +296,9 @@ struct AssistantAskStepView: View {
                     .onSubmit(send)
                     .disabled(isSending)
 
-                Button(action: send) {
-                    if isSending {
-                        ProgressView()
-                            .tint(Color.appOnAccent)
-                            .frame(width: 30, height: 30)
-                            .background(Color.appAccent.opacity(0.5), in: Circle())
-                    } else {
-                        AppIcon("arrow-up", size: 14, weight: .bold)
-                            .foregroundStyle(Color.appOnAccent)
-                            .frame(width: 30, height: 30)
-                            .background(Color.appAccent, in: Circle())
-                    }
-                }
-                .buttonStyle(.appScale(0.94))
-                .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                AppIconButton("arrow-up", label: "Send", size: .small,
+                              style: .accent, weight: .bold, isBusy: isSending, action: send)
+                    .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -401,7 +389,7 @@ struct SessionDoneStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppIcon("check-circle", size: 30)
+            AppIcon("check-circle", size: AppGlyphSize.large)
                 .foregroundStyle(Color.appMuted)
             Text(title)
                 .font(.appDisplay(AppText.title, weight: .semibold))

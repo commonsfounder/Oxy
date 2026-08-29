@@ -55,7 +55,7 @@ struct AgentWorkspaceView: View {
     private func workspaceHeader(_ snapshot: AgentWorkspaceSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AppIcon("doc", size: 18)
+                AppIcon("doc", size: AppGlyphSize.medium)
                     .foregroundStyle(Color.appAccent)
                     .frame(width: 40, height: 40)
                     .background(Color.appAccent.opacity(0.12), in: Circle())
@@ -94,7 +94,7 @@ struct AgentWorkspaceView: View {
                 VStack(spacing: 0) {
                     ForEach(files) { file in
                         HStack(spacing: 10) {
-                            AppIcon(file.kind == "folder" ? "dotted" : "doc", size: 15)
+                            AppIcon(file.kind == "folder" ? "dotted" : "doc", size: AppGlyphSize.regular)
                                 .foregroundStyle(Color.appAccent)
                             Text(file.path)
                                 .font(.appBody(AppText.body))
@@ -142,7 +142,7 @@ struct AgentWorkspaceView: View {
                 VStack(spacing: 0) {
                     ForEach(sessions) { session in
                         HStack(spacing: 10) {
-                            AppIcon("dotted", size: 15)
+                            AppIcon("dotted", size: AppGlyphSize.regular)
                                 .foregroundStyle(Color.appAccent)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(session.title)

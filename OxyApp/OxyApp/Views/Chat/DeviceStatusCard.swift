@@ -37,7 +37,6 @@ struct DeviceStatusCard: View {
                 .frame(width: 6, height: 6)
             Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
                 .font(.appMono(AppText.micro, weight: .medium))
-                .tracking(0.6)
                 .foregroundStyle(telemetry.isStreaming ? Color.appInk : Color.appMuted)
                 .fixedSize()
         }
@@ -53,7 +52,6 @@ struct DeviceStatusCard: View {
     private func metric(_ text: String) -> some View {
         Text(text)
             .font(.appMono(AppText.micro, weight: .medium))
-            .tracking(0.4)
             .foregroundStyle(Color.appTitanium)
             .fixedSize()
             // Live telemetry rolls its digits instead of popping.

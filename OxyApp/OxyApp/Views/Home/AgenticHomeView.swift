@@ -88,10 +88,15 @@ struct AgenticHomeView: View {
                         }
 
                         if isLoading && board.isEmpty && missions.isEmpty && visibleLifeBriefing == nil {
-                            ProgressView()
-                                .tint(Color.appMuted)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
+                            // Cards shaped like the board that is about to arrive,
+                            // rather than a spinner in the middle of nothing.
+                            VStack(spacing: AppSpacing.md) {
+                                OxySkeletonCard(height: 108)
+                                OxySkeletonCard(height: 92)
+                                OxySkeletonCard(height: 92)
+                            }
+                            .padding(.top, AppSpacing.xs)
+                            .appLoadingSwap(isLoading)
                         } else {
                             if !board.isEmpty {
                                 boardLanes
@@ -215,17 +220,9 @@ struct AgenticHomeView: View {
         .fullScreenCover(isPresented: $isChatHomePresented) {
             ChatHomeView()
                 .overlay(alignment: .topTrailing) {
-                    Button {
-                        HapticManager.shared.impact(.light)
+                    AppIconButton("tab-home", label: "Home", style: .glass) {
                         isChatHomePresented = false
-                    } label: {
-                        AppIcon("tab-home", size: 16)
-                            .foregroundStyle(Color.appInk)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
                     }
-                    .buttonStyle(.appScale)
-                    .accessibilityLabel("Home")
                     .padding(.top, 8)
                     .padding(.trailing, 12)
                 }
@@ -234,17 +231,9 @@ struct AgenticHomeView: View {
             MoreView()
                 .swipeToDismiss()
                 .overlay(alignment: .topTrailing) {
-                    Button {
-                        HapticManager.shared.impact(.light)
+                    AppIconButton("tab-home", label: "Home", style: .glass) {
                         isMorePresented = false
-                    } label: {
-                        AppIcon("tab-home", size: 16)
-                            .foregroundStyle(Color.appInk)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
                     }
-                    .buttonStyle(.appScale)
-                    .accessibilityLabel("Home")
                     .padding(.top, 8)
                     .padding(.trailing, 12)
                 }
@@ -258,13 +247,8 @@ struct AgenticHomeView: View {
                 )
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button {
+                        AppIconButton("xmark", label: "Close", size: .small, style: .glass) {
                             chatLaunch = nil
-                        } label: {
-                            AppIcon("xmark", size: 14)
-                                .foregroundStyle(Color.appInk)
-                                .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial, in: Circle())
                         }
                     }
                 }
@@ -320,20 +304,19 @@ struct AgenticHomeView: View {
     private var greetingBlock: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text("TODAY")
-                    .font(.appBody(AppText.micro, weight: .semibold))
-                    .tracking(2.2)
-                    .foregroundStyle(Color.appAccent)
+                Text("Today")
+                    .appEyebrow(.appAccent)
                 Spacer(minLength: 0)
-                Text(dateLine.uppercased())
-                    .font(.appMono(AppText.micro, weight: .medium))
-                    .foregroundStyle(Color.appMuted)
+                Text(dateLine)
+                    .appEyebrow()
             }
 
             Text(greetingLine)
-                .font(.appDisplay(AppText.hero, weight: .medium))
+                .font(.appDisplay(AppText.hero, weight: .semibold))
+                // Optical tracking at display size, instead of the negative line
+                // spacing that was clawing back room a too-loose setting had taken.
+                .appHeroTracking(AppText.hero)
                 .foregroundStyle(Color.appInk)
-                .lineSpacing(-2)
                 .lineLimit(2)
                 .minimumScaleFactor(0.78)
 
@@ -341,6 +324,9 @@ struct AgenticHomeView: View {
                 .font(.appBody(AppText.body, weight: .medium))
                 .foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)
+                // The count changes while work runs; roll it rather than snap it.
+                .contentTransition(.numericText())
+                .animation(.appStandard, value: homeSummary)
 
             AppRule()
         }
@@ -377,7 +363,7 @@ struct AgenticHomeView: View {
                 HStack(spacing: AppSpacing.sm) {
                     Text("Open chat")
                         .font(.appBody(AppText.body, weight: .semibold))
-                    AppIcon("arrow-up-right", size: 12)
+                    AppIcon("arrow-up-right", size: AppGlyphSize.small)
                 }
                 .foregroundStyle(Color.appOnAccent)
                 .padding(.horizontal, AppSpacing.lg)
@@ -499,17 +485,9 @@ struct AgenticHomeView: View {
 
     private var composerBar: some View {
         HStack(spacing: 10) {
-            Button {
-                HapticManager.shared.impact(.light)
+            AppIconButton("plus", label: "New conversation", style: .surface) {
                 openChat(autoSend: nil, startFresh: true)
-            } label: {
-                AppIcon("plus", size: 16)
-                    .foregroundStyle(Color.appMuted)
-                    .frame(width: 40, height: 40)
-                    .background(Color.appSurface, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
             }
-            .buttonStyle(.appScale)
 
             HStack(spacing: 10) {
                 TextField("Ask or delegate", text: $composerDraft)
@@ -520,22 +498,12 @@ struct AgenticHomeView: View {
                     .onSubmit { sendComposer() }
 
                 if composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        HapticManager.shared.impact(.light)
+                    AppIconButton("mic", label: "Speak instead", size: .small) {
                         openChat(autoSend: nil, startFresh: false)
-                    } label: {
-                        AppIcon("mic", size: 16)
-                            .foregroundStyle(Color.appMuted)
                     }
-                    .buttonStyle(.plain)
                 } else {
-                    Button(action: sendComposer) {
-                        AppIcon("arrow-up", size: 14, weight: .bold)
-                            .foregroundStyle(Color.appOnAccent)
-                            .frame(width: 30, height: 30)
-                            .background(Color.appAccent, in: Circle())
-                    }
-                    .buttonStyle(.appScale(0.94))
+                    AppIconButton("arrow-up", label: "Send", size: .small,
+                                  style: .accent, weight: .bold, action: sendComposer)
                 }
             }
             .padding(.horizontal, AppSpacing.lg)
@@ -588,7 +556,7 @@ struct AgenticHomeView: View {
     private var chatPeekIndicator: some View {
         HStack {
             Spacer()
-            AppIcon("chat", size: 17)
+            AppIcon("chat", size: AppGlyphSize.regular)
                 .foregroundStyle(Color.appMuted)
                 .frame(width: 44, height: 44)
                 .background(Color.appSurface, in: Circle())
@@ -958,7 +926,7 @@ private struct LifeBriefingCard: View {
                     .font(.appBody(AppText.footnote, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
                 Spacer()
-                AppIcon("sparkles", size: 15)
+                AppIcon("sparkles", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.appMuted)
             }
 
@@ -969,7 +937,7 @@ private struct LifeBriefingCard: View {
                         onItem(item)
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            AppIcon(item.iconName, size: 16)
+                            AppIcon(item.iconName, size: AppGlyphSize.regular)
                                 .foregroundStyle(Color.appMuted)
                                 .frame(width: 26, height: 26)
                                 .background(Color.appHairline, in: Circle())
@@ -989,7 +957,7 @@ private struct LifeBriefingCard: View {
                             }
 
                             Spacer(minLength: 6)
-                            AppIcon("arrow-right", size: 12)
+                            AppIcon("arrow-right", size: AppGlyphSize.small)
                                 .foregroundStyle(Color.appMuted)
                                 .padding(.top, 8)
                         }
@@ -1281,7 +1249,7 @@ struct MissionCardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let vendor = mission.vendor {
                         HStack(spacing: 6) {
-                            AppIcon("box", size: 11)
+                            AppIcon("box", size: AppGlyphSize.small)
                             Text(vendor)
                                 .font(.appBody(AppText.caption, weight: .semibold))
                         }
@@ -1305,7 +1273,7 @@ struct MissionCardView: View {
             HStack {
                 if let eta = deliveryETA {
                     HStack(spacing: 6) {
-                        AppIcon("clock", size: 12)
+                        AppIcon("clock", size: AppGlyphSize.small)
                         Text(eta).font(.appBody(AppText.caption, weight: .medium))
                     }
                     .foregroundStyle(Color.appMuted)
@@ -1456,7 +1424,7 @@ struct MissionCardView: View {
                     HStack(spacing: 8) {
                         Text(email.cta?.isEmpty == false ? email.cta! : "Draft reply")
                             .font(.appBody(AppText.body, weight: .semibold))
-                        AppIcon("arrow-right", size: 15, weight: .semibold)
+                        AppIcon("arrow-right", size: AppGlyphSize.regular, weight: .semibold)
                     }
                     .foregroundStyle(Color.appOnAccent)
                     .padding(.horizontal, AppSpacing.lg)
@@ -1499,7 +1467,7 @@ struct MissionCardView: View {
     private var reservationCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                AppIcon("calendar", size: 17)
+                AppIcon("calendar", size: AppGlyphSize.regular)
                     .foregroundStyle(Color(red: 0.55, green: 0.4, blue: 0.85))
                     .frame(width: 40, height: 40)
                     .background(Color(red: 0.55, green: 0.4, blue: 0.85).opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
@@ -1584,7 +1552,7 @@ struct MissionCardView: View {
             HStack(spacing: 8) {
                 Text(label)
                     .font(.appBody(AppText.body, weight: .semibold))
-                AppIcon("arrow-right", size: 15, weight: .semibold)
+                AppIcon("arrow-right", size: AppGlyphSize.regular, weight: .semibold)
             }
             .foregroundStyle(primary ? Color.appOnAccent : Color.appInk)
             .padding(.horizontal, AppSpacing.lg)

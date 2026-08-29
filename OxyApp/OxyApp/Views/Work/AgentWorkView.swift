@@ -31,11 +31,11 @@ struct AgentWorkView: View {
 
                         Button(action: { isShowingComposer = true }) {
                             HStack(spacing: 8) {
-                                AppIcon("plus", size: 14)
+                                AppIcon("plus", size: AppGlyphSize.regular)
                                 Text("New request")
                                     .font(.appBody(AppText.footnote, weight: .semibold))
                                 Spacer(minLength: 0)
-                                AppIcon("arrow-right", size: 13)
+                                AppIcon("arrow-right", size: AppGlyphSize.small)
                             }
                             .foregroundStyle(Color.appInk)
                             .padding(.horizontal, 16)
@@ -104,7 +104,7 @@ struct AgentWorkView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppIcon("dotted", size: 18)
+            AppIcon("dotted", size: AppGlyphSize.medium)
                 .foregroundStyle(Color.appAccent)
             Text("Nothing in progress")
                 .font(.appDisplay(AppText.title, weight: .semibold))
@@ -224,7 +224,7 @@ private struct AgentWatchRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AppIcon("clock", size: 16)
+            AppIcon("clock", size: AppGlyphSize.regular)
                 .foregroundStyle(Color.appAccent)
                 .frame(width: 36, height: 36)
                 .background(Color.appAccent.opacity(0.12), in: Circle())
@@ -246,21 +246,10 @@ private struct AgentWatchRow: View {
 
             Spacer(minLength: 8)
 
-            Button(action: onCancel) {
-                if isCancelling {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(Color.appInk)
-                } else {
-                    AppIcon("xmark", size: 12)
-                }
-            }
-            .foregroundStyle(Color.appMuted)
-            .frame(width: 30, height: 30)
-            .background(Color.appHairline, in: Circle())
-            .buttonStyle(.appScale)
-            .disabled(isCancelling)
-            .accessibilityLabel("Stop watching \(watch.title)")
+            AppIconButton("xmark", label: "Stop watching \(watch.title)",
+                          size: .small, style: .surface,
+                          isBusy: isCancelling, action: onCancel)
+                .disabled(isCancelling)
         }
         .padding(16)
         .background { MissionGlassPlate() }
@@ -398,7 +387,7 @@ private struct AgentTaskRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                AppIcon("dotted", size: 16)
+                AppIcon("dotted", size: AppGlyphSize.regular)
                     .foregroundStyle(statusColor)
                     .frame(width: 36, height: 36)
                     .background(statusColor.opacity(0.12), in: Circle())
@@ -589,7 +578,7 @@ private struct AgentTaskDetailView: View {
             } else if let runtime {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        AppIcon("dotted", size: 14)
+                        AppIcon("dotted", size: AppGlyphSize.small)
                             .foregroundStyle(Color.appAccent)
                         Text(runtime.stateLabel)
                             .font(.appBody(AppText.footnote, weight: .semibold))

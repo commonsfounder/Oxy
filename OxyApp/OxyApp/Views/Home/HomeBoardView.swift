@@ -13,10 +13,8 @@ struct LiveWorkHeader: View {
             PulsingWorkDot(active: true)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("LIVE")
-                    .font(.appBody(AppText.micro, weight: .bold))
-                    .tracking(1.7)
-                    .foregroundStyle(Color.appAccent)
+                Text("Live")
+                    .appEyebrow(.appAccent)
                 Text(label)
                     .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
@@ -25,7 +23,7 @@ struct LiveWorkHeader: View {
 
             Spacer(minLength: 0)
 
-            AppIcon("arrow-right", size: 13)
+            AppIcon("arrow-right", size: AppGlyphSize.small)
                 .foregroundStyle(Color.appMuted)
         }
         .padding(.horizontal, 16)
@@ -129,7 +127,7 @@ struct BoardCard: View {
     private var needsYouCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
-                AppIcon(item.overdue == true ? "alert-circle" : "bolt", size: 15)
+                AppIcon(item.overdue == true ? "alert-circle" : "bolt", size: AppGlyphSize.regular)
                     .foregroundStyle(item.overdue == true ? Color.appDanger : Color.appAccent)
                     .padding(.top, 1)
 
@@ -188,7 +186,7 @@ struct BoardCard: View {
                             }
                         }
                         Spacer(minLength: 0)
-                        AppIcon("chevron-right", size: 12)
+                        AppIcon("chevron-right", size: AppGlyphSize.small)
                             .foregroundStyle(Color.appMuted)
                     }
                     .padding(.horizontal, 14)
@@ -242,7 +240,7 @@ struct BoardCard: View {
             HStack(spacing: 6) {
                 Text(title)
                     .font(.appBody(AppText.body, weight: .semibold))
-                AppIcon("arrow-right", size: 12)
+                AppIcon("arrow-right", size: AppGlyphSize.small)
             }
             .foregroundStyle(Color.appInk)
             .padding(.horizontal, 16)
@@ -258,7 +256,7 @@ struct BoardCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 10) {
                     if item.waitingExternal == true {
-                        AppIcon("clock", size: 15)
+                        AppIcon("clock", size: AppGlyphSize.regular)
                             .foregroundStyle(Color.appMuted)
                             .padding(.top, 1)
                     } else {
@@ -281,7 +279,7 @@ struct BoardCard: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    AppIcon("chevron-right", size: 12)
+                    AppIcon("chevron-right", size: AppGlyphSize.small)
                         .foregroundStyle(Color.appMuted)
                         .padding(.top, 3)
                 }
@@ -309,7 +307,7 @@ struct BoardCard: View {
     private var ledgerCard: some View {
         Button(action: { HapticManager.shared.impact(.light); onOpen() }) {
             HStack(alignment: .top, spacing: 10) {
-                AppIcon(ledgerIcon, size: 14)
+                AppIcon(ledgerIcon, size: AppGlyphSize.regular)
                     .foregroundStyle(ledgerTint)
                     .padding(.top, 2)
 

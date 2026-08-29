@@ -54,17 +54,7 @@ struct AgentTaskSessionView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Button {
-                HapticManager.shared.impact(.light)
-                onDismiss()
-            } label: {
-                AppIcon("xmark", size: 14)
-                    .foregroundStyle(Color.appMuted)
-                    .frame(width: 34, height: 34)
-                    .background(Color.appSurface, in: Circle())
-                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
-            }
-            .buttonStyle(.appScale)
+            AppIconButton("xmark", label: "Close", size: .small, style: .surface, action: onDismiss)
 
             Text(session.title)
                 .font(.appBody(AppText.body, weight: .semibold))
@@ -136,7 +126,7 @@ struct AgentTaskSessionView: View {
                 onOpenChat(nil)
             } label: {
                 HStack(spacing: 8) {
-                    AppIcon("chat", size: 15)
+                    AppIcon("chat", size: AppGlyphSize.regular)
                     Text("Chat")
                         .font(.appBody(AppText.body, weight: .medium))
                 }

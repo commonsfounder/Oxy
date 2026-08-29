@@ -178,6 +178,56 @@ enum AppBorder {
     static let strong: CGFloat = 1
 }
 
+// MARK: - Glyph sizes
+//
+// Five optical steps, each sized to the type it sits beside. The app had grown
+// thirteen (10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 30, 34, 60) with 86 of the
+// 110 glyphs landing in the 12–16 band — one optical size written five ways.
+enum AppGlyphSize {
+    /// Beside `caption` / `footnote` text: chevrons, inline status marks.
+    static let small: CGFloat = 13
+    /// The default — beside `body` text and in row chrome.
+    static let regular: CGFloat = 16
+    /// Control glyphs and card headers.
+    static let medium: CGFloat = 20
+    /// Empty states and standalone status.
+    static let large: CGFloat = 28
+    /// One per full-screen state, and no more than that.
+    static let hero: CGFloat = 60
+}
+
+// MARK: - Controls
+//
+// The chrome and the touch target are two different numbers. The app had drawn
+// 30, 34, 36, 38, 40 and 44pt circles and let each one *be* its own target, so
+// ten glyph buttons shipped under the 44pt minimum. Draw the circle at
+// `chrome`; the target underneath is always `AppControl.target`.
+enum AppControl {
+    /// The HIG minimum, and the floor for anything tappable.
+    static let target: CGFloat = 44
+
+    enum Size {
+        case small, regular, large
+
+        /// The visible circle.
+        var chrome: CGFloat {
+            switch self {
+            case .small:   return 32
+            case .regular: return 38
+            case .large:   return AppControl.target
+            }
+        }
+
+        var glyph: CGFloat {
+            switch self {
+            case .small:   return AppGlyphSize.small
+            case .regular: return AppGlyphSize.regular
+            case .large:   return AppGlyphSize.medium
+            }
+        }
+    }
+}
+
 // MARK: - Motion
 extension Animation {
     static let appFast     = Animation.spring(response: 0.15, dampingFraction: 1.0)
@@ -285,12 +335,14 @@ extension Font {
 
 extension View {
     /// A tracked micro-label above a title. One definition, so every eyebrow in the
-    /// app is the same size, weight, tracking and colour.
-    func appEyebrow() -> some View {
+    /// app is the same size, weight and tracking — the screens had eight of them at
+    /// 0.8, 1.2, 1.3, 1.7, 2.2 and 2.8. Pass the accent for an eyebrow that is
+    /// carrying live state ("TODAY", "LIVE"); everything else takes the default.
+    func appEyebrow(_ color: Color = .appMuted) -> some View {
         font(.appBody(AppText.micro, weight: .semibold))
             .tracking(1.6)
             .textCase(.uppercase)
-            .foregroundStyle(Color.appMuted)
+            .foregroundStyle(color)
     }
 }
 
@@ -366,6 +418,124 @@ struct AppLineField: View {
 // slab, which put the loudest surface in the app on the least important screen.
 
 private let appControlHeight: CGFloat = 50
+
+extension View {
+    /// Grows a control's touch target to the HIG minimum without changing how it
+    /// is drawn. For controls whose chrome is too bespoke for `AppIconButton` —
+    /// the chat send button, which changes fill and glyph with recording state.
+    func appHitTarget<S: Shape>(_ shape: S = Circle()) -> some View {
+        frame(minWidth: AppControl.target, minHeight: AppControl.target)
+            .contentShape(shape)
+    }
+}
+
+/// The chrome behind a glyph button.
+enum AppIconButtonStyle {
+    /// No chrome — the glyph sits on the canvas. Toolbars, dismiss marks.
+    case plain
+    /// A card-coloured circle. The default for a control on the canvas.
+    case surface
+    /// A material circle, for a control floating over content.
+    case glass
+    /// The filled accent circle. One per screen: it is the primary action.
+    case accent
+}
+
+/// A round glyph control.
+///
+/// Three things it guarantees, because each was being got wrong by hand:
+/// the touch target is never below `AppControl.target` whatever the chrome is
+/// drawn at; `label` is required, so a glyph button cannot ship unnamed to
+/// VoiceOver; and the busy state crossfades in place rather than swapping the
+/// glyph out from under the finger.
+struct AppIconButton: View {
+    let glyph: String
+    /// The VoiceOver name. Not optional on purpose.
+    let label: String
+    var size: AppControl.Size = .regular
+    var style: AppIconButtonStyle = .plain
+    var weight: Font.Weight = .regular
+    var isBusy: Bool = false
+    var role: ButtonRole? = nil
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(
+        _ glyph: String,
+        label: String,
+        size: AppControl.Size = .regular,
+        style: AppIconButtonStyle = .plain,
+        weight: Font.Weight = .regular,
+        isBusy: Bool = false,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.glyph = glyph
+        self.label = label
+        self.size = size
+        self.style = style
+        self.weight = weight
+        self.isBusy = isBusy
+        self.role = role
+        self.action = action
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .accent: return .appOnAccent
+        case .plain, .surface, .glass: return role == .destructive ? .mgDestructive : .appInk
+        }
+    }
+
+    var body: some View {
+        Button(role: role) {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            ZStack {
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(foreground)
+                } else {
+                    AppIcon(glyph, size: size.glyph, weight: weight)
+                        .foregroundStyle(foreground)
+                }
+            }
+            .frame(width: size.chrome, height: size.chrome)
+            .background { chrome }
+            .opacity(isEnabled ? 1 : 0.4)
+            // Drawn at `chrome`, tappable at 44 — the target grows underneath
+            // the circle instead of inflating it.
+            .frame(width: max(size.chrome, AppControl.target),
+                   height: max(size.chrome, AppControl.target))
+            .contentShape(Circle())
+        }
+        .buttonStyle(.appScale)
+        .accessibilityLabel(label)
+        .animation(.appFast, value: isBusy)
+        .animation(.appFast, value: isEnabled)
+    }
+
+    @ViewBuilder
+    private var chrome: some View {
+        switch style {
+        case .plain:
+            EmptyView()
+        case .surface:
+            Circle()
+                .fill(Color.appSurface)
+                .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
+        case .glass:
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline))
+        case .accent:
+            Circle().fill(Color.appAccent)
+        }
+    }
+}
 
 struct AppPrimaryButton: View {
     let title: String

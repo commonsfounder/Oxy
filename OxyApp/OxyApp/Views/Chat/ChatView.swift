@@ -55,7 +55,7 @@ struct ChatView: View {
                 // Offline banner
                 if isOffline {
                     HStack(spacing: 8) {
-                            AppIcon(sf: "wifi.slash", size: 14)
+                            AppIcon(sf: "wifi.slash", size: AppGlyphSize.regular)
                             Text("No internet connection")
                                 .font(.appBody(AppText.caption, weight: .medium))
                         }
@@ -68,7 +68,7 @@ struct ChatView: View {
 
                     if viewModel.isViewingHistorySnapshot {
                         HStack(spacing: 10) {
-                            AppIcon(sf: "clock.arrow.circlepath", size: 14)
+                            AppIcon(sf: "clock.arrow.circlepath", size: AppGlyphSize.regular)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Viewing history")
                                     .font(.appBody(AppText.caption, weight: .semibold))
@@ -827,7 +827,7 @@ private struct ActionReviewSheet: View {
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 12) {
-                AppIcon(sf: iconName, size: 17)
+                AppIcon(sf: iconName, size: AppGlyphSize.regular)
                     .foregroundStyle(isPayment ? Color.appAccent : Color.appMuted)
                     .frame(width: 36, height: 36)
                     .background(
@@ -1074,7 +1074,7 @@ private struct WelcomeCard: View {
                                 .font(.appBody(AppText.body, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            AppIcon(sf: "arrow.up.right", size: 11)
+                            AppIcon(sf: "arrow.up.right", size: AppGlyphSize.small)
                                 .foregroundStyle(Color.appMuted)
                         }
                         .padding(.horizontal, 24)
@@ -1089,7 +1089,7 @@ private struct WelcomeCard: View {
                     .contextMenu {
                         ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
                             Button { replace(slot: index, with: option.label) } label: {
-                                Label { Text(option.label) } icon: { AppIcon(sf: option.icon, size: 16) }
+                                Label { Text(option.label) } icon: { AppIcon(sf: option.icon, size: AppGlyphSize.regular) }
                             }
                         }
                     }
@@ -1163,7 +1163,7 @@ private struct ChatInputBar: View {
                                     .strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                             )
                     } else {
-                        AppIcon(sf: attachmentIsImage ? "photo.fill" : "doc.fill", size: 17)
+                        AppIcon(sf: attachmentIsImage ? "photo.fill" : "doc.fill", size: AppGlyphSize.regular)
                             .foregroundStyle(Color.appMuted)
                             .frame(width: 38, height: 38)
                             .appGlass(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
@@ -1178,13 +1178,8 @@ private struct ChatInputBar: View {
                             .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
-                    Button(action: onRemoveAttachment) {
-                        AppIcon(sf: "xmark.circle.fill", size: 17)
-                            .foregroundStyle(Color.appMuted)
-                            .frame(width: 40, height: 40)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.appScale)
+                    AppIconButton("xmark-circle", label: "Remove attachment",
+                                  size: .small, action: onRemoveAttachment)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -1196,14 +1191,9 @@ private struct ChatInputBar: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                Button(action: onAttach) {
-                    AppIcon(sf: "plus", size: 19)
-                        .foregroundStyle(isVoiceActive ? Color.appMuted : Color.appMuted)
-                        .frame(width: 34, height: 34)
-                        .appGlass(Circle(), interactive: true)
-                }
-                .buttonStyle(.appScale)
-                .disabled(isSending || isVoiceActive)
+                AppIconButton("plus", label: "Add attachment",
+                              size: .small, style: .glass, action: onAttach)
+                    .disabled(isSending || isVoiceActive)
 
                 Group {
                     if isVoiceActive {
@@ -1225,17 +1215,18 @@ private struct ChatInputBar: View {
                         }
                     }
                     .foregroundStyle(buttonForeground)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Circle())
+                    .frame(width: AppControl.Size.small.chrome, height: AppControl.Size.small.chrome)
                     .background {
                         Circle().fill(buttonFill)
                         if !canSend && !isRecording {
                             Circle().strokeBorder(Color.appHairline, lineWidth: AppBorder.hairline)
                         }
                     }
+                    .appHitTarget()
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
+                .accessibilityLabel(canSend ? "Send" : (isRecording ? "Stop recording" : "Record a message"))
                 .animation(.appFast, value: canAct)
                 .animation(.appFast, value: canSend)
                 .animation(.appFast, value: isRecording)
@@ -1279,13 +1270,8 @@ private struct ChatInputBar: View {
 
     private var voiceField: some View {
         HStack(spacing: 10) {
-            Button(action: onCancelVoice) {
-                AppIcon(sf: "xmark", size: 13)
-                    .foregroundStyle(Color.appMuted)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.appScale)
+            AppIconButton("xmark", label: "Cancel recording",
+                          size: .small, action: onCancelVoice)
 
             Circle()
                 .fill(isPreparingVoice ? Color.appMuted : Color.appDanger)
@@ -1436,10 +1422,10 @@ private struct ActivityStepRow: View {
                 .scaleEffect(pulse ? 1.18 : 0.9)
                 .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
         case .complete:
-            AppIcon(sf: "checkmark", size: 11)
+            AppIcon(sf: "checkmark", size: AppGlyphSize.small)
                 .foregroundStyle(Color.appMuted)
         case .failed:
-            AppIcon(sf: "exclamationmark", size: 11)
+            AppIcon(sf: "exclamationmark", size: AppGlyphSize.small)
                 .foregroundStyle(Color.appDanger)
         case .neutral:
             Circle()
@@ -1459,7 +1445,7 @@ struct PendantOverlay: View {
     var body: some View {
         HStack(spacing: 12) {
             if let notice {
-                AppIcon(sf: "exclamationmark.circle.fill", size: 15)
+                AppIcon(sf: "exclamationmark.circle.fill", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.appWarning)
                 Text(notice)
                     .font(.appBody(AppText.body, weight: .medium))
@@ -1480,7 +1466,7 @@ struct PendantOverlay: View {
                         .animation(.appFast, value: t)
                 }
             } else {
-                AppIcon(sf: "waveform", size: 15)
+                AppIcon(sf: "waveform", size: AppGlyphSize.regular)
                     .foregroundStyle(.secondary)
                     .symbolEffect(.variableColor.iterative, isActive: true)
                 if let t = transcript, !t.isEmpty {

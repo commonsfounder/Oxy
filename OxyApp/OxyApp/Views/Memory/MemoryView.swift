@@ -67,7 +67,7 @@ struct MemoryView: View {
                                     withAnimation(.appStandard) { composerExpanded = true }
                                 } label: {
                                     HStack(spacing: 12) {
-                                        AppIcon("plus", size: 14)
+                                        AppIcon("plus", size: AppGlyphSize.regular)
                                             .foregroundStyle(Color.mgSecondary)
                                         Text("Remember something…")
                                             .font(.appBody(AppText.body))
@@ -141,7 +141,7 @@ struct MemoryView: View {
                                     Button(role: .destructive) {
                                         pendingDeleteItem = item
                                     } label: {
-                                        Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
+                                        Label { Text("Delete") } icon: { AppIcon("trash", size: AppGlyphSize.regular) }
                                     }
                                     // The app's accent tint (mint/etc.) otherwise bleeds into
                                     // swipe actions, overriding the system's destructive red.
@@ -334,7 +334,7 @@ private struct MemoryRow: View {
                         .foregroundStyle(Color.mgSecondary)
                 }
                 Spacer(minLength: 8)
-                AppIcon("chevron-right", size: 13)
+                AppIcon("chevron-right", size: AppGlyphSize.small)
                     .foregroundStyle(Color.mgSecondary.opacity(0.5))
                     .padding(.top, 2)
                     .padding(.trailing, 24)
@@ -355,7 +355,7 @@ private struct MemorySearchField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AppIcon("search", size: 15)
+            AppIcon("search", size: AppGlyphSize.regular)
                 .foregroundStyle(Color.mgSecondary)
             TextField("Search memories…", text: $text)
                 .font(.appBody(AppText.body))
@@ -365,15 +365,10 @@ private struct MemorySearchField: View {
                 .textInputAutocapitalization(.never)
                 .focused($isFocused)
             if !text.isEmpty {
-                Button {
+                AppIconButton("xmark-circle", label: "Clear", size: .small) {
                     text = ""
-                } label: {
-                    AppIcon("xmark-circle", size: 15)
-                        .foregroundStyle(Color.mgSecondary)
-                        .frame(width: 40, height: 40)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.appScale)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
         .padding(.horizontal, 14)
@@ -457,7 +452,7 @@ private struct MemoryDropBox: View {
                 Spacer(minLength: 8)
                 if let onCollapse {
                     Button(action: onCollapse) {
-                        AppIcon("chevron-up", size: 14)
+                        AppIcon("chevron-up", size: AppGlyphSize.regular)
                             .foregroundStyle(Color.mgSecondary)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
@@ -490,7 +485,6 @@ private struct MemoryDropBox: View {
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.appBody(AppText.caption, weight: .semibold))
-                            .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
                 }

@@ -30,13 +30,8 @@ struct ConnectorsView: View {
                     ScreenHeaderView(title: "Connections", onBack: { dismiss() })
 
                     if isLoading {
-                        VStack(spacing: 12) {
-                            OxySkeletonCard(height: 92)
-                            OxySkeletonCard(height: 148)
-                            OxySkeletonCard(height: 148)
-                        }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 16)
+                        AppSkeletonList(heights: [92, 148, 148])
+                            .appLoadingSwap(isLoading)
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
@@ -354,7 +349,7 @@ private struct AppIconView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 4)
             } else {
-                AppIcon(sf: fallbackSystemName, size: 18)
+                AppIcon(sf: fallbackSystemName, size: AppGlyphSize.medium)
                     .foregroundStyle(brand.foreground)
             }
         }

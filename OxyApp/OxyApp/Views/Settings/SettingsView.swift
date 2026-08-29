@@ -225,7 +225,7 @@ struct SettingsView: View {
                         HapticManager.shared.impact(.light)
                     } label: {
                         if option.value == selection.wrappedValue {
-                            Label { Text(option.title) } icon: { AppIcon("check", size: 15) }
+                            Label { Text(option.title) } icon: { AppIcon("check", size: AppGlyphSize.regular) }
                         } else {
                             Text(option.title)
                         }
@@ -237,7 +237,7 @@ struct SettingsView: View {
                         .font(.appBody(AppText.body, weight: .medium))
                         .foregroundStyle(Color.appInk)
                         .lineLimit(1)
-                    AppIcon("chevron-updown", size: 13)
+                    AppIcon("chevron-updown", size: AppGlyphSize.small)
                         .foregroundStyle(Color.appMuted)
                 }
                 .padding(.horizontal, 12)
@@ -265,7 +265,7 @@ struct SettingsView: View {
                     .font(.appBody(AppText.body, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 Spacer()
-                AppIcon("chevron-right", size: 13)
+                AppIcon("chevron-right", size: AppGlyphSize.small)
                     .foregroundStyle(Color.mgSecondary)
             }
             .padding(.vertical, 16)
@@ -304,7 +304,7 @@ struct SettingsView: View {
                 Text(label)
                     .font(.appBody(AppText.body, weight: .regular))
                 Spacer()
-                AppIcon("arrow-up-right", size: 12)
+                AppIcon("arrow-up-right", size: AppGlyphSize.small)
                     .foregroundStyle(Color.mgSecondary)
             }
             .foregroundStyle(Color.mgHeading)

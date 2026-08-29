@@ -95,9 +95,7 @@ struct MoreView: View {
 
             if appState.isDemoSession {
                 Text("Demo/Test session")
-                    .font(.appBody(AppText.micro, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(Color.appAccent)
+                    .appEyebrow(.appAccent)
                     .padding(.top, 10)
             }
 

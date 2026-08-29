@@ -10,20 +10,11 @@ struct ScreenHeaderView: View {
     /// Provide for pushed/presented screens; leave nil for tab roots (e.g. More).
     var onBack: (() -> Void)? = nil
 
-    private let circle: CGFloat = 38
-
     var body: some View {
         HStack(spacing: 10) {
             if let onBack {
                 // Raw chevron — no frosted glass, no circular chrome (Milgrain spec).
-                Button(action: onBack) {
-                    AppIcon("chevron-left", size: 17)
-                        .foregroundStyle(Color.mgHeading)
-                        .frame(width: circle, height: circle)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.appScale)
-                .accessibilityLabel("Back")
+                AppIconButton("chevron-left", label: "Back", action: onBack)
             }
 
             Text(title)

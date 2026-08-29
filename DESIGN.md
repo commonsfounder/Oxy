@@ -85,6 +85,14 @@ Each is `appDynamicColor(dark:light:)`; the dark values are given below.
 
 ## Geometry
 
+- **Glyphs** (`AppGlyphSize`) — `small` 13 (beside `caption`/`footnote`),
+  `regular` 16 (beside `body`; the default), `medium` 20 (control glyphs, card
+  headers), `large` 28 (empty states), `hero` 60 (one per full-screen state).
+  Thirteen sizes had grown, with 86 of 110 glyphs sitting in the 12–16 band.
+- **Controls** (`AppControl`) — the chrome and the touch target are two different
+  numbers. Draw the circle at `Size.chrome` (32 / 38 / 44); the target underneath
+  is always `AppControl.target` (44, the HIG floor). Letting each circle *be* its
+  own target is how ten glyph buttons shipped at 30–40pt.
 - **Spacing** (`AppSpacing`) — a 4pt grid; 1 and 2 are allowed as optical nudges,
   everything above 3 is even.
 - **Radius** (`AppRadius`) — `sm` 8, `md` 12, `lg`/`card` 16, `bubble` 18, `xl` 22.
@@ -128,8 +136,33 @@ Nothing hand-rolls a background + strokeBorder + shadow triple.
   a hairline capsule outline with `appMuted` text. Destructive: `mgDestructive`.
   There is no second primary style — a white/`appInk` slab is not one.
 - **Toggles** — accent fill when on.
+- **Glyph buttons** — `AppIconButton(glyph, label:, size:, style:)`. It requires a
+  VoiceOver `label`, guarantees the 44pt target whatever the chrome is drawn at,
+  and crossfades its busy state in place. Styles: `plain` (toolbars), `surface` (a
+  control on the canvas), `glass` (floating over content), `accent` (the primary
+  action — one per screen). A control too bespoke for it — the chat send button,
+  which changes fill and glyph with recording state — keeps its own chrome and
+  takes `.appHitTarget()` and an explicit label instead.
+- **Eyebrows** — `.appEyebrow()`, or `.appEyebrow(.appAccent)` when the label
+  carries live state. It is the only place in the app that sets tracking; the
+  screens had eight eyebrows at 0.8 / 1.2 / 1.3 / 1.7 / 2.2 / 2.8, and Title Case
+  text hand-tracked at 0.3–0.6 for no reason. Write the label in Title Case —
+  `textCase(.uppercase)` does the rest, and VoiceOver still reads it as a word.
 - **Tab bar** — standard `TabView` with system glass, tinted accent. No custom
   pills, no hide-on-scroll dependencies for reachability.
+
+## Loading
+
+A placeholder is shaped like the thing it stands in for, so nothing jumps when the
+content lands: `OxySkeletonCard` defaults to `AppRadius.card` (it used to default
+to square), `AppSkeletonList` lays them out at the margin and spacing the loaded
+screen uses, and `.appLoadingSwap(isLoading)` crossfades the two states instead of
+popping. Shimmer stops under Reduce Motion.
+
+Which one: a skeleton when the shape of what is coming is known — a board, a list,
+a set of cards. A spinner only for an indeterminate wait with no shape to promise.
+A spinner in the middle of an empty screen tells the user nothing about what they
+are waiting for, which is what the Home board used to do.
 
 ## Today board
 

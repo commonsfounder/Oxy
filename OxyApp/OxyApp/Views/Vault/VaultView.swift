@@ -24,12 +24,8 @@ struct VaultView: View {
                     if !isUnlocked {
                         lockedState
                     } else if isLoading {
-                        VStack(spacing: 12) {
-                            OxySkeletonCard(height: 72)
-                            OxySkeletonCard(height: 72)
-                        }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 16)
+                        AppSkeletonList(heights: [72, 72])
+                            .appLoadingSwap(isLoading)
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {

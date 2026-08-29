@@ -2,18 +2,20 @@ import SwiftUI
 
 struct LoadingIndicator: View {
     var label: String = "Loading…"
-    var tint: Color = .appTitanium
+    var tint: Color = .appMuted
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: AppSpacing.md) {
             ProgressView()
                 .tint(tint)
             Text(label)
-                .font(.appBody(AppText.caption, weight: .regular))
+                .font(.appBody(AppText.caption))
                 .foregroundStyle(Color.appMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.appObsidian)
+        .background(Color.appBackground)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
     }
 }
 
@@ -53,31 +55,71 @@ struct OxyThinkingIndicator: View {
     }
 }
 
+/// A placeholder shaped like the thing it stands in for. It defaults to the card
+/// radius, because a square block standing in for a 16pt-radius card is the moment
+/// the loading state stops looking like the screen it precedes.
 struct OxySkeletonCard: View {
     var height: CGFloat = 84
-    var cornerRadius: CGFloat = 0
+    var cornerRadius: CGFloat = AppRadius.card
     var base: Color = .appAdaptive(dark: .white, light: .black).opacity(0.03)
     var highlight: Color = .appAdaptive(dark: .white, light: .black).opacity(0.06)
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shimmer = false
 
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius)
+        shape
             .fill(base)
             .frame(height: height)
-            .overlay(
-                LinearGradient(
-                    colors: [.clear, highlight, .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .rotationEffect(.degrees(8))
-                .offset(x: shimmer ? 260 : -260)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .overlay {
+                if !reduceMotion {
+                    LinearGradient(
+                        colors: [.clear, highlight, .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .rotationEffect(.degrees(8))
+                    .offset(x: shimmer ? 260 : -260)
+                }
+            }
+            .clipShape(shape)
             .onAppear { shimmer = true }
-            .animation(.easeInOut(duration: 1.25).repeatForever(autoreverses: false), value: shimmer)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 1.25).repeatForever(autoreverses: false),
+                value: shimmer
+            )
             .accessibilityHidden(true)
+    }
+}
+
+/// The standard "this screen is loading" placeholder: cards at the same spacing
+/// and margin the loaded screen uses, so nothing shifts sideways when it arrives.
+struct AppSkeletonList: View {
+    var heights: [CGFloat] = [92, 148, 148]
+    var cornerRadius: CGFloat = AppRadius.card
+
+    var body: some View {
+        VStack(spacing: AppSpacing.md) {
+            ForEach(Array(heights.enumerated()), id: \.offset) { _, height in
+                OxySkeletonCard(height: height, cornerRadius: cornerRadius)
+            }
+        }
+        .padding(.horizontal, AppSpacing.margin)
+        .padding(.top, AppSpacing.lg)
+        .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// Crossfades a loading state into the content it precedes, instead of the
+    /// content popping into place. Apply to both branches of the swap.
+    func appLoadingSwap(_ isLoading: Bool) -> some View {
+        transition(.opacity)
+            .animation(.appStandard, value: isLoading)
     }
 }
 

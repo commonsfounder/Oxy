@@ -209,7 +209,7 @@ struct ProfileView: View {
                 Text(label)
                     .font(.appBody(AppText.body, weight: .regular))
                 Spacer()
-                AppIcon("chevron-right", size: 14)
+                AppIcon("chevron-right", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.mgSecondary)
             }
             .foregroundStyle(destructive ? Color.mgDestructive : Color.mgHeading)

@@ -112,7 +112,7 @@ struct ChatHomeView: View {
                 startNewChat()
             } label: {
                 HStack(spacing: 10) {
-                    AppIcon(sf: "square.and.pencil", size: 15)
+                    AppIcon(sf: "square.and.pencil", size: AppGlyphSize.regular)
                     Text("New conversation")
                         .font(.appBody(AppText.body, weight: .medium))
                     Spacer()
@@ -127,7 +127,7 @@ struct ChatHomeView: View {
 
             // Search
             HStack(spacing: 8) {
-                AppIcon(sf: "magnifyingglass", size: 15)
+                AppIcon(sf: "magnifyingglass", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.appMuted)
                 TextField("Search", text: $searchQuery)
                     .font(.appBody(AppText.body))
@@ -135,16 +135,10 @@ struct ChatHomeView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 if !searchQuery.isEmpty {
-                    Button {
+                    AppIconButton("xmark-circle", label: "Clear search", size: .small) {
                         searchQuery = ""
-                    } label: {
-                        AppIcon(sf: "xmark.circle.fill", size: 16)
-                            .foregroundStyle(Color.appMuted)
-                            // Glyph stays small; the tap target grows to the 40×40 minimum.
-                            .frame(width: 40, height: 40)
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.appScale)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
             .padding(.horizontal, 14)
@@ -193,7 +187,7 @@ struct ChatHomeView: View {
                                 Button(role: .destructive) {
                                     delete(session)
                                 } label: {
-                                    Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
+                                    Label { Text("Delete") } icon: { AppIcon("trash", size: AppGlyphSize.regular) }
                                 }
                                 // The accent tint otherwise overrides the system's
                                 // destructive red on the swipe action.
@@ -246,7 +240,7 @@ struct ChatHomeView: View {
     private func emptyState(icon: String, text: String) -> some View {
         VStack(spacing: 12) {
             Spacer()
-            AppIcon(sf: icon, size: 34)
+            AppIcon(sf: icon, size: AppGlyphSize.large)
                 .foregroundStyle(Color.appMuted)
             Text(text)
                 .font(.appBody(AppText.body))
@@ -508,10 +502,8 @@ private struct SidebarSectionHeader: View {
 
     var body: some View {
         HStack {
-            Text(label.uppercased())
-                .font(.appBody(AppText.micro, weight: .regular))
-                .tracking(2.8)
-                .foregroundStyle(Color.appMuted)
+            Text(label)
+                .appEyebrow()
             Spacer()
         }
         .padding(.horizontal, 16)

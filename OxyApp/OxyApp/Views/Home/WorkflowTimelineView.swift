@@ -73,15 +73,7 @@ struct WorkflowTimelineView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Button {
-                    HapticManager.shared.impact(.light)
-                    dismiss()
-                } label: {
-                    AppIcon("chevron-left", size: 18)
-                        .foregroundStyle(Color.appMuted)
-                        .padding(8)
-                }
-                .buttonStyle(.appScale)
+                AppIconButton("chevron-left", label: "Back") { dismiss() }
                 Spacer()
             }
             .padding(.leading, -8)
@@ -97,7 +89,7 @@ struct WorkflowTimelineView: View {
                         if !workflow.isFinished {
                             PulsingWorkDot(active: true)
                         } else {
-                            AppIcon(workflow.status == "completed" ? "check-circle" : "alert-circle", size: 14)
+                            AppIcon(workflow.status == "completed" ? "check-circle" : "alert-circle", size: AppGlyphSize.regular)
                                 .foregroundStyle(workflow.status == "completed"
                                                  ? Color.appAccent
                                                  : Color.appDanger)
@@ -117,7 +109,7 @@ struct WorkflowTimelineView: View {
     private func checkpointCard(_ checkpoint: WorkflowCheckpoint) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
-                AppIcon("bolt", size: 15)
+                AppIcon("bolt", size: AppGlyphSize.regular)
                     .foregroundStyle(Color.appAccent)
                     .padding(.top, 1)
                 Text(checkpoint.prompt)
@@ -149,7 +141,7 @@ struct WorkflowTimelineView: View {
                                     }
                                 }
                                 Spacer(minLength: 0)
-                                AppIcon("chevron-right", size: 12)
+                                AppIcon("chevron-right", size: AppGlyphSize.small)
                                     .foregroundStyle(Color.appMuted)
                             }
                             .padding(.horizontal, AppSpacing.md)
@@ -193,14 +185,12 @@ struct WorkflowTimelineView: View {
 
     private func documentsSection(_ documents: [WorkflowDocument]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("FILES")
-                .font(.appBody(AppText.micro, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(Color.appMuted)
+            Text("Files")
+                .appEyebrow()
 
             ForEach(documents) { document in
                 HStack(spacing: 10) {
-                    AppIcon("doc", size: 14)
+                    AppIcon("doc", size: AppGlyphSize.regular)
                         .foregroundStyle(Color.appMuted)
                     Text(document.displayName)
                         .font(.appBody(AppText.body, weight: .medium))
@@ -224,10 +214,8 @@ struct WorkflowTimelineView: View {
 
     private func timelineSection(_ events: [WorkflowEvent]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("TIMELINE")
-                .font(.appBody(AppText.micro, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(Color.appMuted)
+            Text("Timeline")
+                .appEyebrow()
 
             VStack(alignment: .leading, spacing: 0) {
                 // Newest first: the interesting end of a live job is the most recent thing.

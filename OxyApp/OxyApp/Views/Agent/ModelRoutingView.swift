@@ -39,7 +39,7 @@ struct ModelRoutingView: View {
     private func activeCard(_ snapshot: ModelRoutingSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                AppIcon("sparkles", size: 16).foregroundStyle(Color.appAccent)
+                AppIcon("sparkles", size: AppGlyphSize.regular).foregroundStyle(Color.appAccent)
                 Text("Millie's AI")
                     .font(.appDisplay(AppText.title, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
@@ -74,7 +74,7 @@ struct ModelRoutingView: View {
                 HStack {
                     Text(isSaving ? "Saving…" : "Use \(providerName(selectedProvider))")
                     Spacer()
-                    AppIcon("arrow-up-right", size: 13)
+                    AppIcon("arrow-up-right", size: AppGlyphSize.small)
                 }
                 .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(Color.appInk)
@@ -94,7 +94,7 @@ struct ModelRoutingView: View {
             AppSectionTitle("Available AI")
             ForEach(providers) { provider in
                 HStack(spacing: 12) {
-                    AppIcon(provider.configured ? "bolt" : "dotted", size: 14)
+                    AppIcon(provider.configured ? "bolt" : "dotted", size: AppGlyphSize.regular)
                         .foregroundStyle(provider.configured ? Color.appAccent : Color.mgSecondary)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(provider.name).font(.appBody(AppText.body, weight: .semibold))

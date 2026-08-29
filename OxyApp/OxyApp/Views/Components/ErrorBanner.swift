@@ -7,7 +7,7 @@ struct ErrorBanner: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            AppIcon("wifi-alert", size: 14)
+            AppIcon("wifi-alert", size: AppGlyphSize.regular)
                 .foregroundStyle(Color.appMuted)
 
             Text(message)
@@ -21,7 +21,6 @@ struct ErrorBanner: View {
                 Button(action: onRetry) {
                     Text("Retry")
                         .font(.appBody(AppText.caption, weight: .semibold))
-                        .tracking(0.3)
                         .foregroundStyle(Color.appAccent)
                         // Pad the label to a ~40pt tap target without distorting the row.
                         .padding(.vertical, 12)
@@ -32,13 +31,7 @@ struct ErrorBanner: View {
             }
 
             if let onDismiss {
-                Button(action: onDismiss) {
-                    AppIcon("xmark", size: 12)
-                        .foregroundStyle(Color.appMuted)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.appScale)
+                AppIconButton("xmark", label: "Dismiss", size: .small, action: onDismiss)
             }
         }
         .padding(.horizontal, 14)

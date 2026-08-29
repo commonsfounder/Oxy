@@ -189,7 +189,7 @@ private struct LoginFormPage: View {
                 if showDemoLogin {
                     Button(action: onDemoLogin) {
                         HStack(spacing: 8) {
-                            AppIcon("person-check", size: 16)
+                            AppIcon("person-check", size: AppGlyphSize.regular)
                             Text("Continue as Test User")
                                 .font(.appBody(AppText.body, weight: .semibold))
                         }

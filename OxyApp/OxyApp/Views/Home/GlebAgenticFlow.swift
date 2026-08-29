@@ -173,8 +173,11 @@ struct GlebTopChrome: View {
                     .foregroundStyle(Color.appAccent)
                 Text("\(Int(weather.temperatureC.rounded()))°")
                     .font(.appBody(AppText.body, weight: .semibold))
-                    .foregroundStyle(Color.appMuted)
-                AppIcon("chevron-down", size: 10)
+                    // The reading is the content of this pill, not a caption on it.
+                    .foregroundStyle(Color.appInk)
+                    .contentTransition(.numericText())
+                    .animation(.appStandard, value: weather.temperatureC)
+                AppIcon("chevron-down", size: AppGlyphSize.small)
                     .foregroundStyle(Color.appMuted)
                     .rotationEffect(.degrees(weatherExpanded ? 180 : 0))
             }
@@ -206,10 +209,8 @@ struct GlebTopChrome: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
                 ForEach(cells, id: \.0) { cell in
                     VStack(spacing: 4) {
-                        Text(cell.0.uppercased())
-                            .font(.appBody(AppText.micro, weight: .semibold))
-                            .tracking(0.8)
-                            .foregroundStyle(Color.appMuted)
+                        Text(cell.0)
+                            .appEyebrow()
                         Text(cell.1)
                             .font(.appBody(AppText.body, weight: .medium))
                             .foregroundStyle(Color.appInk)
@@ -223,13 +224,6 @@ struct GlebTopChrome: View {
     }
 
     private var profileButton: some View {
-        Button(action: onProfile) {
-            AppIcon("person", size: 16)
-                .foregroundStyle(Color.appMuted)
-                .frame(width: 36, height: 36)
-                .background(Color.appSurface, in: Circle())
-                .overlay(Circle().strokeBorder(Color.appAccent.opacity(0.26), lineWidth: AppBorder.hairline))
-        }
-        .buttonStyle(.appScale)
+        AppIconButton("person", label: "Account", style: .surface, action: onProfile)
     }
 }

@@ -37,7 +37,7 @@ struct RoutinesListView: View {
                                         withAnimation(.appStandard) { composerExpanded = true }
                                     } label: {
                                         HStack(spacing: 12) {
-                                            AppIcon("plus", size: 14)
+                                            AppIcon("plus", size: AppGlyphSize.regular)
                                                 .foregroundStyle(Color.mgSecondary)
                                             Text("Add a routine…")
                                                 .font(.appBody(AppText.body))
@@ -81,7 +81,7 @@ struct RoutinesListView: View {
                                     Button(role: .destructive) {
                                         pendingDeleteRoutine = routine
                                     } label: {
-                                        Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
+                                        Label { Text("Delete") } icon: { AppIcon("trash", size: AppGlyphSize.regular) }
                                     }
                                     .tint(Color.mgDestructive)
                                 }
@@ -163,7 +163,6 @@ struct RoutinesListView: View {
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.appBody(AppText.caption, weight: .semibold))
-                            .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
                 }
@@ -270,7 +269,6 @@ private struct RoutineRow: View {
                 if !routine.isEnabled {
                     Text(routine.isImported ? "Off · imported" : "Off")
                         .font(.appBody(AppText.micro, weight: .semibold))
-                        .tracking(0.5)
                         .foregroundStyle(Color.mgSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -278,7 +276,6 @@ private struct RoutineRow: View {
                 } else if routine.isFailing {
                     Text("Failing")
                         .font(.appBody(AppText.micro, weight: .semibold))
-                        .tracking(0.5)
                         .foregroundStyle(Color.mgDestructive)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -286,7 +283,6 @@ private struct RoutineRow: View {
                 } else if let cadenceLabel {
                     Text(cadenceLabel)
                         .font(.appBody(AppText.micro, weight: .semibold))
-                        .tracking(0.5)
                         .foregroundStyle(Color.mgSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)

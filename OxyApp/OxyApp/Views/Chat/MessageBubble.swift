@@ -198,7 +198,7 @@ struct MessageBubble: View {
                             onActionCommand?(command)
                         } label: {
                             HStack(spacing: 8) {
-                                AppIcon(sf: "arrow.clockwise", size: 14)
+                                AppIcon(sf: "arrow.clockwise", size: AppGlyphSize.regular)
                                 Text(recovery.recoveryAction?.label ?? "Keep going")
                                     .font(.appBody(AppText.footnote, weight: .semibold))
                             }
@@ -221,7 +221,7 @@ struct MessageBubble: View {
                             showReauthSheet = true
                         } label: {
                             HStack(spacing: 8) {
-                                AppIcon(sf: "person.crop.circle", size: 14)
+                                AppIcon(sf: "person.crop.circle", size: AppGlyphSize.regular)
                                 Text(reauth.recoveryAction?.label ?? "Sign in")
                                     .font(.appBody(AppText.footnote, weight: .semibold))
                             }
@@ -779,7 +779,7 @@ private struct FailedTurnView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            AppIcon(sf: "exclamationmark.circle", size: 15)
+            AppIcon(sf: "exclamationmark.circle", size: AppGlyphSize.regular)
                 .foregroundStyle(Color.appWarning)
             Text(message)
                 .font(.appBody(AppText.footnote))
@@ -995,7 +995,7 @@ private struct DirectionsResultCard: View {
             UIApplication.shared.open(url)
         } label: {
             HStack(spacing: 6) {
-                AppIcon(sf: glyph, size: 13)
+                AppIcon(sf: glyph, size: AppGlyphSize.small)
                 Text(label)
                     .font(.appBody(AppText.caption, weight: .semibold))
                     .lineLimit(1)
@@ -1091,7 +1091,7 @@ private struct MessageSourceChips: View {
                             Text(source.title)
                                 .font(.appBody(AppText.micro))
                                 .lineLimit(1)
-                            AppIcon(sf: "arrow.up.right", size: 10)
+                            AppIcon(sf: "arrow.up.right", size: AppGlyphSize.small)
                         }
                         .foregroundStyle(Color.appTitanium)
                         .padding(.horizontal, 10)
@@ -1120,10 +1120,10 @@ private struct ToolStatusGlyph: View {
         Group {
             switch state {
             case .success:
-                AppIcon(sf: "checkmark", size: 13)
+                AppIcon(sf: "checkmark", size: AppGlyphSize.small)
                     .foregroundStyle(Color.appSuccess)
             case .failure:
-                AppIcon(sf: "exclamationmark", size: 13)
+                AppIcon(sf: "exclamationmark", size: AppGlyphSize.small)
                     .foregroundStyle(Color.appDanger)
             case .neutral:
                 Circle()
@@ -1142,7 +1142,7 @@ private struct ToolHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AppIcon(sf: icon, size: 13)
+            AppIcon(sf: icon, size: AppGlyphSize.small)
                 .foregroundStyle(Color.appMuted)
                 .frame(width: 14, alignment: .center)
             Text(eyebrow)
@@ -1200,7 +1200,7 @@ struct UberHandoffCard: View {
             TodayCard {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        AppIcon(sf: "car", size: 14)
+                        AppIcon(sf: "car", size: AppGlyphSize.regular)
                             .foregroundStyle(Color.appMuted)
                         Text("Ride to \(destination)")
                             .font(.appBody(AppText.body, weight: .medium))

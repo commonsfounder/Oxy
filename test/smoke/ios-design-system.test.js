@@ -121,6 +121,52 @@ test('the light and dark finishes both get a real colour', () => {
   );
 });
 
+test('every glyph size is a step on the glyph scale', () => {
+  report(
+    findAll(SCREENS, /AppIcon\([^)]*size: (?!AppGlyphSize|size\.)[\d.]/),
+    'Glyph sizes come from AppGlyphSize, the same way type comes from AppText.'
+  );
+});
+
+test('a glyph button is named and reaches the 44pt target', () => {
+  // AppIconButton guarantees both. A hand-rolled one has to prove it.
+  const unnamed = [];
+  const undersized = [];
+  for (const { where, lines } of SCREENS) {
+    lines.forEach((line, index) => {
+      if (!/\bButton\s*[({]/.test(line)) return;
+      const block = lines.slice(index, index + 40);
+      let depth = 0;
+      let end = block.length;
+      for (let i = 0; i < block.length; i++) {
+        depth += (block[i].match(/\{/g) || []).length - (block[i].match(/\}/g) || []).length;
+        if (i > 0 && depth <= 0) { end = i + 1; break; }
+      }
+      let scope = block.slice(0, end);
+      // absorb the trailing modifier chain, where the label usually lives
+      for (let i = end; i < block.length && /^\s*\.\w/.test(block[i]); i++) scope.push(block[i]);
+      const text = scope.join('\n');
+      if (!/AppIcon\(|Image\(/.test(text) || /\bText\(/.test(text)) return;
+
+      const at = `${where}:${index + 1}`;
+      if (!text.includes('accessibilityLabel')) unnamed.push(at);
+      const sized = [...text.matchAll(/\.frame\(width: (\d+), height: \d+\)/g)].map((m) => Number(m[1]));
+      if (sized.length && Math.max(...sized) < 44 && !/appHitTarget|contentShape/.test(text)) {
+        undersized.push(`${at}  ${Math.max(...sized)}pt`);
+      }
+    });
+  }
+  report(unnamed, 'A glyph button has no visible text, so VoiceOver needs an accessibilityLabel. Prefer AppIconButton, which requires one.');
+  report(undersized, 'The HIG floor is 44pt. Draw the chrome smaller and grow the target with .appHitTarget() — or use AppIconButton.');
+});
+
+test('letter-spacing lives in appEyebrow, not in the screens', () => {
+  report(
+    findAll(SCREENS, /\.tracking\(/),
+    'SF is optically spaced. An eyebrow gets its tracking from .appEyebrow(); nothing else hand-tracks.'
+  );
+});
+
 test('padding and stack spacing stay on the grid', () => {
   const offGrid = [];
   for (const { where, lines } of SCREENS) {

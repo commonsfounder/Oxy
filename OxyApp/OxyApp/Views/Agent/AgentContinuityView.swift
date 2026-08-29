@@ -64,7 +64,7 @@ struct AgentContinuityView: View {
     private var importCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                AppIcon("dotted", size: 15).foregroundStyle(Color.appAccent)
+                AppIcon("dotted", size: AppGlyphSize.regular).foregroundStyle(Color.appAccent)
                 AppSectionTitle("Bring your history")
             }
             Text("Import a .zip export. A .json includes conversations only.")
@@ -76,7 +76,7 @@ struct AgentContinuityView: View {
                 HStack {
                     Text(isWorking ? "Reading…" : "Choose export")
                     Spacer()
-                    AppIcon("arrow-up-right", size: 13)
+                    AppIcon("arrow-up-right", size: AppGlyphSize.small)
                 }
                 .font(.appBody(AppText.body, weight: .semibold))
                 .foregroundStyle(Color.appInk)
@@ -95,14 +95,14 @@ struct AgentContinuityView: View {
     private func previewCard(_ preview: AgentContinuityPreview) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                AppIcon("doc", size: 15).foregroundStyle(Color.appAccent)
+                AppIcon("doc", size: AppGlyphSize.regular).foregroundStyle(Color.appAccent)
                 AppSectionTitle("\(preview.source.capitalized) export")
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(coverageRows(preview), id: \.label) { row in
                     HStack(spacing: 10) {
-                        AppIcon(row.found ? "bolt" : "dotted", size: 12)
+                        AppIcon(row.found ? "bolt" : "dotted", size: AppGlyphSize.small)
                             .foregroundStyle(row.found ? Color.appAccent : Color.mgSecondary)
                         Text(row.label)
                             .font(.appBody(AppText.footnote, weight: row.found ? .medium : .regular))
@@ -126,7 +126,7 @@ struct AgentContinuityView: View {
                         .foregroundStyle(Color.mgSecondary)
                     ForEach(preview.workflows.prefix(8)) { workflow in
                         HStack(alignment: .top, spacing: 10) {
-                            AppIcon(workflow.isScheduled ? "bolt" : "dotted", size: 12)
+                            AppIcon(workflow.isScheduled ? "bolt" : "dotted", size: AppGlyphSize.small)
                                 .foregroundStyle(workflow.isScheduled ? Color.appAccent : Color.mgSecondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(workflow.name)

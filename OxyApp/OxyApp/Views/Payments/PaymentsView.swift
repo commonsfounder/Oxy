@@ -20,12 +20,8 @@ struct PaymentsView: View {
                     ScreenHeaderView(title: "Payments", onBack: { dismiss() })
 
                     if isLoading {
-                        VStack(spacing: 12) {
-                            OxySkeletonCard(height: 92)
-                            OxySkeletonCard(height: 92)
-                        }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 16)
+                        AppSkeletonList(heights: [92, 92])
+                            .appLoadingSwap(isLoading)
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
