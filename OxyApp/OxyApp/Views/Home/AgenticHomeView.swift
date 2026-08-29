@@ -320,31 +320,47 @@ struct AgenticHomeView: View {
 // MARK: - Greeting
 
     private var greetingBlock: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Dateline — the rule sits above the row, so it reads as a printed
+            // masthead rather than a floating eyebrow.
+            Rectangle()
+                .fill(Color.appAccent.opacity(0.5))
+                .frame(height: 1)
+
             HStack(alignment: .firstTextBaseline) {
                 Text("TODAY")
-                    .font(.appBody(11, weight: .semibold))
-                    .tracking(2.2)
+                    .font(.appBody(10, weight: .semibold))
+                    .tracking(2.6)
                     .foregroundStyle(Color.appAccent)
                 Spacer(minLength: 0)
                 Text(dateLine.uppercased())
                     .font(.appMono(10, weight: .medium))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.42))
+                    .tracking(0.6)
+                    .foregroundStyle(GlebChrome.ink.opacity(0.5))
             }
+            .padding(.top, 7)
 
-            Text(greetingLine)
-                .font(.appDisplay(40, weight: .medium))
-                .foregroundStyle(GlebChrome.ink)
-                .lineSpacing(-2)
-                .lineLimit(2)
-                .minimumScaleFactor(0.78)
+            // Hero. Salutation in ink, name in gold — the one moment the accent
+            // gets to carry type instead of a hairline.
+            VStack(alignment: .leading, spacing: -2) {
+                Text(salutation)
+                    .font(.appEditorial(42, weight: 380, soft: 45))
+                    .foregroundStyle(GlebChrome.ink)
+                if !firstName.isEmpty {
+                    Text(firstName)
+                        .font(.appEditorial(42, weight: 300, soft: 65))
+                        .foregroundStyle(Color.appAccent)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+            .padding(.top, 20)
 
             Text(homeSummary)
                 .font(.appBody(14, weight: .medium))
-                .foregroundStyle(GlebChrome.ink.opacity(0.56))
+                .foregroundStyle(GlebChrome.ink.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
-
-            AppRule()
+                .padding(.top, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
@@ -917,7 +933,8 @@ struct AgenticHomeView: View {
         return ""
     }
 
-    private var greetingLine: String {
+    /// Set on its own line so the name below can carry the accent.
+    private var salutation: String {
         let hour = Calendar.current.component(.hour, from: Date())
         let hello: String
         switch hour {
@@ -926,7 +943,7 @@ struct AgenticHomeView: View {
         case 17..<22: hello = "Good evening"
         default: hello = "Hey"
         }
-        return firstName.isEmpty ? hello : "\(hello),\n\(firstName)"
+        return firstName.isEmpty ? hello : "\(hello),"
     }
 
     private var dateLine: String {

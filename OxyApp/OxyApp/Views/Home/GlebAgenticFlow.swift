@@ -132,7 +132,18 @@ enum GlebChrome {
                 .blur(radius: 72)
                 .offset(x: -150, y: 110)
                 .allowsHitTesting(false)
-            AppGrain(intensity: 0.035)
+
+            // Warm vignette — stops the canvas reading as flat #FFF and gives the
+            // page edges the falloff of a sheet of stock.
+            RadialGradient(
+                colors: [.clear, Color(red: 0.29, green: 0.22, blue: 0.13).opacity(0.13)],
+                center: .center,
+                startRadius: 190,
+                endRadius: 560
+            )
+            .allowsHitTesting(false)
+
+            AppGrain(intensity: 0.055)
         }
     }
 }
@@ -148,7 +159,7 @@ struct GlebTopChrome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                BrandWordmark(height: 14, color: GlebChrome.ink.opacity(0.62))
+                BrandWordmark(height: 14, color: GlebChrome.ink.opacity(0.78))
                 Spacer(minLength: 0)
                 weatherPill
                 profileButton

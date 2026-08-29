@@ -43,7 +43,13 @@ extension Color {
         light: Color(red: 0.575, green: 0.407, blue: 0.145)   // antique gold
     )
 
-    static let appOnAccent = Color(red: 0.106, green: 0.098, blue: 0.086)
+    /// The two accents sit on opposite sides of mid-luminance, so a single fixed
+    /// foreground can't serve both: near-black on the light-mode antique gold is
+    /// 3.5:1. Pairing each accent with its own ink gives 7.8:1 dark / 5.0:1 light.
+    static let appOnAccent = appDynamicColor(
+        dark: Color(red: 0.106, green: 0.098, blue: 0.086),
+        light: Color(red: 0.992, green: 0.988, blue: 0.980)
+    )
 
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = appDynamicColor(
@@ -183,6 +189,28 @@ private func appUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
     return map[w] ?? .regular
 }
 
+// MARK: - Fraunces variable axes
+
+private enum FrauncesAxis {
+    static let opticalSize: UInt32 = 0x6F70_737A  // opsz
+    static let weight: UInt32      = 0x7767_6874  // wght
+    static let softness: UInt32    = 0x534F_4654  // SOFT
+    static let wonk: UInt32        = 0x574F_4E4B  // WONK
+}
+
+private func appFrauncesUIFont(size: CGFloat, weight: CGFloat, soft: CGFloat, wonk: Bool) -> UIFont {
+    let descriptor = UIFontDescriptor(fontAttributes: [
+        .family: "Fraunces",
+        kCTFontVariationAttribute as UIFontDescriptor.AttributeName: [
+            FrauncesAxis.opticalSize: min(max(size, 9), 144),
+            FrauncesAxis.weight: min(max(weight, 100), 900),
+            FrauncesAxis.softness: min(max(soft, 0), 100),
+            FrauncesAxis.wonk: wonk ? 1 : 0,
+        ],
+    ])
+    return UIFont(descriptor: descriptor, size: size)
+}
+
 extension Font {
     static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .default)
@@ -192,8 +220,19 @@ extension Font {
         .system(size: size, weight: weight, design: .default)
     }
 
-    static func appEditorial(_ size: CGFloat) -> Font {
-        .custom("Fraunces", size: size, relativeTo: .title)
+    /// Fraunces is a variable face whose default instance is `opsz 9 / wght 900`,
+    /// so `.custom("Fraunces")` resolves to Fraunces-9ptBlack — a heavy caption cut
+    /// scaled up. Always drive the axes; optical size tracks the point size.
+    static func appEditorial(
+        _ size: CGFloat,
+        weight: CGFloat = 400,
+        soft: CGFloat = 40,
+        wonk: Bool = true,
+        relativeTo textStyle: UIFont.TextStyle = .title1
+    ) -> Font {
+        Font(UIFontMetrics(forTextStyle: textStyle).scaledFont(for: appFrauncesUIFont(
+            size: size, weight: weight, soft: soft, wonk: wonk
+        )))
     }
 
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -407,21 +446,20 @@ struct AppCard<Content: View>: View {
 
 // MARK: - BrandWordmark
 //
-// The Milgrain wordmark asset, template-rendered so it adapts to any tint on the
-// obsidian canvas. Default: muted titanium at 14pt height (as used in the More tab
-// identity header). Pass a different height or color for alternate contexts.
+// Set live in Fraunces rather than shipped as artwork, so the wordmark inherits the
+// app's display face and any tint. `height` stays the API — it is a cap-height
+// target, and the point size is derived from it.
 
 struct BrandWordmark: View {
     var height: CGFloat = 14
     var color: Color = .appMuted
 
     var body: some View {
-        Image("wordmark")
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .frame(height: height)
+        Text("ADAM")
+            .font(.appEditorial(height * 1.35, weight: 420, soft: 30, relativeTo: .caption1))
+            .tracking(height * 0.22)
             .foregroundStyle(color)
+            .accessibilityLabel("Adam")
     }
 }
 

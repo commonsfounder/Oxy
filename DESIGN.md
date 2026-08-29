@@ -1,7 +1,7 @@
-# DESIGN.md — Milgrain app
+# DESIGN.md — Adam app
 
 **Register:** product
-**Last captured:** 2026-07-04 (chat de-bubbled)
+**Last captured:** 2026-08-28 (light-paper palette + Fraunces display axes)
 **Supersedes:** the pure-black "editorial minimalism" direction and the earlier teal
 "warm companion" palette. Both are scrapped. The July 3 on-device QA found the
 editorial language unreadable and unusable (black-on-black surfaces, Didot prose,
@@ -14,26 +14,33 @@ color/contrast, not the absence of a bubble.
 
 ## Principles
 
-1. **Legibility beats mood.** No text below 72% white on the canvas. No default
-   font weight below `.regular`. If a treatment looks "quiet" in a screenshot but
-   can't be read on a phone in daylight, it's wrong.
+1. **Legibility beats mood.** Body text sits at `appMuted` or darker on the paper
+   canvas — never lighter. No default font weight below `.regular`. Any fill that
+   carries text must clear 4.5:1 against it. If a treatment looks "quiet" in a
+   screenshot but can't be read on a phone in daylight, it's wrong.
 2. **Surfaces are real.** Cards visibly lift off the canvas. Information lives in
    containers the eye can find. Hairlines separate; they do not carry structure alone.
 3. **One warm accent.** The brand gold carries selection, CTAs, times, and the
    assistant's presence. Semantics (green/amber/red) are reserved for state.
-4. **System type.** SF everywhere — rounded for display, regular for body, mono for
-   readouts. The serif exists only inside the wordmark image asset.
-5. **Dark-only.** Every token is a fixed dark value and the root pins
-   `.preferredColorScheme(.dark)`. Never let system chrome follow iOS light mode —
-   it renders a light glass tab bar/keyboard over the dark canvas (July QA bug).
+4. **SF for interface, Fraunces for voice.** SF carries body, labels and readouts.
+   The Fraunces serif carries the display moments — the Home greeting, the Chat
+   greeting — and nothing else. It is a voice, not a body face.
+5. **Light-only.** The root pins `.preferredColorScheme(.light)` and the palette is
+   warm paper. Tokens are declared via `appDynamicColor(dark:light:)`, so the `dark:`
+   branch exists but never renders today; keep it correct rather than deleting it.
 
 ## Palette (`app*` tokens in AppTheme.swift)
 
-- **Canvas:** `appBackground` #0D0E12 — soft charcoal, not void black.
-- **Card surface:** `appSurface` #17191F; **raised:** `appSurface2` #1F222A.
-- **Hairline:** `appHairline` white 10%.
-- **Text:** `appInk` #F4F5F7; `appMuted` white 72% (floor — see Principle 1).
-- **Accent:** `appAccent` #E3B35B (Milgrain monogram gold); `appOnAccent` near-black.
+Values below are the rendered light branch.
+
+- **Canvas:** `appBackground` #F6F3EE — warm paper, not white.
+- **Card surface:** `appSurface` #FCFAF6; **inset:** `appSurface2` #EAE4DB — sand.
+- **Hairline:** `appHairline` ink 10%.
+- **Text:** `appInk` #25221E deep umber; `appMuted` #6B6459 warm secondary.
+- **Accent:** `appAccent` #936825 antique gold. Its foreground is `appOnAccent`,
+  which is **dynamic**: near-white on the light-mode gold (4.96:1), near-black on the
+  dark-mode gold (7.81:1). One fixed foreground cannot serve both — the two accents
+  sit on opposite sides of mid-luminance.
 - **Semantics:** `appSuccess` green, `appWarning`/`appAttention` amber, `appDanger`
   coral, `appLive` bright green.
 - The legacy `oxy*` and `mg*` (settings-family) tokens are aliases into the tokens
@@ -41,18 +48,24 @@ color/contrast, not the absence of a bubble.
 
 ## Typography (`Font.app*`)
 
-- **Display** `appDisplay(size)` — SF rounded semibold. Greetings, card titles,
-  metric figures, screen headers.
+- **Editorial** `appEditorial(size, weight:soft:wonk:)` — Fraunces, display only.
+  Fraunces ships as a **variable** font whose default instance is `opsz 9 / wght 900`,
+  so a bare `.custom("Fraunces", size:)` resolves to Fraunces-9ptBlack — a heavy
+  caption cut scaled up, which is why it went unused for months. The helper drives
+  `opsz`/`wght`/`SOFT`/`WONK` and tracks optical size to point size. Never bypass it.
+- **Display** `appDisplay(size)` — SF semibold. Card titles, metric figures, headers.
 - **Body** `appBody(size)` — SF regular (default weight `.regular`; pass heavier
   weights explicitly, never lighter).
 - **Mono** `appMono(size)` — technical readouts only (battery, latency, IDs).
-- Dynamic Type stays on everywhere.
+- Dynamic Type stays on everywhere, including the Fraunces helper.
 
 ## Components
 
 - **TodayCard** — the standard container: `appSurface` fill, 16pt continuous
   radius, 0.5pt white-6% border. Today board sections, pending action cards.
-- **Card headers** — SF Symbol in accent + `appDisplay(16)` title.
+- **Card headers** — `AppIcon` in accent + `appDisplay(16)` title. SF Symbols are
+  banned app-wide; `Image(systemName:)` must never appear. Glyphs are bundled
+  template assets under `Assets.xcassets/ic-*`, resolved through `AppIcon`.
 - **Chat messages** — user: compact rounded bubble, accent 18% tint, right-aligned.
   Assistant: plain text directly on the canvas, no fill, no accent bar, full-width,
   left-aligned — reads as a reply, not a chat-widget echo. Assistant prose renders
@@ -67,8 +80,11 @@ color/contrast, not the absence of a bubble.
 - **Buttons** — primary: accent capsule with `appOnAccent` text. Secondary: plain
   text in `appMuted`. Destructive: `mgDestructive`.
 - **Toggles** — accent fill when on.
-- **Tab bar** — standard `TabView` with system glass, tinted accent. No custom
-  pills, no hide-on-scroll dependencies for reachability.
+- **Home masthead** — a 1pt accent rule with the `TODAY` eyebrow and the date sitting
+  directly beneath it, then the Fraunces greeting. The rule sits *above* the row so
+  the block reads as a printed dateline rather than a floating eyebrow.
+- **Navigation** — there is no tab bar. Home is the sole root screen; Chat is reached
+  from the composer or a right-edge swipe, and More from the profile avatar.
 
 ## Today board
 
