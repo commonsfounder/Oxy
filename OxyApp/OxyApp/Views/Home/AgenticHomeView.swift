@@ -118,8 +118,10 @@ struct AgenticHomeView: View {
                                 .padding(.top, 4)
                             }
 
+                            // Shown even when the error banner is up: a failed refresh
+                            // still leaves the composer usable, so the page must not
+                            // go blank between the banner and the bottom bar.
                             if !isLoading,
-                               errorMessage == nil,
                                board.isEmpty,
                                missions.isEmpty,
                                visibleLifeBriefing == nil {

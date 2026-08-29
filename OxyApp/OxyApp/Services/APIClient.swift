@@ -342,11 +342,21 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "Invalid URL"
-        case .server(_, let message):
-            return message
+            return "Couldn't reach the server"
+        case let .server(status, message):
+            // Transport-level statuses arrive with jargon bodies ("Unauthorized",
+            // "Bad Gateway") that surface verbatim on Home. Anything else carries a
+            // real message worth showing.
+            switch status {
+            case 401, 403: return "Your session expired. Sign in again."
+            case 404: return "That's no longer available."
+            case 408: return "The server took too long to answer."
+            case 429: return "Too many requests. Try again shortly."
+            case 500...599: return "The server is having trouble. Try again shortly."
+            default: return message
+            }
         case .unknown:
-            return "An unknown error occurred"
+            return "Something went wrong"
         }
     }
 
