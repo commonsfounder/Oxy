@@ -13,6 +13,34 @@ const { buildToolsForGemini } = require('../action-contracts');
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
 
+// A provider rate limit is a transport condition, not an outcome. The goal is untouched and
+// the checkpoint is intact, so the run pauses as resumable rather than ending as failed, and
+// the raw provider body never reaches the user: on 2026-08-28 a burst of 429s left 33 tasks
+// permanently 'failed' with `openai 429: { "error": { "message": "Rate limit reached for
+// gpt-5.6-luna in organization org-…` as their user-visible reason.
+const RATE_LIMIT_PAUSE = 'The model provider hit its rate limit. Resume to carry on from here.';
+// The old retry waited a flat 500ms, which cannot outlast a per-minute token limit. Honour
+// the provider's Retry-After when it sends one, bounded so a single turn cannot hang.
+const MAX_RETRY_WAIT_MS = 5000;
+
+function retryWaitMs(error) {
+  const hinted = Number(error?.retryAfterMs);
+  if (!Number.isFinite(hinted) || hinted <= 0) return 500;
+  return Math.min(hinted, MAX_RETRY_WAIT_MS);
+}
+
+// Rate-limited runs stop as 'rate_limited' (canonically 'paused'); everything else keeps the
+// existing 'error' → 'failed' path, because a bad request is this system's bug to fix.
+function stopForProviderError(agentTrace, error) {
+  if (error?.rateLimited === true) {
+    agentTrace.status = 'rate_limited';
+    agentTrace.lastError = RATE_LIMIT_PAUSE;
+    return;
+  }
+  agentTrace.status = 'error';
+  agentTrace.lastError = error?.message || String(error);
+}
+
 // Extract function calls from ONE source, not both: resp.functionCalls (when the SDK
 // provides it) is a derived view over the same candidates[0].content.parts array, not an
 // independent signal. Reading both and pushing into the same list double-counted every real
@@ -251,19 +279,17 @@ async function runAgentLoop({
       logAgentStep(agentTrace, { type: 'error', error: err.message });
       // Retry once on transient error for cream-of-crop reliability
       if (i < maxIterations - 1) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, retryWaitMs(err)));
         try {
           resp = await callGeminiWithTools(modelName, resumedContents, baseConfig, trace, provider);
         } catch (e2) {
           logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
-          agentTrace.status = 'error';
           // Recorded on the task so a paused run explains itself instead of just stopping.
-          agentTrace.lastError = e2.message;
+          stopForProviderError(agentTrace, e2);
           break;
         }
       } else {
-        agentTrace.status = 'error';
-        agentTrace.lastError = err.message;
+        stopForProviderError(agentTrace, err);
         break;
       }
     }
@@ -428,10 +454,14 @@ async function runAgentLoop({
   // (false) success to the user. Surface the failure so they know to retry.
   const fallback = agentTrace.status === 'error' && !executedActions.length
     ? 'The action could not be completed.'
-    : agentTrace.status === 'incomplete'
-      ? 'The action is incomplete.'
-      : 'Done.';
-  const finalSpoken = agentTrace.status === 'incomplete'
+    : agentTrace.status === 'rate_limited'
+      ? RATE_LIMIT_PAUSE
+      : agentTrace.status === 'incomplete'
+        ? 'The action is incomplete.'
+        : 'Done.';
+  // A rate-limited run reports the pause for the same reason an incomplete one does: whatever
+  // partial text the model produced before the limit would otherwise read as a finished answer.
+  const finalSpoken = agentTrace.status === 'incomplete' || agentTrace.status === 'rate_limited'
     ? fallback
     : (spoken || lastToolResultsText || fallback);
   return {
@@ -536,6 +566,7 @@ function evaluateSimpleCondition(cond, prevResults, ctx) {
 
 module.exports = {
   runAgentLoop,
+  retryWaitMs,
   generatePlan,
   reflectOnResults,
   createAgentTrace,

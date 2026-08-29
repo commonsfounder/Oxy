@@ -28,6 +28,9 @@ const TRACE_STATUS_TO_CANONICAL = Object.freeze({
   awaiting_approval: 'waiting_for_user',
   waiting_for_user: 'waiting_for_user',
   completed: 'completed',
+  // A provider rate limit stopped the run. Resumable like any other pause — the goal and the
+  // checkpoint are intact — so it must not land in 'failed' with the provider's error text.
+  rate_limited: 'paused',
   error: 'failed',
   failed: 'failed',
   cancelled: 'cancelled'

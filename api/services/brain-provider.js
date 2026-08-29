@@ -42,6 +42,36 @@ const { defaultModelForProvider, modelMatchesProvider } = require('./model-routi
 // gpt-5.6-luna returns finish_reason=length with content:''.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
 
+// Every provider HTTP failure throws through here, so a caller can tell a rate limit from a
+// bad request without parsing the message. The message text is unchanged — logs and existing
+// assertions still read `openai 429: {...}` — but a 429 or an overloaded/5xx now carries
+// status, retryability and the provider's own Retry-After, so a transport condition can be
+// waited out and reported as a pause instead of ending a run as failed.
+const RETRY_AFTER_CAP_MS = 60000;
+
+function retryAfterMsFromHeaders(headers) {
+  const raw = headers?.get?.('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.min(Math.max(seconds, 0) * 1000, RETRY_AFTER_CAP_MS);
+  const at = Date.parse(raw);
+  if (!Number.isFinite(at)) return null;
+  return Math.min(Math.max(at - Date.now(), 0), RETRY_AFTER_CAP_MS);
+}
+
+async function providerHttpError(provider, res) {
+  const body = (await res.text().catch(() => '')).slice(0, 300);
+  const error = new Error(`${provider} ${res.status}: ${body}`);
+  error.status = res.status;
+  error.provider = provider;
+  error.rateLimited = res.status === 429;
+  // 529 is Anthropic's "overloaded". Both it and a 5xx are the provider failing to serve a
+  // request it accepted, which is worth one more attempt; a 4xx other than 429 is our bug.
+  error.retryable = res.status === 429 || res.status === 529 || res.status >= 500;
+  error.retryAfterMs = retryAfterMsFromHeaders(res.headers);
+  return error;
+}
+
 let _gemini = null;
 function geminiClient() {
   if (!_gemini) _gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
@@ -141,7 +171,7 @@ async function* groqStream({ model, contents, config }) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError('Groq', res);
   yield* streamChatCompletionSSE(res);
 }
 
@@ -292,7 +322,7 @@ async function* compatibleStream({ provider, model, contents, config }) {
       ...compatibleRequestFromConfig(provider, config)
     })
   });
-  if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError(provider, res);
   yield* streamChatCompletionSSE(res);
 }
 
@@ -307,7 +337,7 @@ async function compatibleGenerate({ provider, model, contents, config }) {
       ...compatibleRequestFromConfig(provider, config)
     })
   });
-  if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError(provider, res);
   const json = await res.json();
   // Returns the full Gemini shape, not just { text }: once tools can be attached here, a
   // reply carrying tool_calls has EMPTY content, and returning only the text would discard
@@ -376,7 +406,7 @@ async function* anthropicStream({ model, contents, config }) {
     headers: anthropicHeaders(),
     body: JSON.stringify(anthropicRequestBody({ model, contents, config, stream: true }))
   });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError('Anthropic', res);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -418,7 +448,7 @@ async function anthropicGenerate({ model, contents, config, tools = [] }) {
     headers: anthropicHeaders(),
     body: JSON.stringify(anthropicRequestBody({ model, contents, config, tools }))
   });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError('Anthropic', res);
   return anthropicResponseToGeminiShape(await res.json());
 }
 
@@ -474,7 +504,7 @@ async function webSearchBrain({ model, prompt, provider }) {
         reasoning: { effort: process.env.OXY_CHAT_REASONING_EFFORT || 'low' }
       })
     });
-    if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw await providerHttpError('OpenAI', res);
     const json = await res.json();
     // The Responses API returns a typed output array; the prose lives in output_text
     // parts of `message` items, alongside non-message items like web_search_call.
@@ -666,11 +696,12 @@ async function callToolsBrain({ provider, model, contents, config }) {
     headers: compatibleHeaders(p),
     body: JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(`${p} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw await providerHttpError(p, res);
   return openAIResponseToGeminiShape(await res.json());
 }
 
 module.exports = {
+  providerHttpError,
   streamChatCompletionSSE,
   streamBrain,
   generateBrain,
