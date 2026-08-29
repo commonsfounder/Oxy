@@ -31,6 +31,8 @@ const TASKS = [
   { id: 'remember-person', group: 'household-write', mode: 'state', expectedAction: 'remember_person', message: 'Remember that Alex prefers vegetarian restaurants.' },
   { id: 'notification-preference', group: 'household-write', mode: 'state', expectedAction: 'set_notification_preference', message: 'Only notify me about urgent reminders by Telegram.' },
   { id: 'scheduled-watch', group: 'household-write', mode: 'state', expectedAction: 'create_scheduled_task', message: 'Every Friday, check whether train fares from Birmingham to London have dropped and tell me.' },
+  { id: 'contextual-reminder', group: 'household-write', mode: 'state', expectedAction: 'create_scheduled_task', message: 'Remind me to take the parcel when I get home.' },
+  { id: 'health-threshold-watch', group: 'household-write', mode: 'state', expectedAction: 'create_scheduled_task', message: 'Tell me if my resting heart rate drops below 45 bpm.' },
   { id: 'agent-task', group: 'household-write', mode: 'state', expectedAction: 'create_agent_task', message: 'Keep an eye on the price of a replacement washing machine and let me know if one under £400 appears.' },
   { id: 'resolve-commitment', group: 'household-write', mode: 'state', expectedAction: 'resolve_commitment', message: 'Mark the tenancy documents commitment as done.' },
   { id: 'cancel-watch', group: 'household-write', mode: 'state', expectedAction: 'cancel_scheduled_task', message: 'Stop the washing machine price watch.' },

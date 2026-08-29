@@ -13,7 +13,7 @@
 create table if not exists notification_events (
   id uuid primary key default gen_random_uuid(),
   user_id text not null references users(user_id) on delete cascade,
-  category text not null check (category in ('watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'other')),
+  category text not null check (category in ('watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'action_required', 'other')),
   urgency text not null default 'normal' check (urgency in ('urgent', 'normal', 'low')),
   title text not null,
   body text not null,

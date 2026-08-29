@@ -1,5 +1,6 @@
 const { createSupabaseServiceClient } = require('../../runtime');
 const watches = require('./watches');
+const contextWatches = require('./context-watches');
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -106,6 +107,9 @@ function computeNextRun(now, { recurrence = 'once', time_of_day, day_of_week, da
 }
 
 function describeSchedule(task) {
+  if (contextWatches.isContextWatch(task)) {
+    return contextWatches.describeContextWatch(task.watch_state.context);
+  }
   const time = task.time_of_day || '09:00';
   if (task.recurrence === 'poll') {
     const mins = task.interval_minutes || 30;
@@ -175,7 +179,8 @@ function isRecurringCadence(recurrence) {
 async function createScheduledTask(userId, {
   title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date,
   condition = null, interval_minutes, expires_at, budget_cap,
-  watch_type, threshold, comparator, notify_rule, source_url, target_state
+  watch_type, threshold, comparator, notify_rule, source_url, target_state,
+  context_event, context_metric, context_radius_metres, initial_context
 }) {
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) return { success: false, error: 'A title is required.' };
@@ -184,12 +189,33 @@ async function createScheduledTask(userId, {
   // produce a separate condition sentence. Without this, "tell me if the price at <url> drops
   // below £90" became a one-shot task that fired once and never polled — and a later "check
   // it weekly" then reported success while changing nothing.
-  const isWatch = Boolean(condition || source_url || threshold !== undefined || watch_type);
+  const contextConfig = contextWatches.buildContextConfig({
+    event: context_event,
+    metric: context_metric,
+    threshold,
+    comparator,
+    radiusMetres: context_radius_metres
+  });
+  if (context_event && context_metric) {
+    return { success: false, error: 'Use either context_event or context_metric, not both.' };
+  }
+  if ((context_event || context_metric) && !contextConfig) {
+    return { success: false, error: context_metric
+      ? 'context_metric needs a supported metric and a numeric threshold.'
+      : 'context_event must be arrive_home or leave_home.' };
+  }
+  if (watch_type === 'context' && !contextConfig) {
+    return { success: false, error: 'A context watch needs a supported context_event or context_metric.' };
+  }
+  const isContextWatch = Boolean(contextConfig);
+  const isWatch = Boolean(condition || source_url || threshold !== undefined || watch_type || isContextWatch);
   const isRecurringCheck = watch_type === 'recurring_check';
   let cleanCondition = condition ? String(condition).trim() : null;
   if (isWatch && !cleanCondition) {
     const comparatorWord = comparator === 'above' ? 'above' : 'below';
-    cleanCondition = threshold !== undefined && threshold !== null
+    cleanCondition = isContextWatch
+      ? contextWatches.describeContextWatch(contextConfig).replace(/^when /, '')
+      : threshold !== undefined && threshold !== null
       ? `the value goes ${comparatorWord} ${threshold}${source_url ? ` at ${source_url}` : ''}`
       : target_state
         ? `it becomes "${String(target_state).trim().slice(0, 80)}"`
@@ -211,7 +237,7 @@ async function createScheduledTask(userId, {
 
   if (resolvedRecurrence === 'poll') {
     intervalMinutes = Number.isFinite(interval_minutes) && interval_minutes > 0
-      ? Math.round(interval_minutes) : DEFAULT_POLL_MINUTES;
+      ? Math.round(interval_minutes) : isContextWatch ? 15 : DEFAULT_POLL_MINUTES;
     const expiry = expires_at ? new Date(expires_at) : null;
     expiresAt = expiry && !Number.isNaN(expiry.getTime())
       ? expiry
@@ -247,9 +273,18 @@ async function createScheduledTask(userId, {
   // "remind me on Tuesday" is not a watch and has nothing to observe.
   if (cleanCondition || source_url || threshold !== undefined) {
     row.watch_state = {
-      ...watches.buildWatchConfig({ type: watch_type, threshold, comparator, notify_rule, source_url, condition: cleanCondition }),
+      ...watches.buildWatchConfig({ type: isContextWatch ? 'context' : watch_type, threshold, comparator, notify_rule, source_url, condition: cleanCondition }),
       targetState: target_state ? String(target_state).trim().slice(0, 120) : null
     };
+    if (contextConfig) row.watch_state.context = contextConfig;
+  }
+
+  // The current fix becomes the baseline when the request carried one. This prevents a
+  // reminder created while already home from pretending the next sync was an arrival.
+  if (contextConfig && initial_context) {
+    row.watch_state = contextWatches.evaluateContextWatch(row.watch_state, initial_context, {
+      now: new Date()
+    }).state;
   }
 
   // Asking for the same watch twice must adjust the one that exists rather than leaving two
@@ -263,12 +298,17 @@ async function createScheduledTask(userId, {
       .eq('active', true);
     const duplicate = watches.findDuplicateWatch(active || [], { title: cleanTitle, condition: cleanCondition, source_url });
     if (duplicate) {
+      const preserved = pickObservationState(duplicate.watch_state);
+      const mergedWatchState = { ...row.watch_state, ...preserved };
+      if (row.watch_state?.context && preserved.context) {
+        mergedWatchState.context = { ...row.watch_state.context, ...preserved.context };
+      }
       const patch = {
         interval_minutes: intervalMinutes,
         expires_at: expiresAt ? expiresAt.toISOString() : duplicate.expires_at,
         // The existing watch keeps its observation history — replacing it would throw away
         // the baseline that makes "has it changed?" answerable.
-        watch_state: { ...row.watch_state, ...pickObservationState(duplicate.watch_state) }
+        watch_state: mergedWatchState
       };
       const { data: updated, error: updateError } = await getSupabase()
         .from('scheduled_tasks').update(patch).eq('id', duplicate.id)
@@ -296,7 +336,54 @@ function pickObservationState(existing = {}) {
   for (const key of ['baseline', 'lastObserved', 'history', 'lastEvaluation', 'thresholdMet', 'lastBlockedAt']) {
     if (existing[key] !== undefined) kept[key] = existing[key];
   }
+  if (existing.context) {
+    kept.context = {};
+    for (const key of ['lastInside', 'transitionCount', 'lastCheckedAt']) {
+      if (existing.context[key] !== undefined) kept.context[key] = existing.context[key];
+    }
+  }
   return kept;
+}
+
+// Evaluates active context watches against one fresh device snapshot. The active-row filter
+// is the claim: once a one-shot trigger closes the row, a concurrent evaluator cannot fire it.
+async function evaluateContextWatches(userId, nativeContext, now = new Date()) {
+  const { data: tasks, error } = await getSupabase()
+    .from('scheduled_tasks')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('active', true)
+    .eq('completed', false)
+    .not('watch_state', 'is', null);
+  if (error) return { success: false, error: error.message, evaluated: 0, events: [] };
+
+  const events = [];
+  let evaluated = 0;
+  for (const task of (tasks || []).filter(contextWatches.isContextWatch)) {
+    const verdict = contextWatches.evaluateContextWatch(task.watch_state, nativeContext, { now });
+    const patch = {
+      watch_state: verdict.state,
+      last_run_at: now.toISOString(),
+      next_run_at: new Date(now.getTime() + (task.interval_minutes || 15) * 60000).toISOString()
+    };
+    if (verdict.notify && verdict.terminal) {
+      patch.active = false;
+      patch.completed = true;
+    }
+    const { data: updated, error: updateError } = await getSupabase()
+      .from('scheduled_tasks')
+      .update(patch)
+      .eq('id', task.id)
+      .eq('user_id', userId)
+      .eq('active', true)
+      .select('id, active')
+      .maybeSingle();
+    if (updateError) return { success: false, error: updateError.message, evaluated, events };
+    if (!updated) continue;
+    evaluated += 1;
+    if (verdict.notify) events.push({ task, verdict });
+  }
+  return { success: true, evaluated, events };
 }
 
 // "Change that to weekly", "only tell me if it goes below £450", "stop checking that" — a
@@ -317,21 +404,39 @@ async function updateScheduledTask(userId, { id, title, ...changes } = {}) {
 
   const patch = {};
   const config = { ...(task.watch_state || {}) };
+  const isContextMetric = config.type === 'context' && Boolean(config.context?.metric);
   let configChanged = false;
 
   if (changes.threshold !== undefined && changes.threshold !== null) {
-    config.threshold = watches.parseNumber(changes.threshold);
-    config.type = 'threshold';
+    const threshold = watches.parseNumber(changes.threshold);
+    if (threshold === null) return { success: false, error: 'The new threshold must be a number.' };
+    if (isContextMetric) {
+      config.context = { ...config.context, threshold, lastMet: null };
+    } else {
+      config.threshold = threshold;
+      config.type = 'threshold';
+      config.thresholdMet = false;
+    }
     // A new threshold is a new question: whether the OLD one had been met must not suppress
     // the first notification about the new one.
-    config.thresholdMet = false;
     configChanged = true;
   }
-  if (changes.comparator) { config.comparator = changes.comparator === 'above' ? 'above' : 'below'; configChanged = true; }
+  if (changes.comparator) {
+    const comparator = changes.comparator === 'above' ? 'above' : 'below';
+    if (isContextMetric) config.context = { ...config.context, comparator, lastMet: null };
+    else config.comparator = comparator;
+    configChanged = true;
+  }
   if (changes.notify_rule && watches.NOTIFY_RULES.includes(changes.notify_rule)) { config.notifyRule = changes.notify_rule; configChanged = true; }
   if (changes.source_url) { config.sourceUrl = String(changes.source_url).trim().slice(0, 500); configChanged = true; }
   if (changes.condition) { patch.condition = String(changes.condition).trim(); config.condition = patch.condition; configChanged = true; }
-  if (configChanged) patch.watch_state = config;
+  if (configChanged) {
+    patch.watch_state = config;
+    if (isContextMetric && (changes.threshold !== undefined || changes.comparator)) {
+      patch.condition = contextWatches.describeContextWatch(config.context).replace(/^when /, '');
+      config.condition = patch.condition;
+    }
+  }
 
   if (changes.instruction) patch.instruction = String(changes.instruction).trim();
   if (changes.new_title) patch.title = String(changes.new_title).trim();
@@ -448,7 +553,11 @@ async function getDueScheduledTasks(userId, now = new Date()) {
     .eq('completed', false)
     .lte('next_run_at', now.toISOString());
   if (error) throw new Error(error.message);
-  return data || [];
+  // Physical context is evidence, not a question for the model. Context watches are
+  // evaluated by evaluateContextWatches against the latest native snapshot during the
+  // proactive sweep (and immediately on /native/context). Their next_run_at is only a
+  // freshness/check cadence; it must never route "did I arrive?" through runSavedGoal.
+  return (data || []).filter(task => !contextWatches.isContextWatch(task));
 }
 
 // A sweep can run on more than one Fly machine. Move the due timestamp forward
@@ -526,6 +635,7 @@ module.exports = {
   createScheduledTask,
   updateScheduledTask,
   recordWatchObservation,
+  evaluateContextWatches,
   listScheduledTasks,
   cancelScheduledTask,
   getDueScheduledTasks,

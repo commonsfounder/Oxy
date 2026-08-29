@@ -164,14 +164,18 @@ test('every background run builds a real per-user prompt, because they all share
   assert.match(starterSrc, /buildSystemPrompt\(userId\)/, 'the shared durable-run starter must build the injected background prompt before launching');
 });
 
-test('the briefing builders call buildSystemPrompt with surface briefing, not a hand-rolled persona string', () => {
+test('briefing generation uses the shared prompt where judgment is needed and deterministic evidence for proactive delivery', () => {
   const src = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
   assert.doesNotMatch(src, /You are a personal assistant/, 'the old separate briefing persona must be gone from executable code');
 
-  for (const fnName of ['buildMorningBriefing', 'buildIntervalBriefing']) {
-    const start = src.indexOf(`async function ${fnName}(`);
-    assert.ok(start >= 0, `${fnName} not found`);
-    const body = src.slice(start, src.indexOf('\n}\n', start));
-    assert.match(body, /surface:\s*'briefing'/, `${fnName} must route through buildSystemPrompt's briefing surface`);
-  }
+  const morningStart = src.indexOf('async function buildMorningBriefing(');
+  assert.ok(morningStart >= 0, 'buildMorningBriefing not found');
+  const morning = src.slice(morningStart, src.indexOf('\n}\n', morningStart));
+  assert.match(morning, /surface:\s*'briefing'/, 'the conversational morning briefing must route through the shared briefing surface');
+
+  const proactiveStart = src.indexOf('async function maybeCreateIntervalBriefing(');
+  assert.ok(proactiveStart >= 0, 'maybeCreateIntervalBriefing not found');
+  const proactive = src.slice(proactiveStart, src.indexOf('\n}\n', proactiveStart));
+  assert.match(proactive, /formatDigestNotification/, 'proactive delivery must format ranked evidence');
+  assert.doesNotMatch(proactive, /generateBrain|buildSystemPrompt/, 'a model paraphrase cannot manufacture a new proactive interruption');
 });

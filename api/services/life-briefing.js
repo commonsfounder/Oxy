@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 const MAX_ITEMS = 3;
 const MAX_TEXT = 240;
 const MAX_REVIEW_BODY = 1200;
@@ -393,10 +395,28 @@ function formatLifeBriefing(briefing) {
   return `${briefing.headline} ${parts.join(' ')}`;
 }
 
+// One day, one evidence state. Relative prose such as "in two hours" naturally changes as
+// time passes, but that is not a new household event. Identity/title changes and urgency-tier
+// crossings are; hashing those lets a genuinely new or newly urgent fact surface without a
+// second interruption caused only by rewording.
+function lifeBriefingSignature(briefing, dateKey = '') {
+  const facts = (briefing?.items || []).map(item => ({
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    urgency: item.urgency
+  }));
+  return crypto.createHash('sha256')
+    .update(JSON.stringify({ dateKey: String(dateKey || ''), facts }))
+    .digest('hex')
+    .slice(0, 24);
+}
+
 module.exports = {
   MAX_ITEMS,
   buildLifeBriefing,
   formatLifeBriefing,
+  lifeBriefingSignature,
   normalizeTask,
   normalizeApproval,
   normalizeEvent,

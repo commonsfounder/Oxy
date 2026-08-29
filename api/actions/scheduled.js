@@ -8,12 +8,32 @@
 
 const scheduledTasks = require('../services/scheduled-tasks');
 const watches = require('../services/watches');
+const contextWatches = require('../services/context-watches');
 
 async function createScheduledTaskAction({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const {} = deps;
   const title = String(params?.title || '').trim();
   const instruction = String(params?.instruction || params?.prompt || '').trim();
   if (!title || !instruction) return { success: false, error: 'create_scheduled_task requires title and instruction' };
+  if (params?.context_event && !contextWatches.explicitLocationWatchRequest({
+    event: params.context_event,
+    radiusMetres: params.context_radius_metres
+  }, context?.userMessage)) {
+    return {
+      success: false,
+      error: 'A location watch needs the user to explicitly request the matching home arrival or departure in this message; a custom radius must also be named.'
+    };
+  }
+  if (params?.context_metric && !contextWatches.explicitMetricWatchRequest({
+    metric: params.context_metric,
+    threshold: params.threshold,
+    comparator: params.comparator
+  }, context?.userMessage)) {
+    return {
+      success: false,
+      error: 'A health watch needs the user to explicitly name the metric, threshold, and monitoring request in this message.'
+    };
+  }
   const created = await scheduledTasks.createScheduledTask(userId, {
     title,
     instruction,
@@ -31,7 +51,16 @@ async function createScheduledTaskAction({ userId, action, params, enrichedParam
     comparator: params?.comparator,
     notify_rule: params?.notify_rule,
     source_url: params?.source_url,
-    target_state: params?.target_state
+    target_state: params?.target_state,
+    context_event: params?.context_event,
+    context_metric: params?.context_metric,
+    context_radius_metres: params?.context_radius_metres,
+    initial_context: context?.location && context?.homeLocation ? {
+      location: context.location,
+      homeLocation: context.homeLocation,
+      settings: { homeLocation: context.homeLocation },
+      updated_at: new Date().toISOString()
+    } : null
   });
   if (!created.success) return created;
   const task = created.task || {};
@@ -73,6 +102,8 @@ async function listScheduledTasksAction({ userId, action, params, enrichedParams
       comparator: task.watch_state.comparator || null,
       notifyRule: task.watch_state.notifyRule || null,
       sourceUrl: task.watch_state.sourceUrl || null,
+      contextEvent: task.watch_state.context?.event || null,
+      contextMetric: task.watch_state.context?.metric || null,
       lastObserved: task.watch_state.lastObserved || null,
       lastCheckFailed: task.watch_state.lastEvaluation?.kind === 'blocked'
         ? task.watch_state.lastEvaluation.reason : null

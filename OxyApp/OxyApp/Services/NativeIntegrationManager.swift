@@ -65,10 +65,13 @@ struct NativeLocalActionResult: Equatable, Sendable {
 
 struct NativeHealthSnapshot: Codable {
     var latestHeartRate: Double?
+    var latestHeartRateRecordedAt: String?
     var restingHeartRate: Double?
+    var restingHeartRateRecordedAt: String?
     var stepCountToday: Double?
     var sleepMinutesLastNight: Double?
     var recentWorkouts: [NativeWorkoutSummary]?
+    var capturedAt: String?
 }
 
 struct NativeWorkoutSummary: Codable, Equatable {
@@ -182,12 +185,31 @@ final class NativeIntegrationManager {
     private var lastReminderIdentifier: String?
     private var lastReminderTitle: String?
     private var lastReminderDueDate: Date?
+    private var activeUserId: String?
+    private var locationSyncTask: Task<Void, Never>?
+    private var lastLocationSyncAt = Date.distantPast
+    private var healthObserverQueries: [HKObserverQuery] = []
+    private var lastHealthContextSyncAt = Date.distantPast
     let pendant = PendantBLEManager()
 
     private init() {}
 
     func bootstrap(userId: String) {
         guard !userId.isEmpty else { return }
+        activeUserId = userId
+        if locationSyncTask == nil {
+            locationSyncTask = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: LocationManager.didChangeLocation) {
+                    guard !Task.isCancelled, let self, let activeUserId = self.activeUserId else { continue }
+                    let now = Date()
+                    guard now.timeIntervalSince(self.lastLocationSyncAt) >= 5 else { continue }
+                    self.lastLocationSyncAt = now
+                    await self.syncNativeContext(userId: activeUserId)
+                }
+            }
+        }
+        LocationManager.shared.startMonitoringSignificantChanges()
+        startHealthContextMonitoring()
         Task {
             await requestNotificationPermission(userId: userId)
             await syncNativeContext(userId: userId)
@@ -2186,7 +2208,57 @@ final class NativeIntegrationManager {
         readTypes.insert(workoutType)
         do {
             try await healthStore.requestAuthorization(toShare: [], read: readTypes)
+            startHealthContextMonitoring()
+            enableHealthBackgroundDelivery()
         } catch {}
+    }
+
+    /// HealthKit observations are environment events, like significant location changes.
+    /// They refresh native context; the server's deterministic watch evaluator alone decides
+    /// whether the user's stated threshold was crossed.
+    private func startHealthContextMonitoring() {
+        guard HKHealthStore.isHealthDataAvailable(), healthObserverQueries.isEmpty else { return }
+        for sampleType in healthContextSampleTypes() {
+            let query = HKObserverQuery(sampleType: sampleType, predicate: nil) { [weak self] _, completion, error in
+                guard error == nil else {
+                    completion()
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    guard let self, let userId = self.activeUserId else {
+                        completion()
+                        return
+                    }
+                    let now = Date()
+                    guard now.timeIntervalSince(self.lastHealthContextSyncAt) >= 30 else {
+                        completion()
+                        return
+                    }
+                    self.lastHealthContextSyncAt = now
+                    await self.syncNativeContext(userId: userId)
+                    completion()
+                }
+            }
+            healthStore.execute(query)
+            healthObserverQueries.append(query)
+        }
+        enableHealthBackgroundDelivery()
+    }
+
+    private func enableHealthBackgroundDelivery() {
+        for sampleType in healthContextSampleTypes() {
+            let frequency: HKUpdateFrequency = sampleType == HKObjectType.quantityType(forIdentifier: .stepCount)
+                ? .hourly
+                : .immediate
+            healthStore.enableBackgroundDelivery(for: sampleType, frequency: frequency) { _, _ in }
+        }
+    }
+
+    private func healthContextSampleTypes() -> [HKSampleType] {
+        let quantities: [HKQuantityTypeIdentifier] = [.heartRate, .restingHeartRate, .stepCount]
+        var types: [HKSampleType] = quantities.compactMap { HKObjectType.quantityType(forIdentifier: $0) }
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.append(sleep) }
+        return types
     }
 
     private func requestContactsPermission() async {
@@ -2232,22 +2304,37 @@ final class NativeIntegrationManager {
 
     private func healthSnapshot() async -> NativeHealthSnapshot {
         guard HKHealthStore.isHealthDataAvailable() else { return NativeHealthSnapshot() }
+        let latestHeartRate = await latestQuantityReading(.heartRate, unit: HKUnit.count().unitDivided(by: .minute()))
+        let restingHeartRate = await latestQuantityReading(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute()))
         return NativeHealthSnapshot(
-            latestHeartRate: await latestQuantity(.heartRate, unit: HKUnit.count().unitDivided(by: .minute())),
-            restingHeartRate: await latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute())),
+            latestHeartRate: latestHeartRate?.value,
+            latestHeartRateRecordedAt: latestHeartRate?.recordedAt.ISO8601Format(),
+            restingHeartRate: restingHeartRate?.value,
+            restingHeartRateRecordedAt: restingHeartRate?.recordedAt.ISO8601Format(),
             stepCountToday: await sumQuantityToday(.stepCount, unit: .count()),
             sleepMinutesLastNight: await sleepMinutesLastNight(),
-            recentWorkouts: await recentWorkouts(limit: 3)
+            recentWorkouts: await recentWorkouts(limit: 3),
+            capturedAt: Date().ISO8601Format()
         )
     }
 
     private func latestQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double? {
+        await latestQuantityReading(identifier, unit: unit)?.value
+    }
+
+    private func latestQuantityReading(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> (value: Double, recordedAt: Date)? {
         guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return nil }
         return await withCheckedContinuation { continuation in
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
             let query = HKSampleQuery(sampleType: type, predicate: nil, limit: 1, sortDescriptors: [sort]) { _, samples, _ in
-                let value = (samples?.first as? HKQuantitySample)?.quantity.doubleValue(for: unit)
-                continuation.resume(returning: value)
+                guard let sample = samples?.first as? HKQuantitySample else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: (
+                    value: sample.quantity.doubleValue(for: unit),
+                    recordedAt: sample.endDate
+                ))
             }
             healthStore.execute(query)
         }

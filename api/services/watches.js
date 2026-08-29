@@ -6,7 +6,7 @@
 // "[WATCH_TRIGGERED]", not a number being below a threshold once the number is written down.
 // No second scheduler: cadence, claiming, advancing and expiry stay scheduled-tasks.js's job.
 
-const WATCH_TYPES = ['state_change', 'threshold', 'recurring_check'];
+const WATCH_TYPES = ['state_change', 'threshold', 'recurring_check', 'context'];
 const NOTIFY_RULES = ['once', 'every_change', 'ongoing'];
 const MAX_HISTORY = 10;
 
@@ -53,7 +53,7 @@ function buildWatchConfig({
     // below £500, not to be told every half hour for as long as it stays there.
     notifyRule: NOTIFY_RULES.includes(notify_rule)
       ? notify_rule
-      : (finalType === 'threshold' ? 'once' : finalType === 'recurring_check' ? 'ongoing' : 'every_change'),
+      : (finalType === 'threshold' || finalType === 'context' ? 'once' : finalType === 'recurring_check' ? 'ongoing' : 'every_change'),
     sourceUrl: clean(source_url, 500) || null,
     condition: clean(condition, 300) || null,
     baseline: null,

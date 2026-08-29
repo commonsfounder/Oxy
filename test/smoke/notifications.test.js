@@ -187,6 +187,19 @@ test('with nothing configured everything falls back to the in-app card', () => {
   assert.equal(decision.channel, 'in_app');
 });
 
+test('an event backed by an existing briefing uses that card as its in-app delivery', async () => {
+  const { runtime, rows, calls } = runtimeWith({ env: {}, emailTo: '' });
+  await runtime.raise('u1', {
+    category: 'digest', title: 'One thing needs you today', body: 'Call the dentist.',
+    dedupeKey: 'digest|day:2026-08-09|state:s1', sourceRef: { briefingId: 'briefing-existing' }
+  });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.results[0].status, 'delivered');
+  assert.equal(result.results[0].channel, 'in_app');
+  assert.equal([...rows.values()][0].provider_ref, 'briefing-existing');
+  assert.equal(calls.includes('in_app'), false, 'the existing Home card is not duplicated');
+});
+
 test('push is preferred over email, and both over the card that does not reach them', () => {
   assert.equal(resolveDelivery({ event: EVENT, available: ['push', 'email', 'in_app'], now: NOW }).channel, 'push');
   assert.equal(resolveDelivery({ event: EVENT, available: ['email', 'in_app'], now: NOW }).channel, 'email');
@@ -211,6 +224,12 @@ test('turning a category off suppresses it rather than failing', () => {
   assert.equal(decision.deliver, false);
   assert.equal(decision.status, 'suppressed');
   assert.match(decision.reason, /turned off/);
+});
+
+test('action-required follow-ups are a first-class category and honor their own preference', () => {
+  const event = { ...EVENT, category: 'action_required' };
+  const prefs = { [PREF.category('action_required')]: 'off' };
+  assert.equal(resolveDelivery({ event, prefs, available: ['push', 'in_app'], now: NOW }).status, 'suppressed');
 });
 
 test('"only send urgent things" holds back the rest', () => {

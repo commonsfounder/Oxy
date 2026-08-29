@@ -205,17 +205,26 @@ function createDeliveryRuntime({
         const shaped = notifications.formatNotificationTelegram(event);
         result = await sendTelegram(userId, { text: shaped.text });
       } else {
-        const briefing = await createBriefing(userId, {
-          kind: `notification_${event.category}`,
-          title: event.title,
-          body: event.body,
-          source: 'agent',
-          metadata: { notificationId: event.id, ...(event.source_ref || {}) },
-          // The push inside createBriefing would be a second, uncontrolled attempt at the
-          // same event — this runtime owns channel choice.
-          push: false
-        });
-        result = { ok: Boolean(briefing?.id), providerRef: briefing?.id || null };
+        // Some producers create the durable Home card before raising an event so its rich
+        // metadata is immediately available to the app. If routing resolves to in-app, that
+        // existing row *is* the delivery; creating another generic notification card would
+        // show the same household update twice.
+        const existingBriefingId = event.source_ref?.briefingId;
+        if (existingBriefingId) {
+          result = { ok: true, providerRef: existingBriefingId };
+        } else {
+          const briefing = await createBriefing(userId, {
+            kind: `notification_${event.category}`,
+            title: event.title,
+            body: event.body,
+            source: 'agent',
+            metadata: { notificationId: event.id, ...(event.source_ref || {}) },
+            // The push inside createBriefing would be a second, uncontrolled attempt at the
+            // same event — this runtime owns channel choice.
+            push: false
+          });
+          result = { ok: Boolean(briefing?.id), providerRef: briefing?.id || null };
+        }
       }
     } catch (error) {
       result = { ok: false, error: error.message };

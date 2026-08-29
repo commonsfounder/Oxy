@@ -31,31 +31,31 @@
 		<true/>
 	</dict>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>Milgrain uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
+	<string>Adam uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Milgrain uses Bluetooth to discover and connect to nearby devices when you choose Bluetooth features.</string>
+	<string>Adam uses Bluetooth to discover and connect to nearby devices when you choose Bluetooth features.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Milgrain uses Bluetooth to communicate with nearby peripherals when you choose Bluetooth features.</string>
+	<string>Adam uses Bluetooth to communicate with nearby peripherals when you choose Bluetooth features.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Milgrain uses Calendar to create native events when you ask.</string>
+	<string>Adam uses Calendar to create native events when you ask.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>Milgrain uses Calendar to create native events when you ask.</string>
+	<string>Adam uses Calendar to create native events when you ask.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>Milgrain uses contacts to prepare native message and FaceTime handoffs.</string>
+	<string>Adam uses contacts to prepare native message and FaceTime handoffs.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID protects the credentials you save to the Vault.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Milgrain reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
+	<string>Adam reads heart rate, sleep, and steps to answer your requests and run health watches you create.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Milgrain uses background location for useful reminders such as arriving near home.</string>
+	<string>Adam uses background location for useful reminders such as arriving near home.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Milgrain uses your location to help with ride booking, directions, and local recommendations.</string>
+	<string>Adam uses your location to help with ride booking, directions, and local recommendations.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Milgrain uses the microphone for voice input so you can talk instead of typing.</string>
+	<string>Adam uses the microphone for voice input so you can talk instead of typing.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Milgrain lets you attach photos and images for multimodal chat when you choose them.</string>
+	<string>Adam lets you attach photos and images for multimodal chat when you choose them.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Milgrain uses reminders to help create native Apple Reminders when you ask.</string>
+	<string>Adam uses reminders to help create native Apple Reminders when you ask.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>
@@ -66,6 +66,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>location</string>
 	</array>
 </dict>
 </plist>

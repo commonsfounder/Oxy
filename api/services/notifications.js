@@ -1,13 +1,13 @@
 'use strict';
 
-// Getting what Millie notices to the user without them opening the app. Three rules:
+// Getting what Adam notices to the user without them opening the app. Three rules:
 //   - "Delivered" means a provider accepted it; a queue is not delivery, and an unconfigured
 //     channel fails loudly rather than reporting success.
 //   - One real-world event is one notification, and the digest is one message, not one per item.
 //   - Quiet hours defer rather than drop, except for urgency grounded in facts (overdue,
 //     starting soon, a threshold crossed) rather than the model finding something important.
 
-const CATEGORIES = ['watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'other'];
+const CATEGORIES = ['watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'action_required', 'other'];
 const URGENCIES = ['urgent', 'normal', 'low'];
 const CHANNELS = ['push', 'email', 'telegram', 'in_app'];
 const MAX_ATTEMPTS = 3;

@@ -156,7 +156,7 @@ const agentWorkspace = require('./services/agent-workspace');
 const agentRuntime = require('./services/agent-runtime');
 const agentApprovals = require('./services/agent-approval-runtime');
 const agentProjectRuntime = require('./services/agent-project-runtime');
-const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-briefing');
+const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
 const dailyDigest = require('./services/daily-digest');
 const people = require('./services/people');
 const receipts = require('./services/receipts');
@@ -165,6 +165,7 @@ const travelSearch = require('./services/travel-search');
 const travelInventory = require('./services/travel-inventory');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
+const { raiseRecentActionFollowUp, recoverySnapshot } = require('./services/action-follow-up');
 const commitments = require('./services/commitments');
 const scheduling = require('./services/scheduling');
 const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
@@ -997,7 +998,7 @@ if ([PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL].some(m => m.includes(
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
 const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
-const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
+const PROACTIVE_BRIEFING_SIGNATURE_PREF = 'proactive.briefing.last_snapshot';
 const DEVICE_PLATFORM_ALLOWLIST = new Set(['ios', 'web']);
 
 setTimeout(() => {
@@ -1115,15 +1116,16 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
   return data;
 }
 
-// Refreshes an existing briefing row's email/delivery data in place, outside the
-// once-per-day narrative throttle. Silent: no chat message, no push.
-async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
+// Refreshes the latest general briefing's evidence in place. Silent: no chat message, no push.
+// Home can therefore stay current without one email card and one calendar card each owning
+// their own proactive lifecycle.
+async function refreshBriefingSourceData(userId, todayKey, snapshot) {
   try {
     const { data, error } = await supabase
       .from('briefings')
       .select('id, metadata')
       .eq('user_id', userId)
-      .eq('kind', kind)
+      .in('kind', PROACTIVE_WINDOWS.map(window => `${window.id}_briefing`))
       .contains('metadata', { date: todayKey })
       .order('created_at', { ascending: false })
       .limit(1);
@@ -1131,7 +1133,16 @@ async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
     const [row] = data;
     await supabase
       .from('briefings')
-      .update({ metadata: { ...row.metadata, emails: emailContext.emails, incoming: emailContext.incoming } })
+      .update({
+        metadata: {
+          ...row.metadata,
+          emails: snapshot.emailContext.emails,
+          incoming: snapshot.emailContext.incoming,
+          attention: snapshot.digest.items,
+          coverage: snapshot.digest.coverage,
+          generatedAt: snapshot.digest.generatedAt
+        }
+      })
       .eq('id', row.id);
   } catch {}
 }
@@ -1380,7 +1391,8 @@ function serializeLoggedAction(action, result) {
     input: action?.input || {},
     status: result?.success ? 'executed' : 'failed',
     resultText: typeof result?.text === 'string' ? result.text.slice(0, 280) : '',
-    error: result?.success ? null : (result?.error || null)
+    error: result?.success ? null : (result?.error || null),
+    recovery: recoverySnapshot(result)
   });
 }
 
@@ -3167,6 +3179,62 @@ const notificationDelivery = createDeliveryRuntime({
     return count || 0;
   }
 });
+
+async function evaluateAndSurfaceContextWatches(userId, nativeContext, now = new Date(), logger = console) {
+  const result = await scheduledTasks.evaluateContextWatches(userId, nativeContext, now);
+  if (!result.success) {
+    logger.warn?.(`[context-watch] evaluation failed for ${userId}: ${result.error}`);
+    return { raised: 0, error: result.error };
+  }
+
+  let raised = 0;
+  let locationRaised = 0;
+  let healthRaised = 0;
+  for (const { task, verdict } of result.events) {
+    const transition = verdict.state?.context?.transitionCount || 0;
+    const blocked = verdict.kind === 'blocked';
+    const contextEvent = verdict.state?.context?.event || null;
+    const contextMetric = verdict.state?.context?.metric || null;
+    const instruction = String(task.instruction || task.title || '').trim();
+    const observation = verdict.state?.lastObserved;
+    const measured = contextMetric && Number.isFinite(Number(observation?.value))
+      ? ` Measured ${Number(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}.`
+      : '';
+    const body = blocked
+      ? `“${task.title}” is waiting: ${verdict.reason}.`
+      : `${instruction}${measured}`;
+    const observed = contextEvent || contextMetric || 'context';
+    const queued = await notificationDelivery.raise(userId, {
+      category: 'watch',
+      urgency: notifications.gradeUrgency({ category: 'watch', thresholdCrossed: Boolean(contextMetric && !blocked) }),
+      title: task.title,
+      body,
+      dedupeKey: notifications.dedupeKeyFor({
+        category: 'watch',
+        scheduledTaskId: task.id,
+        state: blocked ? `blocked:${verdict.reason}` : `${observed}:${transition}`
+      }),
+      sourceRef: {
+        scheduledTaskId: task.id,
+        ...(contextEvent ? { contextEvent } : {}),
+        ...(contextMetric ? { contextMetric } : {}),
+        status: blocked ? 'blocked' : 'triggered'
+      }
+    });
+    if (queued?.ok) {
+      raised += 1;
+      if (contextMetric) healthRaised += 1;
+      else locationRaised += 1;
+    }
+  }
+
+  if (raised) {
+    await notificationDelivery.deliverPending(userId).catch(error => {
+      logger.warn?.(`[context-watch] delivery failed for ${userId}: ${error.message}`);
+    });
+  }
+  return { raised, locationRaised, healthRaised, evaluated: result.evaluated };
+}
 
 // The reply is already recorded; this raises it on the user's configured notification route.
 // It never replies or advances the external conversation itself.
@@ -5223,16 +5291,19 @@ app.post('/native/context', async (req, res) => {
   try {
     const { userId, location = null, health = {}, capabilities = {}, settings = {} } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
-    const { error } = await supabase.from('native_context').upsert({
+    const updatedAt = new Date().toISOString();
+    const nativeContext = {
       user_id: userId,
       location,
       health,
       capabilities,
       settings,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id' });
+      updated_at: updatedAt
+    };
+    const { error } = await supabase.from('native_context').upsert(nativeContext, { onConflict: 'user_id' });
     if (error) throw error;
     invalidateUserContextCache(userId);
+    await evaluateAndSurfaceContextWatches(userId, nativeContext, new Date(updatedAt));
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5276,7 +5347,7 @@ app.get('/briefings/:userId', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    // Return most things; client-side filters handle noise. Agent tasks/recipes now included via proactive unification.
+    // Return the durable briefing feed; the client applies its presentation filters.
     const visible = (data || []).filter(briefing => !briefing.kind?.includes('failed_action_followup'));
     res.json({ briefings: visible });
   } catch (err) {
@@ -5930,7 +6001,7 @@ async function gatherCalendarContext(userId) {
   }
 }
 
-async function loadLifeBriefing(userId, now = new Date()) {
+async function gatherLifeBriefingSnapshot(userId, now = new Date()) {
   const [tasks, emailContext, events, pending, legacyPending, scheduled] = await Promise.all([
     delegatedRunLifecycle.list(userId, null).catch(() => []),
     gatherEmailContext(userId),
@@ -5951,7 +6022,7 @@ async function loadLifeBriefing(userId, now = new Date()) {
     }) === index;
   });
 
-  return buildLifeBriefing({
+  const briefing = buildLifeBriefing({
     tasks: tasks.map(safeAgentTaskSummary),
     approvals,
     emails: emailContext?.emails || [],
@@ -5959,41 +6030,26 @@ async function loadLifeBriefing(userId, now = new Date()) {
     scheduledTasks: scheduled?.tasks || [],
     now
   });
+  return { briefing, emailContext, events };
 }
 
-async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
-  const [memory, history, preferences] = await Promise.all([
-    getMemory(userId, null, ''),
-    getHistory(userId),
-    getPreferences(userId)
+async function loadLifeBriefing(userId, now = new Date()) {
+  return (await gatherLifeBriefingSnapshot(userId, now)).briefing;
+}
+
+// One proactive evidence gatherer. The conversational daily_digest already composes every
+// source that can put something on today's plate (replies, promises, reminders, approvals,
+// calendar, occasions and real watch transitions), so proactive delivery must use that same
+// ranked result rather than grow parallel email/calendar/task schedulers of its own.
+async function gatherProactiveBriefingSnapshot(userId) {
+  const [digest, emailContext] = await Promise.all([
+    executeAction(userId, 'daily_digest', {}),
+    // Raw, bounded email metadata remains attached to the briefing row for the existing Home
+    // inbox/incoming cards. It does not decide whether an interruption is warranted.
+    gatherEmailContext(userId)
   ]);
-
-  const health = parseJsonObject(nativeContext?.health);
-  const location = parseJsonObject(nativeContext?.location);
-  const nativeContextText = `Native context:
-Location: ${location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : 'not available'}
-Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}`;
-  const systemPrompt = buildSystemPrompt({
-    surface: 'briefing',
-    context: {
-      memory,
-      preferences,
-      historyText: history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none',
-      nativeContextText,
-      windowLabel: window.label,
-      maxWords: 70,
-      dateStr: getLocalDateKey(now),
-      timeStr: now.toLocaleString('en-GB', { timeZone: TIMEZONE })
-    }
-  });
-
-  const windowRes = await generateBrain({
-    model: PRIMARY_CHAT_MODEL,
-    contents: [{ role: 'user', parts: [{ text: `${window.label} now` }] }],
-    config: { systemInstruction: systemPrompt }
-  });
-  const text = stripActionMarkupForDisplay(windowRes.text || '').trim();
-  return stripMarkdownFormatting(text);
+  if (!digest?.success) throw new Error(digest?.error || 'Could not build the daily briefing.');
+  return { digest, emailContext };
 }
 
 async function maybeCreateIntervalBriefing(userId, now = new Date()) {
@@ -6008,249 +6064,75 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const todayKey = getLocalDateKey(now);
   const key = `proactive.briefing.${window.id}.${todayKey}`;
   const prefs = await getPreferenceMap(userId);
+  const snapshot = await gatherProactiveBriefingSnapshot(userId);
   if (prefs[key] === 'sent') {
-    // The narrative already fired today, but the cards shouldn't go stale until tomorrow.
-    // Refreshes the existing row's raw data in place: no new narrative, message or push.
-    const emailContext = await gatherEmailContext(userId);
-    await refreshBriefingEmailData(userId, `${window.id}_briefing`, todayKey, emailContext);
+    await refreshBriefingSourceData(userId, todayKey, snapshot);
     return null;
   }
 
-  const [text, emailContext] = await Promise.all([
-    buildIntervalBriefing(userId, window, nativeContext, now),
-    gatherEmailContext(userId)
-  ]);
-  if (!text) return null;
+  // No invented "quiet start" and no source-specific poke. A proactive briefing exists only
+  // when the general evidence-ranked household digest has something real to say.
+  const shaped = dailyDigest.formatDigestNotification(snapshot.digest);
+  if (!shaped) {
+    await setPreferenceValue(userId, key, 'sent');
+    return null;
+  }
+
+  const signature = lifeBriefingSignature(snapshot.digest, todayKey);
+  if (prefs[PROACTIVE_BRIEFING_SIGNATURE_PREF] === signature) {
+    await refreshBriefingSourceData(userId, todayKey, snapshot);
+    await setPreferenceValue(userId, key, 'sent');
+    return null;
+  }
+
   const briefing = await createBriefing(userId, {
     kind: `${window.id}_briefing`,
-    title: window.label,
-    body: text,
+    title: shaped.title,
+    body: shaped.body,
     source: 'schedule',
     metadata: {
       window: window.id,
       date: todayKey,
-      narrative: text,
-      emails: emailContext.emails,
-      incoming: emailContext.incoming
-    }
+      signature,
+      emails: snapshot.emailContext.emails,
+      incoming: snapshot.emailContext.incoming,
+      attention: snapshot.digest.items,
+      coverage: snapshot.digest.coverage,
+      generatedAt: snapshot.digest.generatedAt
+    },
+    // Delivery preferences and quiet hours are enforced by notificationDelivery below.
+    push: false
+  });
+  const covers = dailyDigest.digestCovers(snapshot.digest);
+  await notificationDelivery.raise(userId, {
+    category: 'digest',
+    urgency: notifications.gradeUrgency({ category: 'digest' }),
+    title: shaped.title,
+    body: shaped.body,
+    dedupeKey: notifications.dedupeKeyFor({ category: 'digest', dateKey: todayKey, state: signature }),
+    sourceRef: { briefingId: briefing.id, covers }
   });
   await setPreferenceValue(userId, key, 'sent');
+  await setPreferenceValue(userId, PROACTIVE_BRIEFING_SIGNATURE_PREF, signature);
   return { type: `${window.id}_briefing`, text: briefing.body };
 }
 
-async function maybeCreateHealthAlert(userId, nativeContext, now = new Date()) {
-  const health = parseJsonObject(nativeContext?.health);
-  const settings = parseJsonObject(nativeContext?.settings);
-  if (!settings.healthAlerts) return null;
-  const latest = Number(health.latestHeartRate);
-  const resting = Number(health.restingHeartRate);
-  const lowValue = [latest, resting].filter(Number.isFinite).find(value => value > 0 && value < 45);
-  if (!lowValue) return null;
-
-  const todayKey = getLocalDateKey(now);
-  const key = `proactive.health.low_hr.${todayKey}`;
-  const prefs = await getPreferenceMap(userId);
-  if (prefs[key] === 'sent') return null;
-
-  const body = `Your heart rate data looks unusually low at ${Math.round(lowValue)} bpm. If that does not feel normal for you, check in with how you're feeling.`;
-  const briefing = await createBriefing(userId, {
-    kind: 'health_alert',
-    title: 'Health check',
-    body,
-    source: 'healthkit',
-    metadata: { heartRate: lowValue }
-  });
-  await setPreferenceValue(userId, key, 'sent');
-  return { type: 'health_alert', text: briefing.body };
-}
-
-async function maybeCreateHomeFoodReminder(userId, nativeContext, now = new Date()) {
-  const settings = parseJsonObject(nativeContext?.settings);
-  if (!settings.locationReminders) return null;
-  if (!['Active', 'Bold', 'High'].includes(settings.autonomy)) return null;
-  const hour = getLocalHour(now);
-  if (hour < 17 || hour > 21) return null;
-
-  const location = parseJsonObject(nativeContext?.location);
-  const home = parseJsonObject(settings.homeLocation);
-  const lat = Number(location.latitude);
-  const lng = Number(location.longitude);
-  const homeLat = Number(home.latitude);
-  const homeLng = Number(home.longitude);
-  if (![lat, lng, homeLat, homeLng].every(Number.isFinite)) return null;
-
-  const metres = haversineMetres(lat, lng, homeLat, homeLng);
-  if (metres > 600) return null;
-
-  const todayKey = getLocalDateKey(now);
-  const key = `proactive.food.near_home.${todayKey}`;
-  const prefs = await getPreferenceMap(userId);
-  if (prefs[key] === 'sent') return null;
-
-  const body = "You're close to home. If you haven't eaten yet, this is a good moment to sort food before you fully land.";
-  const briefing = await createBriefing(userId, {
-    kind: 'location_food_reminder',
-    title: 'Food reminder',
-    body,
-    source: 'location',
-    metadata: { distanceMetres: Math.round(metres) }
-  });
-  await setPreferenceValue(userId, key, 'sent');
-  return { type: 'location_food_reminder', text: briefing.body };
-}
-
-function haversineMetres(lat1, lon1, lat2, lon2) {
-  const radius = 6371000;
-  const toRad = degrees => degrees * Math.PI / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * radius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
-  const prefs = await getPreferenceMap(userId);
-  const { data: failedAction } = await supabase
+  const { data: failedActions, error } = await supabase
     .from('action_log')
-    .select('id, action, error, created_at')
+    .select('id, action, status, error, created_at')
     .eq('user_id', userId)
     .eq('status', 'failed')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
+  if (error) throw error;
 
-  if (!failedAction?.id) return null;
-  if (prefs[PROACTIVE_FAILURE_PREF] === failedAction.id) return null;
-
-  const failedAt = new Date(failedAction.created_at).getTime();
-  if (Number.isNaN(failedAt) || (now.getTime() - failedAt) > 90 * 60 * 1000) {
-    return null;
-  }
-
-  const actionType = failedAction.action?.type || failedAction.action?.action?.type || failedAction.action?.action || failedAction.action?.type || 'that';
-  if (['find_place', 'get_directions', 'plan_trip', 'play_music', 'music_control', 'add_to_music_playlist'].includes(actionType)) {
-    return null;
-  }
-  const actionLabel = humanizeActionType(actionType);
-  const detail = String(failedAction.error || '').trim();
-  if (!/(not connected|reconnect|permission|authorized|authenticate|expired|revoked)/i.test(detail)) {
-    return null;
-  }
-  const cleanDetail = detail
-    .replace(/^\.unknown$/i, '')
-    .replace(/^Maps error:\s*/i, '')
-    .replace(/^Google error:\s*/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const followUpText = cleanDetail
-    ? `${actionLabel} needs attention: ${cleanDetail.slice(0, 100)}.`
-    : `${actionLabel} needs attention before I can finish it.`;
-
-  await createBriefing(userId, {
-    kind: 'failed_action_followup',
-    title: 'Action follow-up',
-    body: followUpText,
-    source: 'action_log',
-    metadata: { actionLogId: failedAction.id, actionType }
+  return raiseRecentActionFollowUp({
+    userId,
+    failures: failedActions || [],
+    now,
+    raise: notificationDelivery.raise
   });
-  await setPreferenceValue(userId, PROACTIVE_FAILURE_PREF, failedAction.id);
-  return { type: 'failed_action_followup', text: followUpText };
-}
-
-// Poke-like: scan recent emails for actionable items and nudge
-async function maybeCreateEmailNudges(userId, now = new Date()) {
-  try {
-    const prefs = await getPreferenceMap(userId);
-    const todayKey = getLocalDateKey(now);
-    const key = `proactive.email.nudges.${todayKey}`;
-
-    const nativeContext = await getLatestNativeContext(userId);
-    const settings = parseJsonObject(nativeContext?.settings);
-    if (['Quiet', 'Low'].includes(settings.autonomy)) return null;
-
-    if (prefs[key] === 'sent') {
-      // Same self-healing as maybeCreateIntervalBriefing — keep the row's emails/incoming
-      // current even though today's nudge text already fired, so a card that was wrong
-      // when it was written (or has since become stale) doesn't sit there all day.
-      const emailContext = await gatherEmailContext(userId);
-      await refreshBriefingEmailData(userId, 'email_nudge', todayKey, emailContext);
-      return null;
-    }
-
-    const emailContext = await gatherEmailContext(userId);
-    if (!emailContext.emails.length) return null;
-
-    const emailSummary = emailContext.emails.slice(0, 5).map(e => {
-      return `From: ${e.from || 'unknown'} | Subject: ${e.subject || '(no subject)'} | Snippet: ${(e.snippet || e.body || '').slice(0, 150)}`;
-    }).join('\n');
-
-    // Use fast model to find actionables
-    const prompt = `Analyze these recent emails for actionable items that need the user's attention today (replies, decisions, deadlines, meetings to confirm). List 0-3 short nudges max. Be concise. If nothing urgent, say "no urgent actions".\n\n${emailSummary}`;
-
-    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
-    const text = (res.text || '').trim();
-    if (!text || /no urgent|nothing|none/i.test(text)) {
-      await setPreferenceValue(userId, key, 'sent');
-      return null;
-    }
-
-    const briefing = await createBriefing(userId, {
-      kind: 'email_nudge',
-      title: 'Email actions',
-      body: text,
-      source: 'email',
-      metadata: { date: todayKey, count: 1, emails: emailContext.emails, incoming: emailContext.incoming }
-    });
-    await setPreferenceValue(userId, key, 'sent');
-    return { type: 'email_nudge', text: briefing.body, count: 1 };
-  } catch (e) {
-    return null;
-  }
-}
-
-// Calendar nudges for upcoming events / conflicts
-async function maybeCreateCalendarNudges(userId, now = new Date()) {
-  try {
-    const prefs = await getPreferenceMap(userId);
-    const todayKey = getLocalDateKey(now);
-    const key = `proactive.calendar.nudges.${todayKey}`;
-    if (prefs[key] === 'sent') return null;
-
-    const nativeContext = await getLatestNativeContext(userId);
-    const settings = parseJsonObject(nativeContext?.settings);
-    if (['Quiet', 'Low'].includes(settings.autonomy)) return null;
-
-    const enabled = await getEnabledConnectors(userId);
-    if (!enabled.includes('google')) return null;
-
-    const calResult = await dispatch(userId, 'get_calendar_events', { max_results: 8 });
-    if (!calResult?.success || !Array.isArray(calResult.events) || calResult.events.length === 0) return null;
-
-    const upcoming = calResult.events.filter(ev => {
-      const start = ev.start?.dateTime || ev.start?.date;
-      if (!start) return false;
-      const d = new Date(start);
-      return d > now && (d.getTime() - now.getTime()) < 1000 * 60 * 60 * 6; // next 6 hours
-    });
-
-    if (upcoming.length === 0) return null;
-
-    const summary = upcoming.map(ev => `${ev.summary || 'Event'} at ${ev.start?.dateTime || ev.start?.date}`).join('; ');
-    const body = `Upcoming: ${summary}. Anything you need to prep?`;
-
-    const briefing = await createBriefing(userId, {
-      kind: 'calendar_nudge',
-      title: 'Calendar check',
-      body,
-      source: 'calendar',
-      metadata: { date: todayKey, count: upcoming.length }
-    });
-    await setPreferenceValue(userId, key, 'sent');
-    return { type: 'calendar_nudge', text: briefing.body, count: upcoming.length };
-  } catch (e) {
-    return null;
-  }
 }
 
 function emptyProactiveSummary() {
@@ -6271,101 +6153,21 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   summary.usersScanned = 1;
   try {
     const nativeContext = await getLatestNativeContext(userId);
-    const [briefing, followUp, healthAlert, foodReminder, emailNudges, calendarNudges] = await Promise.all([
+    const [briefing, followUp, contextWatchResult] = await Promise.all([
       maybeCreateIntervalBriefing(userId, now),
       maybeCreateFailedActionFollowUp(userId, now),
-      nativeContext ? maybeCreateHealthAlert(userId, nativeContext, now) : Promise.resolve(null),
-      nativeContext ? maybeCreateHomeFoodReminder(userId, nativeContext, now) : Promise.resolve(null),
-      maybeCreateEmailNudges(userId, now),
-      maybeCreateCalendarNudges(userId, now)
+      evaluateAndSurfaceContextWatches(userId, nativeContext || {}, now, logger)
     ]);
     if (briefing) summary.briefings += 1;
     if (followUp) summary.failureFollowUps += 1;
-    if (healthAlert) summary.healthAlerts += 1;
-    if (foodReminder) summary.locationReminders += 1;
-    if (emailNudges) summary.briefings += emailNudges.count || 0;
-    if (calendarNudges) summary.briefings += calendarNudges.count || 0;
-
-    // Raised once per local day (the date is in the dedupe key), so re-running the sweep
-    // re-words it rather than re-sending. Declares what it covers so other alerts fold in.
-    try {
-      const digest = await executeAction(userId, 'daily_digest', {});
-      const shaped = digest?.success ? dailyDigest.formatDigestNotification(digest) : null;
-      if (shaped) {
-        await notificationDelivery.raise(userId, {
-          category: 'digest',
-          urgency: notifications.gradeUrgency({ category: 'digest' }),
-          title: shaped.title,
-          body: shaped.body,
-          dedupeKey: notifications.dedupeKeyFor({ category: 'digest', dateKey: getLocalDateKey(now) }),
-          sourceRef: { covers: dailyDigest.digestCovers(digest), digestDate: getLocalDateKey(now) }
-        });
-        summary.digestsRaised = (summary.digestsRaised || 0) + 1;
-      }
-    } catch (error) {
-      logger.warn?.(`[digest] could not raise the daily digest for ${userId}: ${error.message}`);
-    }
-
-    // For money-making persistent tasks, proactively advance or report using account
-    try {
-      const tasks = await delegatedRunLifecycle.list(userId, null);
-      const moneyTasks = tasks.filter(t => t.status !== 'completed' && /money|earn|income|monetize|profit|side hustle/i.test(t.goal || ''));
-      for (const t of moneyTasks.slice(0, 2)) {
-        const dedupKey = `proactive.money_task.${t.id}.${getLocalDateKey(now)}`;
-        const prefs = await getPreferenceMap(userId);
-        if (prefs[dedupKey] === 'sent') continue;
-        const body = `Money task "${t.goal}" active. No real payment balance is connected. Progress: ${t.results ? t.results.length : 0} steps. Say "update money plan" to advance.`;
-        await createBriefing(userId, {
-          kind: 'money_task_update',
-          title: 'Money-making update',
-          body,
-          source: 'agent',
-          metadata: { taskId: t.id }
-        });
-        await setPreferenceValue(userId, dedupKey, 'sent');
-        summary.briefings += 1;
-      }
-    } catch (e) {}
-
-    // Unify task logic: surface relevant agent_tasks (including recipes) as briefings for Today tab
-    // This ensures persistent goals, recipes, and agent work appear alongside nudges
-    try {
-      const tasks = await delegatedRunLifecycle.list(userId, null);
-      const todayTasks = tasks.filter(t => {
-        if (t.status === 'completed' || t.status === 'cancelled') return false;
-        if (t.status === 'recipe') return true; // always surface recipes
-        // pending/running tasks that are recent or high autonomy
-        const created = t.created_at ? new Date(t.created_at) : new Date(0);
-        const isRecent = (now.getTime() - created.getTime()) < 1000 * 60 * 60 * 24 * 2; // last 2 days
-        const highAutonomy = ['High', 'Bold', 'Active'].includes(t.autonomy);
-        return isRecent || highAutonomy;
-      });
-      for (const t of todayTasks.slice(0, 3)) { // limit to avoid spam
-        const isRecipe = t.status === 'recipe';
-        const kind = isRecipe ? 'recipe' : 'agent_task';
-        const title = isRecipe ? `Recipe: ${t.goal}` : `Active goal: ${t.goal}`;
-        const body = isRecipe 
-          ? `Your saved automation "${t.goal}" is ready. Say the name to run it.`
-          : `Working on: ${t.goal}. ${t.current_step ? `Step ${t.current_step}.` : ''} Results so far: ${Array.isArray(t.results) ? t.results.length : 0}`;
-        // Use a dedup key per task per day
-        const taskDedupKey = `proactive.${kind}.${t.id}.${getLocalDateKey(now)}`;
-        const prefs = await getPreferenceMap(userId);
-        if (prefs[taskDedupKey] === 'sent') continue;
-        await createBriefing(userId, {
-          kind,
-          title,
-          body,
-          source: 'agent',
-          metadata: { taskId: t.id, status: t.status, autonomy: t.autonomy }
-        });
-        await setPreferenceValue(userId, taskDedupKey, 'sent');
-        summary.briefings += 1;
-      }
-    } catch (taskErr) {
-      logger.warn(`[proactive] task surfacing failed for ${userId}: ${taskErr.message}`);
-    }
-
-    const created = [briefing?.type, followUp?.type, healthAlert?.type, foodReminder?.type, emailNudges?.type, calendarNudges?.type].filter(Boolean);
+    summary.healthAlerts += contextWatchResult?.healthRaised || 0;
+    summary.locationReminders += contextWatchResult?.locationRaised || 0;
+    const created = [
+      briefing?.type,
+      followUp?.type,
+      contextWatchResult?.locationRaised ? 'context_reminder' : null,
+      contextWatchResult?.healthRaised ? 'health_watch' : null
+    ].filter(Boolean);
     if (created.length) logger.log(`[proactive] queued for ${userId}: ${created.join(', ')}`);
   } catch (sweepError) {
     summary.failures += 1;

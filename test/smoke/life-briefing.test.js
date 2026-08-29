@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildLifeBriefing,
-  formatLifeBriefing
+  formatLifeBriefing,
+  lifeBriefingSignature
 } = require('../../api/services/life-briefing');
 
 const now = new Date('2026-08-05T09:00:00.000Z');
@@ -200,4 +201,31 @@ test('keeps an active background watch visible when there is room', () => {
   assert.equal(briefing.items[0].kind, 'watch');
   assert.match(briefing.items[0].detail, /Until the price drops/);
   assert.equal(briefing.coverage.watches, true);
+});
+
+test('briefing signatures identify the evidence state, not a delivery attempt', () => {
+  const briefing = buildLifeBriefing({
+    now,
+    events: [{ id: 'dentist', summary: 'Dentist', start: '2026-08-05T10:00:00.000Z' }]
+  });
+  const sameFacts = JSON.parse(JSON.stringify(briefing));
+  assert.equal(
+    lifeBriefingSignature(briefing, '2026-08-05'),
+    lifeBriefingSignature(sameFacts, '2026-08-05')
+  );
+
+  sameFacts.items[0].detail = 'In 15 minutes';
+  assert.equal(
+    lifeBriefingSignature(briefing, '2026-08-05'),
+    lifeBriefingSignature(sameFacts, '2026-08-05')
+  );
+  sameFacts.items[0].urgency = 'soon';
+  assert.notEqual(
+    lifeBriefingSignature(briefing, '2026-08-05'),
+    lifeBriefingSignature(sameFacts, '2026-08-05')
+  );
+  assert.notEqual(
+    lifeBriefingSignature(briefing, '2026-08-05'),
+    lifeBriefingSignature(briefing, '2026-08-06')
+  );
 });

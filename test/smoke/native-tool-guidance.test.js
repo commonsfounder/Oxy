@@ -441,6 +441,7 @@ test('notifications: an explicit channel preference is exclusive unless a fallba
   assert.match(desc, /it does NOT silently fall back to whatever else happens to be configured/);
   assert.match(desc, /"Telegram only" actually means only Telegram/);
   assert.match(desc, /Never set both category and urgency in the same call/);
+  assert.match(desc, /action_required/, 'recovery needs can be routed without pretending they are generic alerts');
 });
 
 test('commitments: capture is steered conservative, and deadlines are never invented', () => {
