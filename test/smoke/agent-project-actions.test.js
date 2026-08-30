@@ -25,6 +25,10 @@ test('project actions are declared, local, and route through the isolated adapte
   }
   assert.deepEqual(byName.project_write.parameters.required, ['project_ref', 'path', 'content']);
   assert.deepEqual(byName.project_commit.parameters.required, ['project_ref', 'message']);
+  for (const name of ['project_status', 'project_diff', 'project_check']) {
+    assert.deepEqual(byName[name].parameters.required, [], `${name} must use configured task context`);
+    assert.ok(byName[name].parameters.properties.project_ref, `${name} may still accept an explicit project reference`);
+  }
   assert.equal(ACTION_CONTRACTS.project_rollback.executionMode, 'review');
   assert.equal(ACTION_CONTRACTS.project_sync.executionMode, 'review');
 
@@ -58,11 +62,11 @@ test('project actions are declared, local, and route through the isolated adapte
     return { projectRef: 'adam', projectName: 'Adam', branch: 'oxy/task-123', published: true, text: 'Synchronized.' };
   };
 
-  const context = { persistedTaskId: 'task-123' };
-  assert.equal((await executeAction('user-1', 'project_status', { project_ref: 'adam' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_diff', { project_ref: 'adam' }, context)).success, true);
+  const context = { persistedTaskId: 'task-123', projectRef: 'adam' };
+  assert.equal((await executeAction('user-1', 'project_status', {}, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_diff', {}, context)).success, true);
   assert.equal((await executeAction('user-1', 'project_write', { project_ref: 'adam', path: 'README.md', content: '# update' }, context)).success, true);
-  assert.equal((await executeAction('user-1', 'project_check', { project_ref: 'adam', check: 'test' }, context)).success, true);
+  assert.equal((await executeAction('user-1', 'project_check', { check: 'test' }, context)).success, true);
   assert.equal((await executeAction('user-1', 'project_commit', { project_ref: 'adam', message: 'Save work' }, context)).success, true);
   assert.equal((await executeAction('user-1', 'project_rollback', { project_ref: 'adam' }, { ...context, bypassReview: true })).success, true);
   assert.equal((await executeAction('user-1', 'project_sync', { project_ref: 'adam' }, { ...context, bypassReview: true })).success, true);

@@ -933,7 +933,8 @@ const ACTION_CONTRACTS = {
   project_status: {
     adapter: { kind: 'inline' },
     risk: 'low',
-    required: ['project_ref'],
+    required: [],
+    optional: ['project_ref'],
     inputExample: { project_ref: 'adam' },
     guidance: 'Inspect the configured isolated project for the current durable task. Use before editing or reporting project progress.',
     successSummary: 'Project status loaded',
@@ -944,7 +945,8 @@ const ACTION_CONTRACTS = {
   project_diff: {
     adapter: { kind: 'inline' },
     risk: 'low',
-    required: ['project_ref'],
+    required: [],
+    optional: ['project_ref'],
     inputExample: { project_ref: 'adam' },
     guidance: 'Inspect the current uncommitted diff in the isolated project. Never claim code changed without checking this.',
     successSummary: 'Project changes loaded',
@@ -966,8 +968,8 @@ const ACTION_CONTRACTS = {
   project_check: {
     adapter: { kind: 'inline' },
     risk: 'low',
-    required: ['project_ref'],
-    optional: ['check'],
+    required: [],
+    optional: ['project_ref', 'check'],
     inputExample: { project_ref: 'adam', check: 'test|release' },
     paramHints: { check: 'test|release' },
     guidance: 'Run only the configured project check in the isolated task project. Use check=test by default and report failures honestly.',
