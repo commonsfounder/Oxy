@@ -13,7 +13,7 @@ const TASKS = [
   // Household state and personal admin.
   { id: 'daily-brief', group: 'household-read', mode: 'safe', expectedAction: 'daily_digest', message: 'Give me a short briefing of what I need to deal with today.' },
   { id: 'calendar-tomorrow', group: 'household-read', mode: 'safe', expectedAction: 'get_calendar_events', message: 'What is on my calendar tomorrow?' },
-  { id: 'urgent-email', group: 'household-read', mode: 'safe', expectedAction: 'get_emails', message: 'Check my email for anything urgent today.' },
+  { id: 'urgent-email', group: 'household-read', mode: 'safe', expectedAction: 'daily_digest', message: 'Check my email for anything urgent today.' },
   { id: 'search-receipt', group: 'household-read', mode: 'safe', expectedAction: 'search_emails', message: 'Find the email with my Amazon receipt from last month.' },
   { id: 'reply-needed', group: 'household-read', mode: 'safe', expectedAction: 'find_reply_needed', message: 'Which messages do I still need to reply to?' },
   { id: 'occasions', group: 'household-read', mode: 'safe', expectedAction: 'find_occasions', message: 'Do I have any birthdays or occasions coming up?' },
@@ -60,7 +60,7 @@ const TASKS = [
   { id: 'amazon-search', group: 'public-read', mode: 'safe', expectedAction: 'search_amazon', message: 'Find noise-cancelling headphones on Amazon and show me the options.' },
   { id: 'place-search', group: 'public-read', mode: 'safe', expectedAction: 'find_place', message: 'Find a highly rated Italian restaurant near Birmingham city centre.' },
   { id: 'directions', group: 'public-read', mode: 'safe', expectedAction: 'get_directions', message: 'How do I get from Birmingham New Street to the Bullring?' },
-  { id: 'trip-route', group: 'public-read', mode: 'safe', expectedAction: 'plan_trip', message: 'Plan a route from Birmingham to Manchester by public transport.' },
+  { id: 'trip-route', group: 'public-read', mode: 'safe', expectedAction: 'get_directions', message: 'Plan a route from Birmingham to Manchester by public transport.' },
   { id: 'flight-search', group: 'public-read', mode: 'safe', expectedAction: 'search_flights', message: 'Find direct flights from Birmingham to Prague in September under £200.' },
   { id: 'hotel-search', group: 'public-read', mode: 'safe', expectedAction: 'search_hotels', message: 'Find a well-rated hotel in Bath for two nights under £140 per night.' },
   { id: 'itinerary', group: 'public-read', mode: 'safe', expectedAction: 'plan_itinerary', message: 'Plan a three-day trip to Edinburgh starting 1 October.' },
@@ -83,10 +83,11 @@ const TASKS = [
   { id: 'return-order', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Start a return for my latest online order and tell me what information you need.' },
   { id: 'track-parcel', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Check the courier website for my parcel and tell me its current status.' },
   { id: 'compare-products', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'answer', message: 'Compare the current prices of the Dyson V15 at Amazon and John Lewis.' },
+  { id: 'upload-tenancy-document', group: 'browser', mode: 'browser', expectedAction: 'browser_upload', boundary: 'answer', message: 'On the tenancy application already open, attach my stored proof-of-address document to the upload field.' },
 
   // Work, project, and artefact tasks.
   { id: 'web-search', group: 'work-read', mode: 'safe', expectedAction: 'web_search', message: 'Search the web for the latest UK student finance repayment thresholds.' },
-  { id: 'web-browse', group: 'work-read', mode: 'safe', expectedAction: 'web_browse', message: 'Open the official GOV.UK page for applying for a provisional driving licence.' },
+  { id: 'web-browse', group: 'work-read', mode: 'safe', expectedAction: 'web_browse', message: 'Open https://www.gov.uk/apply-first-provisional-driving-licence and tell me the first step.' },
   { id: 'calculate', group: 'work-read', mode: 'safe', expectedAction: 'calculate', message: 'Calculate 17.5% VAT on £840 and show the total.' },
   { id: 'notion-search', group: 'work-read', mode: 'safe', expectedAction: 'search_google_docs', message: 'Find my notes about the Oxy launch.' },
   { id: 'github-prs', group: 'work-read', mode: 'safe', expectedAction: 'get_github_prs', message: 'Show me the open pull requests on commonsfounder/Oxy.' },
@@ -114,36 +115,77 @@ const TASKS = [
   { id: 'oura', group: 'health-read', mode: 'safe', expectedAction: 'get_oura_readiness', message: 'How was my readiness score yesterday?' },
   { id: 'image-analysis', group: 'health-read', mode: 'safe', expectedAction: 'analyze_image', expectedAvailability: 'unavailable', message: 'Look at this image and tell me what is in it.' },
   { id: 'music', group: 'public-read', mode: 'safe', expectedAction: 'play_music', message: 'Play some calm instrumental music.' },
+  { id: 'play-trivia', group: 'play', mode: 'safe', expectedAction: 'play_game', message: 'Let\'s play a quick trivia game.' },
   { id: 'playlist', group: 'state', mode: 'state', expectedAction: 'add_to_music_playlist', message: 'Add a calm instrumental track to my evening playlist.' },
   { id: 'display-render', group: 'state', mode: 'state', expectedAction: 'render_to_display', message: 'Show the message "Dinner is ready" on my paired display.' },
 ];
 
+// Layer 1 is the general digital-agency substrate. It deliberately includes
+// connected-account, browser, durable-work and approval-boundary tasks; it does
+// not claim ambient household understanding or social/delight behaviour.
+const LAYER_TWO_TASK_IDS = new Set([
+  'daily-brief', 'urgent-email', 'reply-needed', 'occasions', 'commitments', 'responsibilities', 'paired-displays', 'spend-search', 'people-search',
+  'commitment', 'responsibility', 'occasion-save', 'remember-person', 'contextual-reminder', 'health-threshold-watch', 'resolve-commitment',
+  'smart-light', 'smart-temperature', 'strava', 'oura', 'image-analysis'
+]);
+const LAYER_THREE_TASK_IDS = new Set(['music', 'play-trivia', 'playlist', 'display-render']);
+const LAYER_ONE_GATE_TASK_IDS = Object.freeze([
+  'web-browse',
+  'search-receipt',
+  'email-landlord',
+  'order-john-lewis',
+  'signup-service',
+  'upload-tenancy-document',
+  'book-dentist-site',
+  'create-doc',
+  'scheduled-watch',
+  'create-agent-task',
+  'cancel-watch',
+  'stripe-charge'
+]);
+
+for (const task of TASKS) {
+  task.layer = LAYER_THREE_TASK_IDS.has(task.id) ? 3 : LAYER_TWO_TASK_IDS.has(task.id) ? 2 : 1;
+}
+
 const GROUPS = [...new Set(TASKS.map(task => task.group))];
 const MODES = [...new Set(TASKS.map(task => task.mode))];
+const LAYERS = [...new Set(TASKS.map(task => task.layer))].sort((a, b) => a - b);
+const LAYER_ONE_GAUNTLET_TASK_IDS = Object.freeze(
+  TASKS.filter(task => task.layer === 1 && task.expectedAvailability !== 'unavailable').map(task => task.id)
+);
 
-function selectTasks({ groups = [], modes = [], ids = [], limit = 0 } = {}) {
+function selectTasks({ groups = [], modes = [], ids = [], layers = [], gauntlet = null, limit = 0 } = {}) {
   const groupSet = new Set(groups.filter(Boolean));
   const modeSet = new Set(modes.filter(Boolean));
   const idSet = new Set(ids.filter(Boolean));
+  const layerSet = new Set(layers.map(Number).filter(layer => LAYERS.includes(layer)));
+  const gauntletSet = String(gauntlet || '').toLowerCase() === 'layer1'
+    ? new Set(LAYER_ONE_GAUNTLET_TASK_IDS)
+    : null;
   let selected = TASKS.filter(task =>
     (!groupSet.size || groupSet.has(task.group)) &&
     (!modeSet.size || modeSet.has(task.mode)) &&
-    (!idSet.size || idSet.has(task.id))
+    (!idSet.size || idSet.has(task.id)) &&
+    (!layerSet.size || layerSet.has(task.layer)) &&
+    (!gauntletSet || gauntletSet.has(task.id))
   );
   if (limit > 0) selected = selected.slice(0, limit);
   return selected;
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
-  const options = { groups: [], modes: [], ids: [], limit: 0 };
+  const options = { groups: [], modes: [], ids: [], layers: [], gauntlet: null, limit: 0 };
   for (const arg of argv) {
     const [key, value = ''] = arg.split('=', 2);
     if (key === '--group') options.groups.push(...value.split(',').filter(Boolean));
     if (key === '--mode') options.modes.push(...value.split(',').filter(Boolean));
     if (key === '--id') options.ids.push(...value.split(',').filter(Boolean));
+    if (key === '--layer') options.layers.push(...value.split(',').map(Number).filter(layer => LAYERS.includes(layer)));
+    if (key === '--gauntlet' && value === 'layer1') options.gauntlet = value;
     if (key === '--limit') options.limit = Number(value) || 0;
     if (arg === '--list') {
-      console.log(JSON.stringify({ groups: GROUPS, modes: MODES, tasks: TASKS }, null, 2));
+      console.log(JSON.stringify({ groups: GROUPS, modes: MODES, layers: LAYERS, gauntlets: ['layer1'], tasks: TASKS }, null, 2));
       process.exit(0);
     }
   }
@@ -165,6 +207,7 @@ function classify(task, reply) {
   const matching = receipts.filter(receipt => receipt.action === task.expectedAction);
   if (!matching.length) return { status: 'wrong_route', receipts };
   const result = matching[matching.length - 1];
+  const sourceUnavailable = result.outcome === 'unavailable' || /(?:could not check|couldn't check|cannot check).{0,120}\b(?:not connected|disconnected|unreachable|unavailable)\b|\b(?:google|gmail|calendar|outlook|telegram|slack)\s+is\s+disconnected\b/i.test(`${result.text} ${result.error}`);
   if (task.mode === 'approval') {
     if (result.outcome === 'awaiting_user' || /approval|confirm|review|permission/i.test(`${result.text} ${result.error}`)) return { status: 'approval_boundary', receipts };
     if (result.outcome === 'unavailable') return { status: 'setup_blocked', receipts };
@@ -173,10 +216,11 @@ function classify(task, reply) {
   }
   if (task.mode === 'browser') {
     if (/checkout|review|user-data/i.test(task.boundary || '') && /payment|checkout|login|sign.?up|email|address|password|account/i.test(`${result.text} ${result.error}`)) return { status: 'browser_boundary', receipts };
-    if (task.boundary === 'answer' && result.outcome === 'completed') return { status: 'completed', receipts };
+    if (task.boundary === 'answer' && (result.outcome === 'completed' || result.success === true)) return { status: 'completed', receipts };
     if (result.outcome === 'unavailable' || result.outcome === 'handoff_required' || result.outcome === 'reauth') return { status: 'setup_or_handoff', receipts };
     return { status: result.success === false ? 'failed' : 'browser_progress', receipts };
   }
+  if (sourceUnavailable) return { status: 'setup_blocked', receipts };
   if (result.outcome === 'completed' || result.success === true) return { status: 'completed', receipts };
   if (result.outcome === 'unavailable') return { status: 'setup_blocked', receipts };
   if (result.outcome === 'handoff_required') return { status: 'handoff_required', receipts };
@@ -211,7 +255,7 @@ async function runLive({ base, token, userId, tasks, verbose = true, delayMs = 0
     const classification = reply.error || reply.httpStatus
       ? { status: 'http_error', receipts: [], error: reply.error || `HTTP ${reply.httpStatus}` }
       : classify(task, reply);
-    const result = { id: task.id, group: task.group, mode: task.mode, expectedAction: task.expectedAction, message: task.message, ...classification };
+    const result = { id: task.id, group: task.group, mode: task.mode, layer: task.layer, expectedAction: task.expectedAction, message: task.message, ...classification };
     results.push(result);
     if (verbose) console.log(JSON.stringify(result));
   }
@@ -219,6 +263,7 @@ async function runLive({ base, token, userId, tasks, verbose = true, delayMs = 0
 }
 
 if (require.main === module) {
+  const options = parseArgs();
   const base = (process.env.OXY_MATRIX_API_URL || 'https://milgrain-live-2026.fly.dev').replace(/\/+$/, '');
   const token = process.env.OXY_MATRIX_SESSION_TOKEN;
   const userId = process.env.OXY_MATRIX_USER_ID;
@@ -227,11 +272,11 @@ if (require.main === module) {
     process.exit(1);
   }
   const delayMs = Number(process.env.OXY_MATRIX_DELAY_MS || 0);
-  const results = runLive({ base, token, userId, tasks: selectTasks(parseArgs()), delayMs });
+  const results = runLive({ base, token, userId, tasks: selectTasks(options), delayMs });
   results.then(rows => {
     const counts = rows.reduce((out, row) => { out[row.status] = (out[row.status] || 0) + 1; return out; }, {});
     console.log(JSON.stringify({ total: rows.length, counts }, null, 2));
   }).catch(error => { console.error(error.stack || error.message); process.exit(1); });
 }
 
-module.exports = { TASKS, GROUPS, MODES, selectTasks, actionReceipt, classify, runLive };
+module.exports = { TASKS, GROUPS, MODES, LAYERS, LAYER_ONE_GATE_TASK_IDS, LAYER_ONE_GAUNTLET_TASK_IDS, selectTasks, actionReceipt, classify, runLive };

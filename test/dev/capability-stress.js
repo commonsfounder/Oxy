@@ -13,10 +13,15 @@ const DEFAULT_RATE_PER_MIN = Number(process.env.OXY_STRESS_RATE_PER_MIN || 25);
 
 // Statuses where the runtime answered truthfully; a missing connector is an answer, not a failure.
 const HEALTHY = new Set(['completed', 'setup_blocked', 'handoff_required', 'approval_boundary', 'browser_boundary', 'setup_or_handoff']);
+const LAYER_ONE_GAUNTLET_PASSING = new Set(['completed', 'approval_boundary', 'browser_boundary']);
+
+function passesLayerOneGauntlet(result) {
+  return LAYER_ONE_GAUNTLET_PASSING.has(result?.status);
+}
 
 const USAGE = `capability-stress — run the read-only task corpus against a live deployment
 
-  node test/dev/capability-stress.js [--group=g] [--mode=m] [--id=a,b] [--limit=n]
+  node test/dev/capability-stress.js [--group=g] [--mode=m] [--id=a,b] [--layer=1,2,3] [--gauntlet=layer1] [--limit=n]
                                      [--concurrency=n] [--rate=perMinute] [--allow-writes]
 
   BASE_URL   deployment to hit (default ${BASE})
@@ -24,12 +29,14 @@ const USAGE = `capability-stress — run the read-only task corpus against a liv
   Read-only unless --allow-writes.`;
 
 function parseArgs(argv = process.argv.slice(2)) {
-  const options = { groups: [], modes: [], ids: [], limit: 0, concurrency: 4, allowWrites: false, ratePerMin: DEFAULT_RATE_PER_MIN };
+  const options = { groups: [], modes: [], ids: [], layers: [], gauntlet: null, limit: 0, concurrency: 4, allowWrites: false, ratePerMin: DEFAULT_RATE_PER_MIN };
   for (const arg of argv) {
     const [key, value = ''] = arg.split('=', 2);
     if (key === '--group') options.groups.push(...value.split(',').filter(Boolean));
     if (key === '--mode') options.modes.push(...value.split(',').filter(Boolean));
     if (key === '--id') options.ids.push(...value.split(',').filter(Boolean));
+    if (key === '--layer') options.layers.push(...value.split(',').map(Number).filter(Number.isInteger));
+    if (key === '--gauntlet' && value === 'layer1') options.gauntlet = value;
     if (key === '--limit') options.limit = Number(value) || 0;
     if (key === '--concurrency') options.concurrency = Math.max(1, Number(value) || 1);
     if (key === '--rate') options.ratePerMin = Math.max(1, Number(value) || DEFAULT_RATE_PER_MIN);
@@ -65,18 +72,18 @@ async function runTask(token, task) {
     const body = await response.json().catch(() => ({}));
     const ms = Date.now() - startedAt;
     if (response.status === 429) {
-      return { id: task.id, group: task.group, expectedAction: task.expectedAction, ms, status: 'rate_limited', routed: false, error: body.error || 'HTTP 429' };
+      return { id: task.id, group: task.group, layer: task.layer, expectedAction: task.expectedAction, ms, status: 'rate_limited', routed: false, error: body.error || 'HTTP 429' };
     }
     if (!response.ok) {
-      return { id: task.id, group: task.group, expectedAction: task.expectedAction, ms, status: 'http_error', routed: false, error: body.error || `HTTP ${response.status}` };
+      return { id: task.id, group: task.group, layer: task.layer, expectedAction: task.expectedAction, ms, status: 'http_error', routed: false, error: body.error || `HTTP ${response.status}` };
     }
     const { status, receipts } = classify(task, body);
     const routed = (receipts || []).some((receipt) => receipt.action === task.expectedAction);
     const detail = (receipts || []).map((r) => r.action).join(',') || '(no actions)';
-    return { id: task.id, group: task.group, expectedAction: task.expectedAction, ms, status, routed, actions: detail };
+    return { id: task.id, group: task.group, layer: task.layer, expectedAction: task.expectedAction, ms, status, routed, actions: detail };
   } catch (error) {
     return {
-      id: task.id, group: task.group, expectedAction: task.expectedAction,
+      id: task.id, group: task.group, layer: task.layer, expectedAction: task.expectedAction,
       ms: Date.now() - startedAt, routed: false,
       status: error.name === 'AbortError' ? 'timeout' : 'transport_error',
       error: error.message,
@@ -113,10 +120,10 @@ function percentile(sorted, p) {
   return sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
 }
 
-function report(results, wallMs, concurrency) {
+function report(results, wallMs, concurrency, { passes = result => HEALTHY.has(result.status), label = 'CAPABLE  capability answered truthfully' } = {}) {
   const latencies = results.map((r) => r.ms).sort((a, b) => a - b);
   const routed = results.filter((r) => r.routed).length;
-  const healthy = results.filter((r) => HEALTHY.has(r.status)).length;
+  const passed = results.filter(passes).length;
   const byStatus = {};
   for (const r of results) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
 
@@ -125,7 +132,7 @@ function report(results, wallMs, concurrency) {
   console.log(`CAPABILITY STRESS — ${BASE}`);
   console.log(`${results.length} tasks, ${concurrency} in flight, ${(wallMs / 1000).toFixed(1)}s wall\n`);
   console.log(`SMART    routed to the expected capability   ${routed}/${results.length}  ${pct(routed)}`);
-  console.log(`CAPABLE  capability answered truthfully      ${healthy}/${results.length}  ${pct(healthy)}`);
+  console.log(`${label}      ${passed}/${results.length}  ${pct(passed)}`);
   console.log(`FAST     p50 ${percentile(latencies, 50)}ms   p90 ${percentile(latencies, 90)}ms   p95 ${percentile(latencies, 95)}ms   max ${latencies[latencies.length - 1]}ms`);
   console.log(`\nstatus breakdown: ${JSON.stringify(byStatus)}`);
 
@@ -138,7 +145,7 @@ function report(results, wallMs, concurrency) {
     console.log(`\nnot routed to the expected capability (${misrouted.length}):`);
     for (const r of misrouted) console.log(`  ${r.id.padEnd(20)} wanted ${r.expectedAction.padEnd(26)} got ${r.actions || r.error || '(nothing)'}`);
   }
-  return { routed, healthy, total: results.length };
+  return { routed, passed, total: results.length };
 }
 
 async function main() {
@@ -159,10 +166,13 @@ async function main() {
   console.log(`${tasks.length} tasks against ${BASE} as ${USER}, concurrency ${options.concurrency}, paced to ${options.ratePerMin}/min\n`);
   const startedAt = Date.now();
   const results = await runPool(token, tasks, options.concurrency, options.ratePerMin);
-  const summary = report(results, Date.now() - startedAt, options.concurrency);
-  process.exit(summary.healthy === summary.total ? 0 : 1);
+  const gauntlet = options.gauntlet === 'layer1';
+  const summary = report(results, Date.now() - startedAt, options.concurrency, gauntlet
+    ? { passes: passesLayerOneGauntlet, label: 'GAUNTLET completed or safely parked' }
+    : undefined);
+  process.exit(summary.passed === summary.total ? 0 : 1);
 }
 
 if (require.main === module) main();
 
-module.exports = { runTask, runPool, HEALTHY };
+module.exports = { runTask, runPool, HEALTHY, passesLayerOneGauntlet };
