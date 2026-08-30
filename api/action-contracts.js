@@ -59,6 +59,23 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     adapter: { kind: 'inline' }
   },
+  play_game: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['game'],
+    optional: ['operation', 'session_id', 'question_id', 'choice_id', 'round', 'score'],
+    inputExample: { game: 'trivia' },
+    paramHints: {
+      game: 'trivia',
+      operation: 'start or answer',
+      choice_id: 'the exact choice id from the current question'
+    },
+    guidance: 'Use when the user asks to play a game, quiz, trivia, or something fun together. Start with game "trivia" and let the user answer naturally or choose one of the presented options. Keep it light and short; do not turn this into a productivity task, invent current facts, or claim a physical game is running. A play session is conversation-first and can later be carried by a speaker or other device.',
+    successSummary: 'Game in progress',
+    failureSummary: 'Game unavailable',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   add_to_music_playlist: {
     risk: 'medium',
     required: ['query'],
