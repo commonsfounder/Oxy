@@ -28,6 +28,45 @@ test('ordinary personal-admin reads reach their declared actions', () => {
   });
 });
 
+test('an explicit web URL reaches the shared browsing capability instead of relying on a model claim', () => {
+  assert.deepEqual(
+    inferDeterministicAction('Open https://www.gov.uk/apply-first-provisional-driving-licence and tell me the first step.'),
+    {
+      reason: 'browse_explicit_url',
+      spoken: "I'll open that.",
+      actions: [{
+        type: 'web_browse',
+        input: {
+          url: 'https://www.gov.uk/apply-first-provisional-driving-licence',
+          query: 'tell me the first step'
+        }
+      }]
+    }
+  );
+  assert.equal(inferDeterministicAction('I found https://www.gov.uk/apply-first-provisional-driving-licence yesterday.'), null);
+});
+
+test('an explicit uppercase ticker price reaches stocks rather than weather or forecast', () => {
+  assert.deepEqual(
+    inferDeterministicAction('What is the current price of AAPL?'),
+    {
+      reason: 'stock_price',
+      spoken: "I'll check the current price.",
+      actions: [{ type: 'get_stock_price', input: { symbol: 'AAPL' } }]
+    }
+  );
+  assert.equal(inferDeterministicAction('What is the price of a wireless mouse?'), null);
+});
+
+test('an explicit trivia request reaches the conversation-first play capability', () => {
+  assert.deepEqual(inferDeterministicAction("Let's play a quick trivia game."), {
+    reason: 'play_trivia',
+    spoken: "Let's play a quick one.",
+    actions: [{ type: 'play_game', input: { game: 'trivia' } }]
+  });
+  assert.notEqual(inferDeterministicAction('Play some calm instrumental music.')?.actions?.[0]?.type, 'play_game');
+});
+
 test('clear outbound requests reach the review-gated action with bounded inputs', () => {
   assert.deepEqual(inferOutboundCommunicationAction('Text Alex that I am running ten minutes late.'), {
     reason: 'send_message',

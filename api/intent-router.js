@@ -13,6 +13,57 @@ function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
+const EXPLICIT_WEB_URL = /https?:\/\/[^\s<>"'`]+/i;
+const EXPLICIT_WEB_REQUEST = /\b(open|browse|read|look at|check|summari[sz]e)\b/i;
+const STOCK_REQUEST = /\b(?:stock|share|current)\s+price\b|\b(?:price|quote)\s+(?:of|for)\b/i;
+const PLAY_TRIVIA_REQUEST = /\b(?:let['’]?s|can we|could we|we should|i want to|i['’]d like to|please)?\s*(?:play|start|begin|do|have)\s+(?:a\s+)?(?:quick\s+|little\s+|fun\s+)?(?:trivia|quiz|game)\b/i;
+
+function inferStockPriceAction(message) {
+  const text = normalizeText(message);
+  if (!STOCK_REQUEST.test(text)) return null;
+
+  // A ticker is deliberately uppercase in the original message. This keeps ordinary product
+  // prices ("price of a mouse") out of the market-data connector.
+  const ticker = text.match(/\b[A-Z]{1,5}\b/)?.[0];
+  if (!ticker) return null;
+
+  return {
+    reason: 'stock_price',
+    spoken: "I'll check the current price.",
+    actions: [{ type: 'get_stock_price', input: { symbol: ticker } }]
+  };
+}
+
+function inferPlayAction(message) {
+  const text = normalizeText(message);
+  if (!PLAY_TRIVIA_REQUEST.test(text)) return null;
+
+  return {
+    reason: 'play_trivia',
+    spoken: "Let's play a quick one.",
+    actions: [{ type: 'play_game', input: { game: 'trivia' } }]
+  };
+}
+
+function inferExplicitWebBrowseAction(message) {
+  const text = normalizeText(message);
+  const match = text.match(EXPLICIT_WEB_URL);
+  if (!match || !EXPLICIT_WEB_REQUEST.test(text)) return null;
+
+  const url = match[0].replace(/[),.!?;:]+$/, '');
+  const query = normalizeText(text
+    .replace(match[0], ' ')
+    .replace(/^(?:please\s+)?(?:open|browse|read|look at|check|summari[sz]e)\s*/i, '')
+    .replace(/^(?:and|then)\s+/i, '')
+    .replace(/[?.!]+$/, ''));
+
+  return {
+    reason: 'browse_explicit_url',
+    spoken: "I'll open that.",
+    actions: [{ type: 'web_browse', input: { url, ...(query ? { query } : {}) } }]
+  };
+}
+
 
 
 function isQuestionOnly(text) {
@@ -410,6 +461,15 @@ function inferDeterministicAction(message, options = {}) {
   const text = normalizeText(message);
   const preferredMode = options?.settings?.preferredTransportMode;
   const defaultMode = ['driving', 'transit', 'walking'].includes(preferredMode) ? preferredMode : 'driving';
+
+  const explicitWebBrowse = inferExplicitWebBrowseAction(text);
+  if (explicitWebBrowse) return explicitWebBrowse;
+
+  const stockPrice = inferStockPriceAction(text);
+  if (stockPrice) return stockPrice;
+
+  const playAction = inferPlayAction(text);
+  if (playAction) return playAction;
 
   const personalAdmin = inferPersonalAdminAction(text);
   if (personalAdmin) return personalAdmin;
