@@ -1,5 +1,8 @@
 # Oxy Pendant Firmware
 
+Status: experimental input prototype. This sketch is not the canonical Adam hardware
+interface; see `docs/AMBIENT_DEVICE_CONTRACT.md` before changing firmware or designing a PCB.
+
 Arduino firmware for the Seeed Studio XIAO nRF52840 Sense that pairs with the Oxy iOS app over BLE using the Nordic UART Service.
 
 ## What the Oxy app expects

@@ -1,5 +1,9 @@
 # Oxy Pendant Firmware
 
+Status: legacy audio-streaming experiment. This sketch conflicts with the current phone-side
+control-command prototype and is not a production hardware specification; see
+`docs/AMBIENT_DEVICE_CONTRACT.md` before changing firmware or designing a PCB.
+
 Arduino firmware for the Oxy pendant, targeting the **Seeed XIAO nRF52840 Sense** dev board.
 
 ## What it does
