@@ -86,6 +86,11 @@
 		A10000010000000000000042 /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000042 /* WeatherService.swift */; };
 		A10000010000000000000043 /* PendantLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000043 /* PendantLiveActivity.swift */; };
 		A10000010000000000000044 /* ScreenHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000044 /* ScreenHeaderView.swift */; };
+		C10000010000000000000001 /* AdamMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000001 /* AdamMacApp.swift */; };
+		C10000010000000000000002 /* GameSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000002 /* GameSession.swift */; };
+		C10000010000000000000003 /* MacGameAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000003 /* MacGameAdapter.swift */; };
+		C10000010000000000000004 /* GameMovePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000005 /* GameMovePipeline.swift */; };
+		C10000010000000000000005 /* GameMoveCommandPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000006 /* GameMoveCommandPlanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -171,6 +176,13 @@
 		A20000010000000000000043 /* PendantLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantLiveActivity.swift; sourceTree = "<group>"; };
 		A20000010000000000000044 /* ScreenHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenHeaderView.swift; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000010000000000000001 /* AdamMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdamMacApp.swift; sourceTree = "<group>"; };
+		C20000010000000000000002 /* GameSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSession.swift; sourceTree = "<group>"; };
+		C20000010000000000000003 /* MacGameAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameAdapter.swift; sourceTree = "<group>"; };
+		C20000010000000000000004 /* Adam Mac Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C20000010000000000000005 /* GameMovePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameMovePipeline.swift; sourceTree = "<group>"; };
+		C20000010000000000000006 /* GameMoveCommandPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameMoveCommandPlanner.swift; sourceTree = "<group>"; };
+		C30000010000000000000001 /* AdamMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AdamMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -182,6 +194,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C40000010000000000000001 /* Adam Mac Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -189,6 +208,7 @@
 			isa = PBXGroup;
 			children = (
 				A50000010000000000000002 /* OxyApp */,
+				C50000010000000000000001 /* MacRuntime */,
 				A50000010000000000000099 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -436,8 +456,38 @@
 			isa = PBXGroup;
 			children = (
 				A30000010000000000000001 /* OxyApp.app */,
+				C30000010000000000000001 /* AdamMac.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C50000010000000000000001 /* MacRuntime */ = {
+			isa = PBXGroup;
+			children = (
+				C50000010000000000000002 /* AdamMacApp */,
+				C50000010000000000000003 /* AdamMacRuntime */,
+			);
+			path = ../MacRuntime;
+			sourceTree = "<group>";
+		};
+		C50000010000000000000002 /* AdamMacApp */ = {
+			isa = PBXGroup;
+			children = (
+				C20000010000000000000001 /* AdamMacApp.swift */,
+				C20000010000000000000004 /* Adam Mac Info.plist */,
+			);
+			path = Sources/AdamMacApp;
+			sourceTree = "<group>";
+		};
+		C50000010000000000000003 /* AdamMacRuntime */ = {
+			isa = PBXGroup;
+			children = (
+				C20000010000000000000002 /* GameSession.swift */,
+				C20000010000000000000003 /* MacGameAdapter.swift */,
+				C20000010000000000000005 /* GameMovePipeline.swift */,
+				C20000010000000000000006 /* GameMoveCommandPlanner.swift */,
+			);
+			path = Sources/AdamMacRuntime;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -460,6 +510,22 @@
 			productReference = A30000010000000000000001 /* OxyApp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C60000010000000000000001 /* AdamMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C80000010000000000000004 /* Build configuration list for PBXNativeTarget "AdamMac" */;
+			buildPhases = (
+				C70000010000000000000003 /* Adam Mac Sources */,
+				C40000010000000000000001 /* Adam Mac Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AdamMac;
+			productName = AdamMac;
+			productReference = C30000010000000000000001 /* AdamMac.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -472,6 +538,9 @@
 				TargetAttributes = {
 					A60000010000000000000001 = {
 						CreatedOnToolsVersion = 15.4;
+					};
+					C60000010000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -489,6 +558,7 @@
 			projectRoot = "";
 			targets = (
 				A60000010000000000000001 /* OxyApp */,
+				C60000010000000000000001 /* AdamMac */,
 			);
 		};
 /* End PBXProject section */
@@ -586,6 +656,18 @@
 				A10000010000000000000039 /* PendantStatusView.swift in Sources */,
 				A10000010000000000000040 /* AppHeaderView.swift in Sources */,
 				A10000010000000000000048 /* PaymentsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C70000010000000000000003 /* Adam Mac Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000010000000000000001 /* AdamMacApp.swift in Sources */,
+				C10000010000000000000002 /* GameSession.swift in Sources */,
+				C10000010000000000000003 /* MacGameAdapter.swift in Sources */,
+				C10000010000000000000004 /* GameMovePipeline.swift in Sources */,
+				C10000010000000000000005 /* GameMoveCommandPlanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -777,6 +859,46 @@
 			};
 			name = Release;
 		};
+		C90000010000000000000001 /* Adam Mac Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q7252AW6HC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../MacRuntime/Sources/AdamMacApp/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.oxy.adam.mac;
+				PRODUCT_NAME = AdamMac;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C90000010000000000000002 /* Adam Mac Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q7252AW6HC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../MacRuntime/Sources/AdamMacApp/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.oxy.adam.mac;
+				PRODUCT_NAME = AdamMac;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -794,6 +916,15 @@
 			buildConfigurations = (
 				B10000010000000000000003 /* Debug */,
 				B10000010000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C80000010000000000000004 /* Build configuration list for PBXNativeTarget "AdamMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C90000010000000000000001 /* Adam Mac Debug */,
+				C90000010000000000000002 /* Adam Mac Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

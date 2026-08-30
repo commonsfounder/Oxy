@@ -12,6 +12,7 @@ build/
 
 # iOS / Xcode
 OxyApp/build/
+MacRuntime/.build/
 OxyApp/DerivedData/
 OxyApp/*.xcodeproj/xcuserdata/
 OxyApp/*.xcodeproj/project.xcworkspace/xcuserdata/
