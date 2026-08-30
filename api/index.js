@@ -167,6 +167,15 @@ const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
 const { raiseRecentActionFollowUp, recoverySnapshot } = require('./services/action-follow-up');
 const commitments = require('./services/commitments');
+const { normalizeHouseholdState, formatHouseholdState } = require('./services/household-state');
+const {
+  normalizeHouseholdEvent,
+  normalizeHouseholdEvents,
+  householdEventDedupeKey,
+  notificationCategoryForHouseholdEvent,
+  decideIntervention,
+  interventionReceipt
+} = require('./services/household-events');
 const scheduling = require('./services/scheduling');
 const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
 const { buildInboundReplyNotification } = require('./services/external-reply-notifications');
@@ -3203,6 +3212,25 @@ async function evaluateAndSurfaceContextWatches(userId, nativeContext, now = new
     const body = blocked
       ? `“${task.title}” is waiting: ${verdict.reason}.`
       : `${instruction}${measured}`;
+    const event = normalizeHouseholdEvent({
+      id: `${task.id}:${blocked ? 'blocked' : transition}`,
+      type: contextEvent === 'arrive_home'
+        ? 'person_arrived'
+        : contextEvent === 'leave_home'
+          ? 'person_left'
+          : 'household_state_changed',
+      subject: instruction || task.title,
+      title: task.title,
+      body,
+      source: 'context_watch',
+      confidence: 1,
+      relevance: 1,
+      actionable: true,
+      interruptionCost: blocked ? 'normal' : 'low'
+    }, now);
+    const decision = decideIntervention({ event, now });
+    if (!decision.surface) continue;
+    const receipt = interventionReceipt(event);
     const observed = contextEvent || contextMetric || 'context';
     const queued = await notificationDelivery.raise(userId, {
       category: 'watch',
@@ -3216,6 +3244,7 @@ async function evaluateAndSurfaceContextWatches(userId, nativeContext, now = new
       }),
       sourceRef: {
         scheduledTaskId: task.id,
+        ...receipt.sourceRef,
         ...(contextEvent ? { contextEvent } : {}),
         ...(contextMetric ? { contextMetric } : {}),
         status: blocked ? 'blocked' : 'triggered'
@@ -3234,6 +3263,52 @@ async function evaluateAndSurfaceContextWatches(userId, nativeContext, now = new
     });
   }
   return { raised, locationRaised, healthRaised, evaluated: result.evaluated };
+}
+
+// Native integrations and commodity sensors may send an observation at the same boundary as
+// location/HealthKit context. Keep the observation ephemeral and bounded here: the durable
+// notification row is the record of what Adam decided to surface, while the device remains the
+// source of truth for its next reading.
+async function evaluateAndSurfaceHouseholdEvents(userId, observations, now = new Date(), logger = console) {
+  const events = normalizeHouseholdEvents(observations, now);
+  let raised = 0;
+  for (const event of events) {
+    const decision = decideIntervention({ event, now });
+    if (!decision.surface) continue;
+
+    const receipt = interventionReceipt(event);
+    const category = notificationCategoryForHouseholdEvent(event);
+    try {
+      const queued = await notificationDelivery.raise(userId, {
+        category,
+        urgency: notifications.gradeUrgency({
+          category,
+          minutesUntil: event.requiresNow ? 0 : null,
+          exception: event.urgent,
+          terminalState: event.type === 'delivery_arrived'
+        }),
+        title: receipt.title,
+        body: receipt.body,
+        dedupeKey: householdEventDedupeKey(event),
+        sourceRef: {
+          ...receipt.sourceRef,
+          source: event.source,
+          ...(event.personName ? { personName: event.personName } : {}),
+          ...(event.room ? { room: event.room } : {})
+        }
+      });
+      if (queued?.ok) raised += 1;
+    } catch (error) {
+      logger.warn?.(`[household-event] notification failed for ${event.id}: ${error.message}`);
+    }
+  }
+
+  if (raised) {
+    await notificationDelivery.deliverPending(userId).catch(error => {
+      logger.warn?.(`[household-event] delivery failed for ${userId}: ${error.message}`);
+    });
+  }
+  return { raised, received: events.length };
 }
 
 // The reply is already recorded; this raises it on the user's configured notification route.
@@ -4182,20 +4257,26 @@ async function getUserContext(userId, trace = null) {
     .select('display_name, relationship').eq('user_id', userId)
     .order('updated_at', { ascending: false, nullsFirst: false }).limit(12);
 
-  const [connectors, memories, actionLog, delegatedTasks, knownPeople] = trace
+  const [connectors, memories, actionLog, delegatedTasks, knownPeople, nativeContext, openCommitments, activePlans] = trace
     ? await Promise.all([
       trace.run('supabase.user_context.connectors', () => supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true)),
       trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)),
       trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)),
       trace.run('supabase.user_context.agent_tasks', () => supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6)),
-      trace.run('supabase.user_context.participants', loadKnownPeople)
+      trace.run('supabase.user_context.participants', loadKnownPeople),
+      trace.run('supabase.user_context.native_context', () => supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle()),
+      trace.run('supabase.user_context.commitments', () => supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId).eq('status', 'open').order('due_at', { ascending: true }).limit(12)),
+      trace.run('supabase.user_context.scheduled_tasks', () => supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12))
     ])
     : await Promise.all([
       supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
       supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
       supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8),
       supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6),
-      loadKnownPeople()
+      loadKnownPeople(),
+      supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle(),
+      supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId).eq('status', 'open').order('due_at', { ascending: true }).limit(12),
+      supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12)
     ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
@@ -4237,12 +4318,20 @@ async function getUserContext(userId, trace = null) {
     .join(' | ') || 'none';
 
   const peopleLine = people.peopleContextLine(knownPeople.data || []);
+  const householdState = normalizeHouseholdState({
+    nativeContext: nativeContext.data || {},
+    people: knownPeople.data || [],
+    commitments: openCommitments.data || [],
+    scheduledTasks: activePlans.data || [],
+    now: new Date()
+  });
 
   const context = [
     "LIVE USER CONTEXT:",
     "Active connectors: " + active,
     "Messaging patterns: " + patterns,
     "Known people: " + (peopleLine || 'none saved yet') + " (use find_people for their contact details, notes and saved dates)",
+    formatHouseholdState(householdState),
     "Key facts: " + memoryLines,
     "Active delegated goals: " + activeGoals,
     "Recent action outcomes: " + recentActions
@@ -5289,7 +5378,7 @@ app.post('/devices/register', async (req, res) => {
 
 app.post('/native/context', async (req, res) => {
   try {
-    const { userId, location = null, health = {}, capabilities = {}, settings = {} } = req.body || {};
+    const { userId, location = null, health = {}, capabilities = {}, settings = {}, events = [] } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
     const updatedAt = new Date().toISOString();
     const nativeContext = {
@@ -5304,7 +5393,8 @@ app.post('/native/context', async (req, res) => {
     if (error) throw error;
     invalidateUserContextCache(userId);
     await evaluateAndSurfaceContextWatches(userId, nativeContext, new Date(updatedAt));
-    res.json({ ok: true });
+    const householdEventResult = await evaluateAndSurfaceHouseholdEvents(userId, events, new Date(updatedAt));
+    res.json({ ok: true, householdEventsReceived: householdEventResult.received, householdEventsRaised: householdEventResult.raised });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -9943,3 +10033,4 @@ module.exports.executeActions = executeActions;
 module.exports.runScheduledTasksForUser = runScheduledTasksForUser;
 module.exports.notificationDelivery = notificationDelivery;
 module.exports.isScheduledRunNoteworthy = isScheduledRunNoteworthy;
+module.exports.evaluateAndSurfaceHouseholdEvents = evaluateAndSurfaceHouseholdEvents;
