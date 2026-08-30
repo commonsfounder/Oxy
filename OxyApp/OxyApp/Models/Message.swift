@@ -14,7 +14,6 @@ struct Message: Identifiable, Equatable {
     /// Recoverable per-turn failure copy. Kept on the assistant turn so a failed
     /// request has one inline retry surface instead of a global banner plus a row.
     var turnError: String?
-    /// Web sources behind a grounded answer, when the model searched for it.
     var sources: [MessageSource]
 
     enum Role: String, Codable {
@@ -108,6 +107,18 @@ extension Date {
     }
 }
 
+/// A bounded set of choices observed by the agent. The server owns the exact action input;
+/// iOS only needs the safe label and command to render a follow-up affordance.
+struct ActionSelectionOption: Codable, Equatable, Identifiable {
+    let id: String
+    let label: String
+    let command: String
+}
+
+struct ActionSelection: Codable, Equatable {
+    let options: [ActionSelectionOption]
+}
+
 struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String
@@ -138,6 +149,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let subject: ResultSubject?
     /// Completed browser-task identifier.
     let taskId: String?
+    /// Exact observed choices for a later user selection. Never reconstructed from prose.
+    let selection: ActionSelection?
 
     /// Bounded backend outcomes keep handoffs and review pauses visible without
     /// treating their legacy `success` compatibility flag as a completed effect.
@@ -156,7 +169,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
-        case subject, taskId
+        case subject, taskId, selection
         // Older servers sent these at the top level; decoded into `subject` below.
         case imageUrls, productName, price, total, colorOptions
     }
@@ -184,7 +197,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         recoverable: Bool? = nil,
         recoveryAction: BrowserRecoveryAction? = nil,
         subject: ResultSubject? = nil,
-        taskId: String? = nil
+        taskId: String? = nil,
+        selection: ActionSelection? = nil
     ) {
         self.action = action
         self.success = success
@@ -209,6 +223,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.recoveryAction = recoveryAction
         self.subject = subject
         self.taskId = taskId
+        self.selection = selection
     }
 
     init(native result: NativeLocalActionResult) {
@@ -223,7 +238,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
             cardText: result.cardText,
             actionSummary: result.actionSummary,
             risk: result.risk,
-            confirmation: result.confirmation
+            confirmation: result.confirmation,
+            selection: nil
         )
     }
 
@@ -254,6 +270,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             recoveryAction = try result.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
             subject = try ResultSubject.decode(from: result)
             taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
+            selection = try result.decodeIfPresent(ActionSelection.self, forKey: .selection)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
@@ -277,6 +294,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             recoveryAction = try container.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
             subject = try ResultSubject.decode(from: container)
             taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
+            selection = try container.decodeIfPresent(ActionSelection.self, forKey: .selection)
         }
     }
 
@@ -305,6 +323,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(recoveryAction, forKey: .recoveryAction)
         try container.encodeIfPresent(subject, forKey: .subject)
         try container.encodeIfPresent(taskId, forKey: .taskId)
+        try container.encodeIfPresent(selection, forKey: .selection)
     }
 }
 

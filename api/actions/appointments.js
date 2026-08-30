@@ -2,8 +2,10 @@
 
 // Appointment actions, lifted out of the switch in api/index.js.
 //
-// The booking-service accessor and the task helpers stay owned by index.js: they are also
-// used by the chat path that infers a booking turn, and two copies would drift.
+// The booking-service accessor and task helpers stay owned by index.js so the capability keeps
+// one provider/task boundary without making the chat router know about appointments.
+
+const { createActionSelection } = require('../services/action-selection');
 
 async function findAppointmentOptions({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { getAppointmentBookingService, appointmentChoicesText, saveAppointmentTask, delegatedRunLifecycle } = deps;
@@ -37,13 +39,28 @@ async function findAppointmentOptions({ userId, action, params, enrichedParams, 
     };
     const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: found.ok ? null : found.text });
     if (!found.ok) return { success: false, error: found.text, taskId: task.id, actionSummary: 'Appointment search paused' };
+    const selection = createActionSelection({
+      actionType: 'book_appointment',
+      actionInput: { task_id: task.id },
+      options: found.choices.map((choice, index) => ({
+        id: choice.id,
+        label: choice.label,
+        command: `choose option ${index + 1}`,
+        input: {
+          choice_id: choice.id,
+          choice_label: choice.label,
+          service: choice.service
+        }
+      }))
+    });
     return {
       success: true,
       text: appointmentChoicesText(found.service, found.choices),
       cardText: found.choices.map(choice => choice.label).join('\n'),
       actionSummary: 'Appointment options found',
       taskId: task.id,
-      choices: found.choices
+      choices: found.choices,
+      selection
     };
   } catch {
     const booking = { request, service: 'appointment', preference: { label: '' }, choices: [], phase: 'paused' };

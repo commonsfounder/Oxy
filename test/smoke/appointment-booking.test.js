@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createAppointmentBookingService } = require('../../api/services/appointment-booking');
+const { handlers } = require('../../api/actions/appointments');
 
 test('a vague request asks only for the missing appointment detail', async () => {
   const service = createAppointmentBookingService({ provider: { id: 'sandbox', findSlots: async () => [], book: async () => ({}) } });
@@ -53,4 +54,30 @@ test('after-work choices exclude a busy calendar slot', async () => {
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.choices.map(choice => choice.id), ['free']);
+});
+
+test('appointment action exposes a bounded selection receipt with provider IDs', async () => {
+  const result = await handlers.find_appointment_options({
+    userId: 'user-1',
+    params: { request: 'find me a dentist appointment next week' },
+    context: {},
+    deps: {
+      getAppointmentBookingService: () => ({
+        findChoices: async () => ({
+          ok: true,
+          service: 'dentist',
+          provider: 'sandbox',
+          preference: { label: 'at any time' },
+          choices: [{ id: 'slot-real-id', service: 'dentist', label: 'Tue 11 Aug at 6pm', start: '2026-08-11T18:00:00.000Z', end: '2026-08-11T18:30:00.000Z' }]
+        })
+      }),
+      appointmentChoicesText: () => 'I found one time.',
+      saveAppointmentTask: async () => ({ id: 'task-1' }),
+      delegatedRunLifecycle: {}
+    }
+  });
+  assert.equal(result.selection.action.type, 'book_appointment');
+  assert.equal(result.selection.action.input.task_id, 'task-1');
+  assert.equal(result.selection.options[0].id, 'slot-real-id');
+  assert.equal(result.selection.options[0].input.choice_id, 'slot-real-id');
 });

@@ -23,6 +23,13 @@ const {
 const u = (content, actions) => ({ role: 'user', content, actions });
 const a = (content, actions) => ({ role: 'assistant', content, actions });
 const action = (type, input, result) => ({ action: type, input, result });
+const observedSelection = {
+  action: { type: 'book_appointment', input: { task_id: 'task-1' } },
+  options: [
+    { id: 'slot-a', label: 'Tue 11 Aug at 6pm', command: 'choose option 1', input: { choice_id: 'slot-a', choice_label: 'Tue 11 Aug at 6pm', service: 'dentist' } },
+    { id: 'slot-b', label: 'Wed 12 Aug at 2pm', command: 'choose option 2', input: { choice_id: 'slot-b', choice_label: 'Wed 12 Aug at 2pm', service: 'dentist' } }
+  ]
+};
 
 // ── 1. "remind me tomorrow" ────────────────────────────────────────────────────────────────
 test('remind me tomorrow: infers the topic from the last substantive turn', () => {
@@ -139,19 +146,48 @@ test('the other one: resolves when exactly two options exist', () => {
   assert.equal(ctx.selectedIndex, 2);
 });
 
-test('the other one: the built action is authoritative, not left for the model to reconstruct (regression, live bug 2026-08-07)', () => {
-  // Live verification found the resolver correctly picked option 2 ("Wed 12 Aug") but the
-  // model, left to build the booking action from prose, substituted option 1 instead.
-  // resolveContextualTurn must now build the action directly from selectedIndex/label.
+test('the other one: the built action uses the exact observed provider ID, not the ordinal', () => {
+  // The resolver must carry the provider ID and task ID from the structured receipt. The model
+  // may phrase the reply, but it cannot reconstruct a different option from prose.
   const history = [
-    a('I found these times:\n1. Tue 11 Aug at 6pm\n2. Wed 12 Aug at 2pm'),
+    a('I found these times:\n1. Tue 11 Aug at 6pm\n2. Wed 12 Aug at 2pm', [action('find_appointment_options', {}, {
+      success: true,
+      text: 'I found these times',
+      selection: observedSelection
+    })]),
     u('the other one')
   ];
   const resolved = resolveContextualTurn({ message: 'the other one', history, recentActions: [] });
-  assert.equal(resolved.reason, 'context_option_selected');
+  assert.equal(resolved.reason, 'context_selection_selected');
   assert.equal(resolved.actions[0].type, 'book_appointment');
-  assert.equal(resolved.actions[0].input.choice_id, '2');
+  assert.equal(resolved.actions[0].input.task_id, 'task-1');
+  assert.equal(resolved.actions[0].input.choice_id, 'slot-b');
   assert.equal(resolved.actions[0].input.choice_label, 'Wed 12 Aug at 2pm');
+});
+
+test('a generic structured selection resolves any declared action, not only appointments', () => {
+  const history = [a('I found two buttons.', [action('browser_observe', {}, {
+    success: true,
+    text: 'I found two buttons.',
+    selection: {
+      action: { type: 'browser_act', input: { sessionId: 'session-1', action: 'click' } },
+      options: [
+        { id: 'cta-a', label: 'Accept', command: 'choose option 1', input: { elementId: 'button-a' } },
+        { id: 'cta-b', label: 'Decline', command: 'choose option 2', input: { elementId: 'button-b' } }
+      ]
+    }
+  })]), u('choose option 2')];
+  const resolved = resolveContextualTurn({ message: 'choose option 2', history, recentActions: [] });
+  assert.equal(resolved.actions[0].type, 'browser_act');
+  assert.deepEqual(resolved.actions[0].input, { sessionId: 'session-1', action: 'click', elementId: 'button-b' });
+});
+
+test('numbered prose alone never authorizes an action', () => {
+  const history = [
+    a('I found these times:\n1. Tue 11 Aug at 6pm\n2. Wed 12 Aug at 2pm'),
+    u('book the second one')
+  ];
+  assert.equal(resolveContextualTurn({ message: 'book the second one', history, recentActions: [] }), null);
 });
 
 test('the other one: does NOT guess when three or more options exist — ambiguous, must ask', () => {
@@ -258,6 +294,16 @@ test('do the failed one: retries the failed action, not a more recent succeeded 
   assert.equal(resolved.reason, 'context_retry_failed_action');
   assert.equal(resolved.actions[0].type, 'send_email');
   assert.deepEqual(resolved.actions[0].input, { to: 'a@b.com', body: 'running late' });
+});
+
+test('a natural retry sentence reaches the failed action without a domain-specific branch', () => {
+  const history = [a('', [action('book_appointment', { task_id: 'task-1', calendar_retry: true }, { success: false, error: 'Booked, but not added to your calendar.' })])];
+  const resolved = resolveContextualTurn({ message: 'try adding it to the calendar again', history, recentActions: [] });
+  assert.equal(resolved.reason, 'context_retry_failed_action');
+  assert.deepEqual(resolved.actions[0], {
+    type: 'book_appointment',
+    input: { task_id: 'task-1', calendar_retry: true }
+  });
 });
 
 test('a failed action does not get replayed by ordinary (non-retry) follow-up language', () => {

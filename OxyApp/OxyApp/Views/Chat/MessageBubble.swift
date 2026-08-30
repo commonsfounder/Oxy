@@ -91,19 +91,11 @@ struct MessageBubble: View {
         return out
     }
 
-    private var appointmentChoices: [(label: String, command: String)] {
-        guard !isUser, !message.isStreaming,
-              message.actions.contains(where: { $0.action == "find_appointment_options" && $0.isCompleted }) else { return [] }
-        return message.content
-            .split(separator: "\n")
-            .compactMap { line -> (label: String, command: String)? in
-                guard let match = String(line).range(of: #"^\s*([1-3])\.\s+(.+)$"#, options: .regularExpression) else { return nil }
-                let parts = String(line)[match].replacingOccurrences(of: #"^\s*([1-3])\.\s+"#, with: "", options: .regularExpression)
-                let number = String(line).trimmingCharacters(in: .whitespaces).prefix(1)
-                return (String(parts), "book option \(number)")
-            }
-            .prefix(3)
-            .map { $0 }
+    private var actionChoices: [ActionSelectionOption] {
+        guard !isUser, !message.isStreaming else { return [] }
+        return message.actions
+            .filter { $0.isCompleted }
+            .flatMap { $0.selection?.options ?? [] }
     }
 
     // User turns stay compact rounded bubbles, right-aligned. Assistant turns sit
@@ -274,10 +266,10 @@ struct MessageBubble: View {
                 .padding(.top, 6)
             }
 
-            if !appointmentChoices.isEmpty {
+            if !actionChoices.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(appointmentChoices, id: \.command) { choice in
+                        ForEach(actionChoices) { choice in
                             Button(choice.label) { onActionCommand?(choice.command) }
                                 .font(.appBody(13, weight: .medium))
                                 .foregroundStyle(Color.appInk)

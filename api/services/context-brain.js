@@ -2,6 +2,8 @@
 // recent conversation and action history. buildResolvedContext is message-aware: it ranks typed
 // candidates by relevance to what was actually asked, not by recency alone.
 
+const { normalizeActionSelection, resolveActionSelectionOption } = require('./action-selection');
+
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
 }
@@ -88,6 +90,17 @@ function contextFromAction(action, source = 'action_result') {
   const input = action?.input || {};
   const label = actionLabel(action);
   if (!type || action?.status === 'pending') return null;
+
+  const selection = normalizeActionSelection(action?.result?.selection || action?.selection);
+  if (selection && action?.status !== 'failed') {
+    return {
+      kind: 'action_selection',
+      label: label || selection.options.map(option => option.label).join(' | '),
+      source,
+      confidence: 'high',
+      selection
+    };
+  }
 
   // Failed actions keep their own kind rather than the action's real one, so retry language
   // ("do the failed one") only matches failures and replay language never binds to one.
@@ -379,13 +392,13 @@ function messageKindHints(message) {
   if (/\b(directions|navigate|maps?|route)\b/.test(text)) hints.add('route');
   if (/\bplace\b/.test(text) || /\bsame place\b/.test(text)) hints.add('place');
   if (/\b(send)\b/.test(text) && !/\b(email|mail)\b/.test(text)) hints.add('draft');
-  if (/\b(failed|fix|retry|redo)\b/.test(text)) hints.add('failed_action');
+  if (/\b(failed|fix|retry|redo)\b/.test(text) || isRetryIntent(text)) hints.add('failed_action');
   if (/\b(book|choose|pick|order|select)\b/.test(text) || parseOrdinalSelector(text)) hints.add('option_list');
   return hints;
 }
 
 function isRetryIntent(message) {
-  return /\b(do|fix|retry|redo|try)\b.*\bfailed\b|\bfailed\s+one\b|\btry\s+that\s+again\b/i.test(normalizeText(message));
+  return /\b(do|fix|retry|redo|try)\b.*\bfailed\b|\bfailed\s+one\b|\b(?:try|retry|resume)\b.*\bagain\b/i.test(normalizeText(message));
 }
 
 function isDateShiftIntent(message) {
@@ -395,8 +408,26 @@ function isDateShiftIntent(message) {
 
 function resolveOptionListSelection(optionListCtx, message) {
   const selector = parseOrdinalSelector(message);
-  if (!selector || !optionListCtx?.options?.length) return null;
   const options = optionListCtx.options;
+  if (!options?.length) return null;
+
+  // Voice answers often repeat the visible choice instead of saying "option one". Exact
+  // matching is intentionally the only label-based path: Adam must not infer a provider
+  // choice from a partial phrase, and duplicate labels remain ambiguous.
+  if (!selector) {
+    const spoken = normalizeText(message).toLowerCase().replace(/[.!?]+$/, '');
+    const matches = options.filter(option => normalizeText(option.label).toLowerCase().replace(/[.!?]+$/, '') === spoken);
+    if (matches.length !== 1) return null;
+    return {
+      kind: 'option_list_selection',
+      label: matches[0].label,
+      source: optionListCtx.source,
+      confidence: 'high',
+      selectedIndex: matches[0].index,
+      options
+    };
+  }
+
   let chosen = null;
   if (Number.isInteger(selector.index)) {
     chosen = options[selector.index] || null;
@@ -418,12 +449,44 @@ function resolveOptionListSelection(optionListCtx, message) {
   };
 }
 
+function resolveActionSelectionContext(selectionCtx, message) {
+  if (!selectionCtx?.selection) return null;
+  const optionList = {
+    options: selectionCtx.selection.options.map((option, index) => ({
+      index: index + 1,
+      label: option.label
+    }))
+  };
+  const resolved = resolveOptionListSelection(optionList, message);
+  if (!resolved) return null;
+  const action = resolveActionSelectionOption(selectionCtx.selection, resolved.selectedIndex - 1);
+  if (!action) return null;
+  return {
+    kind: 'action_selection_selected',
+    label: resolved.label,
+    source: selectionCtx.source,
+    confidence: 'high',
+    selection: selectionCtx.selection,
+    selectedIndex: resolved.selectedIndex,
+    selectedOption: action.option,
+    action
+  };
+}
+
 function buildResolvedContext(message = '', history = [], recentActions = []) {
   const hints = messageKindHints(message);
+
+  const actionContexts = [
+    ...extractActionContexts(recentActions),
+    ...extractAssistantContexts(history)
+  ];
 
   // option_list selection is resolved first and independently: it answers "which of several
   // named things" rather than "which kind of thing", and a correct ordinal match should win
   // regardless of what else ranks highly.
+  const selectionCtx = actionContexts.find(c => c.kind === 'action_selection');
+  const structuredSelection = selectionCtx && resolveActionSelectionContext(selectionCtx, message);
+  if (structuredSelection) return structuredSelection;
   if (hints.has('option_list')) {
     const optionListCtx = extractOptionListFromText(
       [...history].reverse().find(row => row?.role === 'assistant')?.content
@@ -440,10 +503,7 @@ function buildResolvedContext(message = '', history = [], recentActions = []) {
     return { kind: 'reminder_needs_topic', label: '', source: 'assistant_answer', confidence: 'low' };
   }
 
-  const allContexts = [
-    ...extractActionContexts(recentActions),
-    ...extractAssistantContexts(history)
-  ];
+  const allContexts = actionContexts;
   const draft = hints.has('draft') ? extractDraftContext(history) : null;
   if (draft) allContexts.unshift(draft);
 
@@ -490,17 +550,18 @@ function resolveContextualTurn({ message = '', history = [], recentActions = [],
   // An ordinal resolved against a real option list is authoritative: the choice is built here
   // from the resolver's own index, so the model can phrase the reply but cannot substitute a
   // different option.
-  if (resolvedContext.kind === 'option_list_selection' && resolvedContext.confidence === 'high') {
+  if (resolvedContext.kind === 'action_selection_selected' && resolvedContext.confidence === 'high') {
     return {
-      reason: 'context_option_selected',
+      reason: 'context_selection_selected',
       resolvedContext,
       spoken: `I'll go with ${resolvedContext.label}.`,
-      actions: [{
-        type: 'book_appointment',
-        input: { choice_id: String(resolvedContext.selectedIndex), choice_label: resolvedContext.label }
-      }]
+      actions: [resolvedContext.action]
     };
   }
+
+  // Numbered prose from an older server is still useful as context, but it is not an authority
+  // for an external action. Only a structured receipt with an exact provider ID may execute.
+  if (resolvedContext.kind === 'option_list_selection' && resolvedContext.confidence === 'high') return null;
 
   if (resolvedContext.kind === 'failed_action' && isRetryIntent(text)) {
     return {
@@ -572,5 +633,6 @@ module.exports = {
   extractSongFromText,
   parseOrdinalSelector,
   isContextualReference,
+  resolveActionSelectionContext,
   resolveContextualTurn
 };

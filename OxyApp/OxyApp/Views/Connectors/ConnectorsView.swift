@@ -9,9 +9,7 @@ struct ConnectorsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
-    // Keyed by connector id — both Google and Microsoft go through the same
-    // browser-redirect OAuth dance, so they share this rather than each getting their own
-    // single-value state var (which is how Google alone used to work here).
+    
     @State private var oauthStatus: [String: OAuthStatus] = [:]
     @State private var errorMessage: String?
 
@@ -370,8 +368,6 @@ private struct AppIconView: View {
         if names.contains("trainline") { return ("TL", Color(red: 0/255, green: 169/255, blue: 126/255), .white, 15) }
         if names.contains("deliveroo") { return ("D", Color(red: 0/255, green: 204/255, blue: 188/255), .white, 19) }
         if names.contains("netflix") { return ("N", .black, Color(red: 229/255, green: 9/255, blue: 20/255), 21) }
-        // No bundled logo asset yet for these — a brand-colour wordmark chip reads as
-        // intentional, unlike the generic sparkle placeholder these were falling to.
         if names.contains("slack") { return ("Slack", Color(red: 74/255, green: 21/255, blue: 75/255), .white, 11) }
         if names.contains("oura") { return ("Oura", .black, .white, 12) }
         return (nil, Color.oxySurface3, Color.oxySub, 17)

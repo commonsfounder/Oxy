@@ -299,49 +299,6 @@ async function saveAppointmentTask(userId, existingTaskId, booking, updates = {}
   });
 }
 
-function appointmentChoiceIndex(message) {
-  const text = String(message || '').toLowerCase();
-  if (/\b(?:option|choice)\s*1\b|\bfirst\s+(?:one|option|choice)\b/.test(text)) return 0;
-  if (/\b(?:option|choice)\s*2\b|\bsecond\s+(?:one|option|choice)\b/.test(text)) return 1;
-  if (/\b(?:option|choice)\s*3\b|\bthird\s+(?:one|option|choice)\b/.test(text)) return 2;
-  return null;
-}
-
-async function inferAppointmentBookingTurn(userId, message) {
-  let tasks;
-  try {
-    tasks = await delegatedRunLifecycle.list(userId, null);
-  } catch {
-    return null;
-  }
-  const task = tasks.find(candidate => ['choosing', 'calendar_retry'].includes(candidate?.metadata?.appointmentBooking?.phase));
-  if (!task) return null;
-  const booking = task.metadata.appointmentBooking;
-  if (booking.phase === 'calendar_retry' && /\b(try|add|calendar|again|resume)\b/i.test(message)) {
-    const choice = booking.booking?.choice || booking.choices?.[0];
-    if (!choice) return null;
-    return {
-      reason: 'appointment_calendar_retry',
-      spoken: "I'll get that ready for your OK.",
-      actions: [{ type: 'book_appointment', input: { task_id: task.id, choice_id: choice.id, choice_label: choice.label, service: booking.service, calendar_retry: true } }]
-    };
-  }
-  const choiceIndex = appointmentChoiceIndex(message);
-  if (choiceIndex != null) {
-    const choice = booking.choices?.[choiceIndex];
-    if (!choice) return { reason: 'appointment_choice_missing', spokenOnly: true, spoken: appointmentChoicesText(booking.service, booking.choices) };
-    return {
-      reason: 'appointment_choice_selected',
-      spoken: "I'll get that ready for your OK.",
-      actions: [{ type: 'book_appointment', input: { task_id: task.id, choice_id: choice.id, choice_label: choice.label, service: booking.service } }]
-    };
-  }
-  if (/\b(book|choose|pick)\s+(?:it|that|one|an?\s+(?:appointment|option|choice))\b/i.test(message)) {
-    return { reason: 'appointment_choice_needed', spokenOnly: true, spoken: appointmentChoicesText(booking.service, booking.choices) };
-  }
-  return null;
-}
-
 function devTimingEnabled() {
   return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
 }
@@ -2147,9 +2104,6 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   // A paused browser task used to be routed back into the ordering loop from here. It no
   // longer needs a branch: the session persists, and the agent loop simply calls
   // browser_observe to see where it left off, exactly as it would on any other page.
-
-  const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
-  if (appointmentTurn) return appointmentTurn;
 
   const structuredMemory = parseStructuredMemoryRequest(text);
   if (structuredMemory) {
