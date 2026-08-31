@@ -1854,7 +1854,12 @@ function isPureContentGenerationTurn(message = '') {
   // These imply real-world action, tool execution, or persistent planning. Keep
   // them eligible for the agent loop instead of treating them as plain prose.
   const actionOrGoal = /\b(book|order|buy|purchase|send|text|message|call|email|create|add|schedule|remind|reserve|open|navigate|directions|find|search|look up|research|arrange|organize|handle|monitor|track|make money|earn cash|side hustle|moneti[sz]e|profit)\b/.test(text);
-  return !actionOrGoal;
+
+  // "Compare the price of X on Amazon and John Lewis" is a real-site lookup, not a
+  // summarized opinion — it needs the browser, not a prose answer built from memory.
+  const isShoppingComparison = /\bcompar/.test(text) && /\b(price|prices|cost|costs|cheaper|cheapest|deal|deals)\b/.test(text);
+
+  return !(actionOrGoal || isShoppingComparison);
 }
 
 // A plain question about the world — answerable by talking (with search grounding if needed)

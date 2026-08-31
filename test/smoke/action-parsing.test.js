@@ -56,6 +56,20 @@ test('real-world action prompts remain eligible for the agent loop', () => {
   }), true);
 });
 
+test('a price comparison across real sites stays eligible for the agent loop, not a prose answer', () => {
+  assert.equal(isPureContentGenerationTurn('compare the price of the iPhone 15 on Amazon and John Lewis'), false);
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: 'compare the price of the iPhone 15 on Amazon and John Lewis',
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: null
+  }), true);
+});
+
+test('a plain non-shopping comparison still streams as prose', () => {
+  assert.equal(isPureContentGenerationTurn('compare cats and dogs as pets'), true);
+});
+
 test('direct tool prompts route away from the fast streaming path', () => {
   for (const message of [
     'send an email to Sam',
