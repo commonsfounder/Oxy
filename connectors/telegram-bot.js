@@ -40,6 +40,11 @@ function answerCallbackQuery(callbackQueryId, { text = '' } = {}) {
   return callBotApi('answerCallbackQuery', { callback_query_id: callbackQueryId, text });
 }
 
+// Cosmetic only — a failure here must never block or delay the actual reply.
+function sendChatAction(chatId, action = 'typing') {
+  return callBotApi('sendChatAction', { chat_id: chatId, action }).catch(() => null);
+}
+
 // Best-effort cosmetic cleanup (strips the Confirm/Cancel buttons after a tap) — a failure
 // here must never block the actual reply from reaching the user.
 function clearInlineKeyboard(chatId, messageId) {
@@ -151,6 +156,7 @@ function describePendingAction(pendingEntry) {
 module.exports = {
   sendMessage,
   answerCallbackQuery,
+  sendChatAction,
   clearInlineKeyboard,
   setWebhook,
   deleteWebhook,

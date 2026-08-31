@@ -612,8 +612,9 @@ app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   // Ack immediately — Telegram retries the same update on anything but a 2xx, and this work
   // can take longer than Telegram's own retry patience.
   res.status(200).end();
+  const update = req.body || {};
+  const chatId = update.callback_query?.message?.chat?.id ?? update.message?.chat?.id ?? null;
   try {
-    const update = req.body || {};
     if (update.callback_query) {
       await handleTelegramBotCallback(update.callback_query, req);
     } else if (update.message?.text != null) {
@@ -621,6 +622,11 @@ app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
     }
   } catch (err) {
     log('error', 'telegram_bot.webhook.error', { error: err.message });
+    // The alternative to this is silence: the user sent a message and nothing ever comes
+    // back, indistinguishable from Adam not having seen it at all.
+    if (chatId != null) {
+      await telegramBot.sendMessage(chatId, "Something went wrong on my end — try that again.").catch(() => {});
+    }
   }
 });
 
@@ -637,6 +643,18 @@ async function bridgeToChatPipeline(userId, message, req) {
   });
   if (!chatRes.ok) throw new Error(`chat bridge returned ${chatRes.status}`);
   return chatRes.json();
+}
+
+// Telegram's own typing indicator lasts ~5s, so it needs refreshing while a slow agent-loop
+// turn runs — otherwise a 30-60s travel search looks like dead silence instead of a wait.
+async function withTelegramTyping(chatId, work) {
+  telegramBot.sendChatAction(chatId, 'typing');
+  const interval = setInterval(() => telegramBot.sendChatAction(chatId, 'typing'), 4500);
+  try {
+    return await work();
+  } finally {
+    clearInterval(interval);
+  }
 }
 
 // Renders a pending review-gated action as Telegram inline buttons; a tap synthesizes the
@@ -690,7 +708,7 @@ async function handleTelegramBotMessage(message, req) {
   }
   if (!text) return;
 
-  const result = await bridgeToChatPipeline(userId, text, req);
+  const result = await withTelegramTyping(chatId, () => bridgeToChatPipeline(userId, text, req));
   await sendChatResultToTelegram(chatId, result);
 }
 
