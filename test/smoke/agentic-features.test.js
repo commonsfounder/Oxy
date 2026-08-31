@@ -274,7 +274,7 @@ test('persistent task run claims before handing off to the shared starter', () =
   const routeStart = source.indexOf("app.post('/agent/tasks/:id/run'");
   const routeEnd = source.indexOf("app.post('/agent/simulate'", routeStart);
   const route = source.slice(routeStart, routeEnd);
-  assert.match(route, /startDelegatedTaskExecution\(\{/);
+  assert.match(route, /startDelegatedTaskExecution\.start\(\{/);
   const starter = fs.readFileSync(path.join(__dirname, '../../api/services/delegated-run-starter.js'), 'utf8');
   const claimIndex = starter.indexOf('routeHandlers.run({');
   const loopIndex = starter.indexOf('runLoop({');

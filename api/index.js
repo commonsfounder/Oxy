@@ -9284,7 +9284,7 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const task = await delegatedRunLifecycle.get(userId, req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
-  const started = await startDelegatedTaskExecution({
+  const started = await startDelegatedTaskExecution.start({
     userId,
     task,
     runtime: {

@@ -41,7 +41,7 @@ async function createAgentTask({ userId, action, params, enrichedParams, context
       plan: params.plan,
       metadata: guardMode === undefined ? undefined : { guardMode }
     });
-    const started = await startDelegatedTaskExecution({
+    const started = await startDelegatedTaskExecution.start({
       userId,
       task,
       runtime: {
