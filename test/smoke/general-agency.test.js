@@ -62,12 +62,11 @@ test('a plain question is still answered by talking, not by starting a work sess
 });
 
 test('no request is pre-classified into a domain workflow before the model sees it', () => {
-  // The deterministic router may still shortcut a SINGLE tool call with extracted parameters
-  // (directions, a place lookup). What it must never do again is decide that a request
-  // belongs to "shopping" and hand the whole goal to one subsystem.
+  // Nothing here needs interpreting by a regex, so nothing may be answered by one. The
+  // deterministic router now only fires on a literal signal — see preroute-boundary.test.js.
   for (const message of REAL_TASKS) {
     const routed = inferDeterministicAction(message);
-    assert.notEqual(routed?.actions?.[0]?.type, 'run_browser_task', `"${message}" was pre-routed into the ordering loop`);
+    assert.equal(routed, null, `"${message}" was decided before the model got a turn`);
   }
 });
 

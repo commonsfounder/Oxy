@@ -72,16 +72,18 @@ const evalCases = [
     deterministicAction: null
   },
   {
-    name: 'obvious local place action stays deterministic',
+    // find_place and book_uber carry this exact phrasing in their contract guidance, so the
+    // model reaches them with the user's natural phrase intact.
+    name: 'a local place request reaches the model, not a regex',
     message: "nearest McDonald's",
     expectSearch: false,
-    deterministicAction: 'find_place'
+    deterministicAction: null
   },
   {
-    name: 'obvious Uber action stays deterministic',
+    name: 'a ride request reaches the model, not a regex',
     message: "get me an Uber to the nearest McDonald's",
     expectSearch: false,
-    deterministicAction: 'book_uber'
+    deterministicAction: null
   },
   {
     name: 'vague travel follow-up must not invent a destination',

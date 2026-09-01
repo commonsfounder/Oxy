@@ -7496,10 +7496,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return;
     }
 
-    const deterministicAction = contextualTurn || inferDeterministicAction(routingMessage, {
-      settings,
-      appointmentProviderConnected: Boolean(getAppointmentBookingService())
-    });
+    const deterministicAction = contextualTurn || inferDeterministicAction(routingMessage);
     // Instrumentation for the bare-pronoun path: attempted, resolved, and routed directly vs
     // fell through to the model. Only fires when a referential phrase was detected.
     const entityReferenceKind = extractReferentialPhrase(message) ? 'named' : (hasBareEntityReference(message) ? 'bare' : null);

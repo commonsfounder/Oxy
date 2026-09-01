@@ -1,22 +1,40 @@
-const LOCAL_PLACE_TERMS = /\b(nearest|closest|near me|nearby|around me|coffee|cafe|restaurant|gym|mcdonald'?s|john lewis|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i;
-const RIDE_TERMS = /\b(uber|ride|taxi|cab|car|take me|pick me up|drive me)\b/i;
-const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|when should i leave|latest.*leave|get there by|be there by|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
-// Only these actually ASK for a route. Bare mode words (drive/walk/route/bus) appear all over
-// ordinary requests, so they must not pre-empt the loop on their own.
-const DIRECTIONS_INTENT = /\b(directions|navigate|how do i get|how do we get|when should i leave|latest.*leave|get there by|be there by|need to be at|heading to|what bus|which bus|public transport|what train|which train|train can i take|first train|next train|train to)\b/i;
-const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|train|trains|rail|tube|tram)\b/i;
-const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
-const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
-const FUTURE_TIME_TERMS = /\b(tomorrow|later|around|about|by|at|after|before|\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i;
+// Deterministic shortcuts for messages that need no interpretation.
+//
+// A shortcut may only key off something literal: a URL, an uppercase ticker, an anchored
+// command form that names its own channel. Anything needing prose weighed belongs to the
+// model, which can see the conversation and the action contracts. See preroute-boundary.test.js.
 
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
+}
+
+function trimTrailingPunctuation(value) {
+  return normalizeText(value).replace(/[?.!]+$/, '').trim();
 }
 
 const EXPLICIT_WEB_URL = /https?:\/\/[^\s<>"'`]+/i;
 const EXPLICIT_WEB_REQUEST = /\b(open|browse|read|look at|check|summari[sz]e)\b/i;
 const STOCK_REQUEST = /\b(?:stock|share|current)\s+price\b|\b(?:price|quote)\s+(?:of|for)\b/i;
 const PLAY_TRIVIA_REQUEST = /\b(?:let['’]?s|can we|could we|we should|i want to|i['’]d like to|please)?\s*(?:play|start|begin|do|have)\s+(?:a\s+)?(?:quick\s+|little\s+|fun\s+)?(?:trivia|quiz|game)\b/i;
+
+function inferExplicitWebBrowseAction(message) {
+  const text = normalizeText(message);
+  const match = text.match(EXPLICIT_WEB_URL);
+  if (!match || !EXPLICIT_WEB_REQUEST.test(text)) return null;
+
+  const url = match[0].replace(/[),.!?;:]+$/, '');
+  const query = normalizeText(text
+    .replace(match[0], ' ')
+    .replace(/^(?:please\s+)?(?:open|browse|read|look at|check|summari[sz]e)\s*/i, '')
+    .replace(/^(?:and|then)\s+/i, '')
+    .replace(/[?.!]+$/, ''));
+
+  return {
+    reason: 'browse_explicit_url',
+    spoken: "I'll open that.",
+    actions: [{ type: 'web_browse', input: { url, ...(query ? { query } : {}) } }]
+  };
+}
 
 function inferStockPriceAction(message) {
   const text = normalizeText(message);
@@ -43,90 +61,6 @@ function inferPlayAction(message) {
     spoken: "Let's play a quick one.",
     actions: [{ type: 'play_game', input: { game: 'trivia' } }]
   };
-}
-
-function inferExplicitWebBrowseAction(message) {
-  const text = normalizeText(message);
-  const match = text.match(EXPLICIT_WEB_URL);
-  if (!match || !EXPLICIT_WEB_REQUEST.test(text)) return null;
-
-  const url = match[0].replace(/[),.!?;:]+$/, '');
-  const query = normalizeText(text
-    .replace(match[0], ' ')
-    .replace(/^(?:please\s+)?(?:open|browse|read|look at|check|summari[sz]e)\s*/i, '')
-    .replace(/^(?:and|then)\s+/i, '')
-    .replace(/[?.!]+$/, ''));
-
-  return {
-    reason: 'browse_explicit_url',
-    spoken: "I'll open that.",
-    actions: [{ type: 'web_browse', input: { url, ...(query ? { query } : {}) } }]
-  };
-}
-
-
-
-function isQuestionOnly(text) {
-  return /^(what|who|when|why|explain)\b/i.test(text) &&
-    !/\b(nearest|closest|near me|nearby|around me)\b/i.test(text);
-}
-
-function looksLikeLocalPlaceRequest(message) {
-  const text = normalizeText(message);
-  if (!text || isQuestionOnly(text)) return false;
-  return LOCAL_PLACE_TERMS.test(text);
-}
-
-// LOCAL_PLACE_TERMS mixes locating language ("nearest", "where is") with bare category and brand
-// nouns that appear in sentences about nothing of the sort ("email the restaurant"). Every
-// collision has that shape: a noun with no locating signal beside it. The plain
-// looksLikeLocalPlaceRequest is safe where an explicit ride verb narrows it; this stricter
-// variant is for the bare fallback at the bottom of inferDeterministicAction, which has nothing
-// else narrowing it and must see real locating language before assuming a place lookup.
-const LOCAL_PLACE_INTENT_TERMS = /\b(nearest|closest|near|nearby|around me|where'?s|where is|opening hours|store location|branch(?:es)?)\b/i;
-
-function looksLikeExplicitPlaceLookup(message) {
-  const text = normalizeText(message);
-  return looksLikeLocalPlaceRequest(text) && LOCAL_PLACE_INTENT_TERMS.test(text);
-}
-
-// Retailer names are also place terms, so a request to buy a product — especially
-// "<product> on/from/at <retailer>" — is a shopping task, never a nearby-branch lookup.
-// High precision: "nearest john lewis" has no purchase verb and stays a place request.
-const { allRetailerAliases } = require('./services/retailer-sites');
-
-
-
-
-
-
-function looksLikeRideRequest(message) {
-  return RIDE_TERMS.test(normalizeText(message));
-}
-
-// Category nouns are also place terms, so a plain request to email or text one would fall
-// through to the place fallback. A literal address or an explicit contact verb makes this a
-// communication request. Narrow on purpose, same shape as looksLikeShoppingRequest below.
-const COMMUNICATION_TERMS = /\b(email|e-mail|text|message|contact|write to)\b/i;
-const EMAIL_ADDRESS_RE = /[^\s<]+@[^\s>]+\.[^\s>]+/;
-
-function looksLikeCommunicationRequest(message) {
-  const text = normalizeText(message);
-  if (!text) return false;
-  return EMAIL_ADDRESS_RE.test(text) || COMMUNICATION_TERMS.test(text);
-}
-
-// The same collision again: a message about resuming a shopping session and checking the basket
-// names a retailer and falls through to the place fallback. Only an explicit session or basket
-// phrase defers, so "nearest john lewis" is unaffected.
-const BROWSER_SESSION_TERMS = /\b(?:that|this|the) session\b|\bsession back\b|\bwhat'?s in (?:the|my) (?:basket|cart|bag)\b/i;
-
-function looksLikeBrowserSessionRequest(message) {
-  return BROWSER_SESSION_TERMS.test(normalizeText(message));
-}
-
-function trimTrailingPunctuation(value) {
-  return normalizeText(value).replace(/[?.!]+$/, '').trim();
 }
 
 function inferPersonalAdminAction(message) {
@@ -163,6 +97,9 @@ function inferPersonalAdminAction(message) {
   return null;
 }
 
+// Only the two forms that name their own channel in words nobody uses by accident. A bare
+// "call/email/text <someone>" leaves the recipient and the request as prose, which the model
+// resolves against contacts and context — and which this used to mangle.
 function inferOutboundCommunicationAction(message) {
   const text = normalizeText(message);
   if (!text) return null;
@@ -185,408 +122,22 @@ function inferOutboundCommunicationAction(message) {
     };
   }
 
-  const call = text.match(/^(?:please\s+)?call\s+(.+?)(?:\s+and\s+(?:ask|find out|see if)\s+.+)?[?.!]*$/i);
-  if (call && /\b(call|ring)\b/i.test(text)) {
-    return {
-      reason: 'make_call',
-      spoken: 'I’ll prepare that call for review.',
-      actions: [{ type: 'make_call', input: { contact: trimTrailingPunctuation(call[1]) } }]
-    };
-  }
-
-  const email = text.match(/^(?:please\s+)?(?:send\s+an?\s+)?e-?mail\s+(?:to\s+)?(.+?)\s+(?:and\s+)?(?:ask(?:ing)?|saying|that)\s+(.+)$/i);
-  if (email) {
-    const recipient = trimTrailingPunctuation(email[1]);
-    const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(recipient)
-      ? 'send_adam_email'
-      : 'send_email';
-    return {
-      reason: type,
-      spoken: 'I’ll prepare that message for review.',
-      actions: [{ type, input: { to: recipient, body: email[2].trim() } }]
-    };
-  }
-
-  const messageMatch = text.match(/^(?:please\s+)?(?:text|message)\s+(.+?)\s+(?:that|saying|and\s+ask)\s+(.+)$/i);
-  if (messageMatch) {
-    const contact = trimTrailingPunctuation(messageMatch[1]);
-    const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(contact)
-      ? 'send_adam_sms'
-      : 'send_message';
-    return {
-      reason: type,
-      spoken: 'I’ll prepare that message for review.',
-      actions: [{ type, input: type === 'send_message'
-        ? { contact, message: messageMatch[2].trim() }
-        : { to: contact, body: messageMatch[2].trim() } }]
-    };
-  }
-
   return null;
 }
 
-function looksLikeDirectionsRequest(message) {
-  return DIRECTIONS_INTENT.test(normalizeText(message));
-}
-
-// True only when a phrase names an actual place — i.e. something survives after stripping
-// the directions/navigation trigger words and generic filler. "Get directions" -> false;
-// "directions to the gym" -> "the gym" -> true.
-function hasRealDestination(phrase) {
-  const residue = normalizeText(phrase)
-    .replace(new RegExp(DIRECTIONS_TERMS.source, 'gi'), ' ')
-    .replace(/\b(get|show|give|find|open|take|me|my|please|pls|a|an|the|to|for|some|now|here)\b/gi, ' ')
-    .replace(/[^a-z0-9]+/gi, ' ')
-    .trim();
-  return residue.length > 0;
-}
-
-function looksLikeMemoryWrite(message) {
+function inferDeterministicAction(message) {
   const text = normalizeText(message);
-  return /^(remember|save|note down)\b/i.test(text) ||
-    /\bmy\s+(usual|preferred|default)\s+\w+\s+(is|are)\b/i.test(text) ||
-    /^(my|our)\s+[^?.!]{2,80}\s+(is|are)\s+[^?.!]{2,120}$/i.test(text);
-}
+  if (!text) return null;
 
-const WATCH_VERBS = /\b(watch|monitor|track|follow|keep an eye on)\b/i;
-const WATCH_TARGETS = /\b(flight|flights|fare|fares|ticket|tickets|hotel|hotels|price|prices|cost|costs|sale|cheaper|lower|drops?|falls?)\b/i;
-
-function stripWakeWord(text) {
-  return normalizeText(text)
-    .replace(/^(?:hey|okay|ok)?\s*adam(?:\s*[:,;-]\s*|\s+)/i, '')
-    .replace(/^(?:okay|ok|please|pls)\s+/i, '')
-    .trim();
-}
-
-function looksLikeWatchRequest(message) {
-  const text = stripWakeWord(message);
-  const repeats = /\bcheck\b.+\b(every|each|daily|weekly|when|if|until)\b/i.test(text);
-  if (!text || !(WATCH_VERBS.test(text) || repeats) || !WATCH_TARGETS.test(text)) return false;
-  // "Track my order" and similar status requests belong to the live task path.
-  // A durable watch needs a price, availability, or future-change signal.
-  return /\b(cheaper|lower|price|prices|cost|costs|sale|when|if|until|every|daily|weekly|available|drops?|falls?)\b/i.test(text);
-}
-
-function extractWatchCadence(text) {
-  const normalized = text.toLowerCase();
-  const match = normalized.match(/\b(?:every|each)\s+(\d+)?\s*(minute|hour|day|week)s?\b/) ||
-    normalized.match(/\b(daily|weekly|hourly)\b/);
-  if (!match) return { intervalMinutes: 1440, label: 'once a day' };
-
-  if (match[1] === 'daily') return { intervalMinutes: 1440, label: 'once a day' };
-  if (match[1] === 'weekly') return { intervalMinutes: 10080, label: 'once a week' };
-  if (match[1] === 'hourly') return { intervalMinutes: 60, label: 'once an hour' };
-
-  const amount = Number(match[1] || 1);
-  const unit = match[2];
-  const multiplier = unit === 'minute' ? 1 : unit === 'hour' ? 60 : unit === 'day' ? 1440 : 10080;
-  const intervalMinutes = amount * multiplier;
-  const label = unit === 'minute' && amount === 1 ? 'once a minute'
-    : unit === 'hour' && amount === 1 ? 'once an hour'
-      : unit === 'day' && amount === 1 ? 'once a day'
-        : unit === 'week' && amount === 1 ? 'once a week'
-          : `every ${amount} ${unit}s`;
-  return { intervalMinutes, label };
-}
-
-function buildWatchRequest(message) {
-  const text = stripWakeWord(message).replace(/[?.!]+$/, '').trim();
-  const cadence = extractWatchCadence(text);
-  const conditionMatch = text.match(/\b(?:when|if|until)\s+(.+)$/i);
-  const condition = conditionMatch ? conditionMatch[1].trim() : null;
-  const title = text
-    .replace(/^(?:watch|monitor|track|follow|keep an eye on|check)\s+(?:for\s+)?/i, '')
-    .replace(/\s+(?:when|if|until)\s+.+$/i, '')
-    .replace(/\s+(?:and\s+)?(?:tell|let)\s+me\s*$/i, '')
-    .replace(/\s+(?:every|each)\s+(?:\d+\s+)?(?:minute|hour|day|week)s?$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const instruction = text;
-  return {
-    title: title || 'Price watch',
-    instruction,
-    condition,
-    recurrence: 'poll',
-    interval_minutes: cadence.intervalMinutes,
-    cadenceLabel: cadence.label
-  };
-}
-
-function looksLikeWatchCancellation(message) {
-  const text = stripWakeWord(message);
-  return /\b(stop|cancel|pause|disable|turn off)\b/i.test(text) &&
-    WATCH_TARGETS.test(text) &&
-    /\b(watch|monitor|track|follow|checking|watching)\b/i.test(text);
-}
-
-function buildWatchCancellation(message) {
-  const title = stripWakeWord(message)
-    .replace(/^(?:stop|cancel|pause|disable|turn off)\s+(?:watching|monitoring|tracking|following|the\s+watch\s+for|the\s+watch)\s*/i, '')
-    .replace(/^(?:watch|monitor|track|follow)\s+/i, '')
-    .replace(/\s+(?:watch|monitor|tracking|monitoring)$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return title || 'that watch';
-}
-
-function looksLikeContextualPlaceFollowup(message) {
-  const text = normalizeText(message);
-  return /\b(that|it|this|one|there)\b/i.test(text) &&
-    /\b(closest|nearest|definitely|sure|same|open|maps|uber|there)\b/i.test(text) &&
-    !/\b(mcdonald'?s|john lewis|coffee|cafe|restaurant|gym|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i.test(text);
-}
-
-function looksLikeContextualTravelFollowup(message) {
-  const text = normalizeText(message);
-  return /\b(that|it|this|there|the route|the train)\b/i.test(text) &&
-    /\b(train|direct|changes?|platform|leave|arrive|get there|what time|which one|what is it|what train)\b/i.test(text) &&
-    !extractFromTo(text) &&
-    !extractHeadingDestination(text);
-}
-
-function cleanDestinationPhrase(message) {
-  const text = normalizeText(message)
-    .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, '')
-    // Ordinary question-opener phrasing ("is there a gym...", "are there any decent
-    // gyms...", "do you know if there's a coffee shop...") — see the matching strip in
-    // geocoding.js's cleanPlaceSearchQuery for why this matters downstream.
-    .replace(/^(?:is|are)\s+there\s+(?:a|an|any|anywhere)?\b\s*/i, '')
-    .replace(/^do\s+you\s+know\s+if\s+there'?s?\s+(?:a|an|any)?\b\s*/i, '')
-    .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, '')
-    .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, '')
-    .replace(/^(what|which)\s+(bus|buses|public transport|transit)\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
-    .replace(/^(what|which)\s+train\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
-    .replace(/^(when'?s\s+)?(the\s+)?(first|earliest|next)\s+train\s+(to|for)\s+/i, '')
-    .replace(/^(train|trains)\s+(to|for)\s+/i, '')
-    .replace(/^what\s+about\s+(to)?\s*/i, '')
-    .replace(/^heading\s+to\s+/i, '')
-    .replace(/^how\s+do\s+i\s+get\s+to\s+/i, '')
-    .replace(/^how\s+can\s+i\s+get\s+to\s+/i, '')
-    .replace(/^where\s+(is|are)\s+/i, '')
-    .replace(/^(what|which)\s+(is\s+)?/i, '')
-    .replace(/^i\s+need\s+to\s+be\s+at\s+/i, '')
-    .replace(/^i\s+need\s+to\s+get\s+to\s+/i, '')
-    .replace(/^where\s+the\s+/i, 'the ')
-    .replace(/\b(this|that)\s+(?=\w)/gi, '')
-    .replace(/\bnext\s+(nearest|closest)\b/i, '$1')
-    .replace(/\b(book|get|order|call|send|open)\s+(me\s+)?(an?\s+)?(uber|ride|taxi|cab|car)\s+(to|for)?\b/i, ' ')
-    .replace(/\b(take|drive)\s+me\s+(to)?\b/i, ' ')
-    .replace(/\b(show|find|search for|look for|open)\s+(me\s+)?\b/i, ' ')
-    .replace(/\b(in|on)\s+(apple\s+)?maps\b/i, ' ')
-    .replace(/\bis\s+(located|at)\b/i, ' ')
-    .replace(/\s+by\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\s+.*$/i, ' ')
-    .replace(/\s+(tomorrow|today)\s+(around|about|at|by)?\s*\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
-    .replace(/\s+(around|about|at|by)\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
-    .replace(/\s+(with\s+)?(no changes?|without changing|direct|fewest changes?)\b.*$/i, ' ')
-    .replace(/\s+what\s+(bus|buses|public transport|transit)\s+.*$/i, ' ')
-    .replace(/\s+(to|near|from)\s+me\s+(is|are)\??$/i, ' ')
-    .replace(/\s+(is|are)\??$/i, '')
-    .replace(/\bplease\b/gi, ' ')
-    .replace(/\s+is$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[?.!]+$/g, '')
-    .trim();
-  return text || normalizeText(message);
-}
-
-const TIME = /(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i;
-// Arrival cues mean a deadline to BE somewhere — "at 9" here is when to ARRIVE.
-const ARRIVAL_CUE = /\b(be (there|at)|need to be|needs? to be|meeting|appointment|arrive|arriving|get there|make it|for)\b/i;
-
-function extractArrivalTime(message) {
-  const text = String(message || '');
-  const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  // "by X" is always an arrival deadline. "at/for X" only when an arrival cue is
-  // present ("meeting at 9", "be there at 8", "make it for 8") — otherwise a bare
-  // "at 9" is ambiguous and handled by departure detection below.
-  const match = text.match(new RegExp(`\\bby\\s+${TIME.source}`, 'i')) ||
-    (ARRIVAL_CUE.test(text) ? text.match(new RegExp(`\\b(?:at|for|by)\\s+${TIME.source}`, 'i')) : null);
-  return match ? `${day}${match[1].trim()}`.trim() : undefined;
-}
-
-function extractDepartureTime(message) {
-  const text = String(message || '');
-  const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  if (/\b(first|earliest)\s+train\b/i.test(text) && /\btomorrow\b/i.test(text)) {
-    return 'tomorrow 00:01';
-  }
-  // Only treat a time as a departure when the user explicitly states when they
-  // LEAVE — never from a bare "at 9" / "9pm", which is usually an arrival deadline
-  // (HARDCODED CORRECTNESS TRAP: a wrong departure_time = a missed train).
-  const match = text.match(new RegExp(`\\b(?:leav(?:e|ing)|set(?:ting)?\\s+off|depart(?:ing)?|head(?:ing)?\\s+off)\\s+(?:at|around|about|after|by)?\\s*${TIME.source}`, 'i'));
-  return match ? `${day}${match[1].trim()}`.trim() : undefined;
-}
-
-function extractTripPreference(message) {
-  const text = String(message || '');
-  if (/\b(direct|no changes?|without changing|fewest changes?)\b/i.test(text)) return 'fewest_changes';
-  if (/\b(fastest|quickest|soonest|earliest|first train)\b/i.test(text)) return 'fastest';
-  return 'balanced';
-}
-
-function extractFromTo(message) {
-  const text = normalizeText(message);
-  const match = text.match(/\bfrom\s+(.+?)\s+to\s+(.+?)(?:\s+(?:tomorrow|today|around|about|at|by|after|before)\b|[?.!]|$)/i);
-  if (!match) return null;
-  return {
-    origin: cleanDestinationPhrase(match[1]),
-    destination: cleanDestinationPhrase(match[2])
-  };
-}
-
-function extractHeadingDestination(message) {
-  const text = normalizeText(message);
-  const match = text.match(/\bneed\s+to\s+be\s+at\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
-    text.match(/\bneed\s+to\s+get\s+to\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
-    text.match(/\b(?:get|go)\s+to\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
-    text.match(/\b(?:heading|going|travelling|traveling)\s+to\s+(.+?)(?:[?.!]|$)/i) ||
-    text.match(/\bto\s+(.+?)(?:\s+(?:tomorrow|today|around|about|at|by|after|before)\b|[?.!]|$)/i);
-  if (!match) return null;
-  return cleanDestinationPhrase(match[1]);
-}
-
-function cleanStationPhrase(value) {
-  return normalizeText(value)
-    .replace(/^(live\s+)?(departures?|arrival board|station board|platforms?|what platform)\s+(at|from|for)?\s*/i, '')
-    .replace(/^next\s+train\s+from\s+/i, '')
-    .replace(/^first\s+train\s+from\s+/i, '')
-    .replace(/\s+(station board|departures?|platforms?)$/i, '')
-    .replace(/\bplease\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function inferDeterministicAction(message, options = {}) {
-  const text = normalizeText(message);
-  const preferredMode = options?.settings?.preferredTransportMode;
-  const defaultMode = ['driving', 'transit', 'walking'].includes(preferredMode) ? preferredMode : 'driving';
-
-  const explicitWebBrowse = inferExplicitWebBrowseAction(text);
-  if (explicitWebBrowse) return explicitWebBrowse;
-
-  const stockPrice = inferStockPriceAction(text);
-  if (stockPrice) return stockPrice;
-
-  const playAction = inferPlayAction(text);
-  if (playAction) return playAction;
-
-  const personalAdmin = inferPersonalAdminAction(text);
-  if (personalAdmin) return personalAdmin;
-
-  const outboundCommunication = inferOutboundCommunicationAction(text);
-  if (outboundCommunication) return outboundCommunication;
-
-  if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
-
-  // find_appointment_options only talks to the sandbox provider; there is no real one yet, so
-  // routing to it regardless makes every "book me a dentist appointment" a dead end. Only take
-  // this path when a provider is connected, otherwise let the model use the browser.
-  if (options?.appointmentProviderConnected &&
-      /\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
-    return {
-      reason: 'appointment_booking',
-      spoken: "I'll look for a time that fits.",
-      actions: [{ type: 'find_appointment_options', input: { request: text } }]
-    };
-  }
-
-  if (/\b(train|trains|rail|platforms?|departures?|station board|arrival board)\b/i.test(text) &&
-      !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text) &&
-      (LIVE_RAIL_TERMS.test(text) || RAIL_TRIP_TERMS.test(text) || /\bfrom\b.+\bto\b/i.test(text))) {
-    return null;
-  }
-
-  if (looksLikeRideRequest(text) && looksLikeLocalPlaceRequest(text)) {
-    return {
-      reason: 'ride_to_local_place',
-      spoken: "I'll open that in Uber.",
-      actions: [{ type: 'book_uber', input: { destination: cleanDestinationPhrase(text) } }]
-    };
-  }
-
-  if (looksLikeWatchCancellation(text)) {
-    const title = buildWatchCancellation(text);
-    return {
-      reason: 'stop_durable_watch',
-      spoken: `I’ll stop watching ${title}.`,
-      actions: [{ type: 'cancel_scheduled_task', input: { title } }]
-    };
-  }
-
-  if (looksLikeWatchRequest(text)) {
-    const watch = buildWatchRequest(text);
-    return {
-      reason: 'durable_price_watch',
-      spoken: `I’ll check ${watch.title} ${watch.cadenceLabel} and tell you when I find a change.`,
-      actions: [{
-        type: 'create_scheduled_task',
-        input: {
-          title: watch.title,
-          instruction: watch.instruction,
-          condition: watch.condition,
-          recurrence: watch.recurrence,
-          interval_minutes: watch.interval_minutes
-        }
-      }]
-    };
-  }
-
-  if (looksLikeDirectionsRequest(text)) {
-    const fromTo = extractFromTo(text);
-    const headingDestination = !fromTo ? extractHeadingDestination(text) : null;
-    if (!fromTo && !headingDestination && /\b(yeah|yes|but|that|it|this|same|there|direct|changes?|tomorrow)\b/i.test(text)) {
-      return null;
-    }
-    const destination = fromTo?.destination || headingDestination || cleanDestinationPhrase(text);
-    // A bare "get directions" names no place, and cleanDestinationPhrase just echoes the command
-    // back. Defer to the model so it asks "where to?" rather than routing somewhere invented.
-    if (!fromTo && !headingDestination && !hasRealDestination(destination)) {
-      return null;
-    }
-    const input = {
-      destination,
-      mode: TRANSIT_TERMS.test(text) ? 'transit' : defaultMode
-    };
-    if (fromTo?.origin) input.origin = fromTo.origin;
-    const arrivalTime = extractArrivalTime(text);
-    if (arrivalTime) input.arrival_time = arrivalTime;
-    const departureTime = !arrivalTime ? extractDepartureTime(text) : undefined;
-    if (departureTime) input.departure_time = departureTime;
-    if (RAIL_TRIP_TERMS.test(text) && !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text)) {
-      return null;
-    }
-    return {
-      reason: input.mode === 'transit' ? 'transit_directions_to_place' : 'directions_to_local_place',
-      spoken: input.mode === 'transit' ? "I'll check the transit route." : "I'll check directions.",
-      actions: [{ type: 'get_directions', input }]
-    };
-  }
-
-  // Placed after ride & directions so "get me an uber to the restaurant" is unaffected —
-  // only the final place-lookup fallback is guarded.
-  if (looksLikeCommunicationRequest(text)) return null;
-
-  if (looksLikeBrowserSessionRequest(text)) return null;
-
-  if (!looksLikeExplicitPlaceLookup(text)) return null;
-
-  return {
-    reason: 'find_local_place',
-    spoken: "I'll find that nearby.",
-    actions: [{ type: 'find_place', input: { query: cleanDestinationPhrase(text) } }]
-  };
+  return inferExplicitWebBrowseAction(text)
+    || inferStockPriceAction(text)
+    || inferPlayAction(text)
+    || inferPersonalAdminAction(text)
+    || inferOutboundCommunicationAction(text);
 }
 
 module.exports = {
   inferDeterministicAction,
   inferPersonalAdminAction,
-  inferOutboundCommunicationAction,
-  looksLikeLocalPlaceRequest,
-  looksLikeDirectionsRequest,
-  cleanDestinationPhrase,
-  looksLikeWatchRequest,
-  buildWatchRequest,
-  looksLikeWatchCancellation,
-  buildWatchCancellation
+  inferOutboundCommunicationAction
 };
