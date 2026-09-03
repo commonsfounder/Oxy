@@ -28,6 +28,33 @@ function unavailableActionResult(type) {
   };
 }
 
+function normalizeAuthorizationWords(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}@+]+/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function hasExplicitUserAuthorization(action, userMessage) {
+  const text = String(userMessage || '').trim();
+  if (!text) return false;
+  if (/\b(?:don['’]?t|do not|never|not yet|wait|hold on|cancel|stop)\b/i.test(text)) return false;
+  if (/\b(?:draft|compose|prepare|write|show me|what should)\b/i.test(text)) return false;
+
+  const explicitSend = /^(?:hey\s+adam[,\s]+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+|i(?:'d| would)?\s+like\s+you\s+to\s+|i\s+want\s+you\s+to\s+)?(?:send|text|message|dm|telegram)\b/i;
+  if (!explicitSend.test(text)) return false;
+
+  const targetWords = normalizeAuthorizationWords(action?.input?.contact || action?.input?.to)
+    .filter(word => word.length >= 2 || /^\+?\d{4,}$/.test(word));
+  if (!targetWords.length) return false;
+  const messageWords = new Set(normalizeAuthorizationWords(text));
+  return targetWords.some(word => messageWords.has(word));
+}
+
 async function safeLogAction(trace, label, fn) {
   try {
     if (trace) await trace.run(label, fn);
@@ -65,7 +92,12 @@ function createActionExecution({
         result = applyActionContractResultMetadata(action, validationError);
       } else if (context.dryRun || context.simulate) {
         result = simulatedActionResult(action);
-      } else if ((contract?.executionMode === 'review' || context.guardMode) && !context.bypassReview) {
+      } else if ((
+        context.guardMode ||
+        (contract?.executionMode === 'review' && !(
+          contract.explicitRequestAuthorizes && hasExplicitUserAuthorization(action, context.userMessage)
+        ))
+      ) && !context.bypassReview) {
         await setPendingAction(userId, action, context);
         const cardInfo = MONEY_ACTION_TYPES.has(type) ? await getLinkedCardInfo(userId) : null;
         result = buildPendingReviewResult(action, cardInfo);
@@ -137,4 +169,4 @@ function createActionExecution({
   };
 }
 
-module.exports = { createActionExecution, unavailableActionResult };
+module.exports = { createActionExecution, hasExplicitUserAuthorization, unavailableActionResult };

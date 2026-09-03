@@ -134,6 +134,12 @@ test('high-risk communication actions require review', () => {
   }
 });
 
+test('an explicit Telegram send request is its own authorization', () => {
+  assert.equal(ACTION_CONTRACTS.send_telegram.confirmation, 'review_required');
+  assert.equal(ACTION_CONTRACTS.send_telegram.executionMode, 'review');
+  assert.equal(ACTION_CONTRACTS.send_telegram.explicitRequestAuthorizes, true);
+});
+
 test('SMS uses native composer instead of chat review', () => {
   assert.equal(ACTION_CONTRACTS.send_message.confirmation, 'none');
   assert.equal(ACTION_CONTRACTS.send_message.executionMode, 'direct');

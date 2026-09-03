@@ -63,11 +63,60 @@ test('action runner normalizes a channel-specific action before applying review 
 
   const result = await executeActions('user-1', [
     { type: 'send_message', input: { contact: 'Arina', message: 'Hello.' } }
-  ], { userMessage: 'Can you text Arina', channel: 'telegram_bot' });
+  ], { userMessage: 'Draft a message to Arina', channel: 'telegram_bot' });
 
   assert.equal(result[0].action, 'send_telegram');
   assert.equal(result[0].result.pending, true);
   assert.equal(pending[0].action.type, 'send_telegram');
+});
+
+test('an explicit Telegram send command is the authorization and executes without a second approval', async () => {
+  const executed = [];
+  const pending = [];
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type, input) => {
+      executed.push({ userId, type, input });
+      return { success: true, text: 'Telegram message sent.' };
+    },
+    setPendingAction: async (userId, action) => pending.push({ userId, action }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const action = { type: 'send_telegram', input: { contact: 'Arina☕️', message: 'Hey Arina' } };
+  const messages = ['text arina', 'Can you text Arina', 'Please send a Telegram message to Arina'];
+  const results = [];
+
+  for (const userMessage of messages) {
+    results.push(await executeActions('user-1', [action], { userMessage }));
+  }
+
+  assert.equal(executed.length, messages.length);
+  assert.ok(executed.every(item => item.type === 'send_telegram'));
+  assert.equal(pending.length, 0);
+  assert.ok(results.every(result => result[0].result.success === true));
+});
+
+test('a Telegram draft, recipient mismatch, or Guard Mode still requires review', async () => {
+  const pending = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => {
+      throw new Error('must not execute without matching explicit authorization');
+    },
+    setPendingAction: async (userId, action) => pending.push({ userId, action }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+  const action = { type: 'send_telegram', input: { contact: 'Arina☕️', message: 'Hey Arina' } };
+
+  const draft = await executeActions('user-1', [action], { userMessage: 'Draft a message to Arina' });
+  const mismatch = await executeActions('user-1', [action], { userMessage: 'Text Bob' });
+  const guarded = await executeActions('user-1', [action], { userMessage: 'Text Arina', guardMode: true });
+
+  assert.equal(draft[0].result.pending, true);
+  assert.equal(mismatch[0].result.pending, true);
+  assert.equal(guarded[0].result.pending, true);
+  assert.equal(pending.length, 3);
 });
 
 test('appointment booking waits for an explicit OK before it runs', async () => {

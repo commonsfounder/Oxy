@@ -800,6 +800,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Telegram failed',
     confirmation: 'review_required',
     executionMode: 'review',
+    explicitRequestAuthorizes: true,
     adapter: { kind: 'connector', id: 'telegram' }
   },
   get_telegram_contacts: {
