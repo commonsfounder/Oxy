@@ -1899,7 +1899,16 @@ function isPlainWorldQuestion(message = '') {
 
 // Every turn gets the think/act/observe loop except the few kinds that do not want one.
 function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, autonomyLevel = 'Active', pendingAction = null } = {}) {
-  if (quickTurn || pendingAction || autonomyLevel === 'Quiet') return false;
+  // A pending approval only changes routing when this turn is controlling or revising that
+  // approval. An unrelated new request must still get the full think/act/observe loop; using
+  // the presence of any old approval here forced the classic one-tool path, which could look
+  // up Telegram contacts but had no second tool turn available to send the message.
+  const approvalControlTurn = pendingAction && (
+    isPendingConfirmMessage(message) ||
+    isPendingCancelMessage(message) ||
+    isPendingRevisionMessage(message)
+  );
+  if (quickTurn || approvalControlTurn || autonomyLevel === 'Quiet') return false;
   if (isPureContentGenerationTurn(message)) return false;  // long prose streams better
   if (isPlainWorldQuestion(message)) return false;         // answerable by talking
   return Boolean(String(message || '').trim());

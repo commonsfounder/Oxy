@@ -56,6 +56,24 @@ test('real-world action prompts remain eligible for the agent loop', () => {
   }), true);
 });
 
+test('a new action request stays agentic when an older approval is still pending', () => {
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: 'text Arina now',
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: { action: { type: 'send_message', input: { contact: 'someone else' } } }
+  }), true);
+});
+
+test('a pending-action revision remains on the review-aware classic path', () => {
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: 'make it shorter',
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: { action: { type: 'send_message', input: { contact: 'Arina', message: 'Hello there.' } } }
+  }), false);
+});
+
 test('a price comparison across real sites stays eligible for the agent loop, not a prose answer', () => {
   assert.equal(isPureContentGenerationTurn('compare the price of the iPhone 15 on Amazon and John Lewis'), false);
   assert.equal(shouldUseAgenticLoopForMessage({
