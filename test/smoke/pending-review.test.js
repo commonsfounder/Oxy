@@ -27,6 +27,8 @@ test('pending review does not confirm revision or cancellation language', () => 
   assert.equal(isPendingConfirmMessage('wait change the tone'), false);
   assert.equal(isPendingConfirmMessage("yes but don't send yet"), false);
   assert.equal(isPendingCancelMessage('nah leave it'), true);
+  assert.equal(isPendingCancelMessage("don't call arina"), true);
+  assert.equal(isPendingCancelMessage('do not text arina'), true);
 });
 
 test('pending review detects edit follow-ups', () => {

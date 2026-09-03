@@ -124,11 +124,17 @@ function tokenize(value) {
 
 function approvalSummary(approval) {
   const actionType = actionDisplayName(cleanText(approval?.action?.type, 'action', 100));
+  const input = approval?.action?.input || {};
+  const detail = cleanText([
+    input.contact || input.to || input.title || input.destination || input.repo,
+    input.message || input.body || input.subject
+  ].filter(Boolean).join(' · '), '', 180) || null;
   return {
     approvalId: approval?.approvalId || null,
     taskId: approval?.taskId || null,
     taskGoal: cleanText(approval?.taskGoal, '', 120) || null,
     actionType,
+    detail,
     createdAt: approval?.createdAt || null
   };
 }
@@ -145,6 +151,9 @@ function selectPendingApproval(approvals = [], message = '') {
       approval.taskGoal,
       approval.userMessage,
       approval.action?.type,
+      approval.action?.input?.contact,
+      approval.action?.input?.message,
+      approval.action?.input?.body,
       approval.action?.input?.title,
       approval.action?.input?.subject,
       approval.action?.input?.to,
@@ -162,7 +171,10 @@ function describeAmbiguousApprovals(approvals = []) {
   const labels = approvals.map((approval, index) => {
     const goal = cleanText(approval.taskGoal, '', 90);
     const action = cleanText(approval.actionType, 'action', 80);
-    return `${index + 1}. ${goal || action}`;
+    const label = goal || action;
+    const detail = cleanText(approval.detail, '', 160);
+    const suffix = detail && !label.toLowerCase().includes(detail.toLowerCase()) ? ` — ${detail}` : '';
+    return `${index + 1}. ${label}${suffix}`;
   });
   if (!labels.length) return 'I have more than one approval waiting. Tell me which task to handle.';
   return `I have more than one approval waiting:\n${labels.join('\n')}\nTell me which task to approve or cancel.`;

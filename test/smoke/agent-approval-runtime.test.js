@@ -68,6 +68,29 @@ test('multiple pending approvals do not overwrite each other or silently choose 
   assert.equal(approvals.selectPendingApproval(pending.approvals, 'approve the website work').taskId, 'task-website');
 });
 
+test('contact-specific approval language selects among repeated action labels', () => {
+  const pending = [
+    {
+      approvalId: 'arina-message',
+      taskGoal: 'Message',
+      userMessage: 'Message',
+      action: { type: 'send_telegram', input: { contact: 'Arina', message: 'Hey Arina' } }
+    },
+    {
+      approvalId: 'bob-message',
+      taskGoal: 'Message',
+      userMessage: 'Message',
+      action: { type: 'send_telegram', input: { contact: 'Bob', message: 'Hi Bob' } }
+    }
+  ];
+  assert.equal(approvals.selectPendingApproval(pending, 'approve the message to arina').approvalId, 'arina-message');
+  assert.equal(approvals.approvalSummary(pending[0]).detail, 'Arina · Hey Arina');
+  assert.match(
+    approvals.describeAmbiguousApprovals(pending.map(approval => approvals.approvalSummary(approval))),
+    /Message — Arina · Hey Arina/
+  );
+});
+
 test('runtime approval claim is single-flight and settles only the claimed row', async () => {
   const db = fakeSupabase();
   const created = await approvals.createApproval(db, 'user-1', {

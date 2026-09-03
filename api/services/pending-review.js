@@ -27,6 +27,7 @@ function isPendingCancelMessage(message) {
   return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it|not now|not yet)$/i
     .test(text) ||
     /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text) ||
+    /\b(?:don['’]?t|do not|never)\s+(?:call|text|message|email|send|book|order|buy|purchase|open|add|create|schedule|move)\b/i.test(text) ||
     /\b(cancel|stop)\b.+/i.test(text);
 }
 
