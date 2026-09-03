@@ -124,7 +124,6 @@ const {
 const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
   buildCalendarReadAction,
-  calendarIntentKind,
   isCalendarReadRequest,
   isExplicitCalendarWrite
 } = require('./services/calendar-intent');
@@ -883,6 +882,8 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 const supabase = createSupabaseServiceClient();
+const approvalRuntime = agentApprovals.createApprovalRuntime(supabase);
+const setPendingAction = (userId, action, context = {}) => approvalRuntime.park(userId, action, context);
 
 // Durable delegated runs have one lifecycle owner. The adapter keeps the
 // existing runtime service's Supabase-shaped API at the boundary; callers do
@@ -1132,7 +1133,7 @@ async function refreshBriefingSourceData(userId, todayKey, snapshot) {
 }
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
-const { adaptActionForChannel, buildChatChannelContext, buildTelegramChatRequest } = require('./services/chat-channel');
+const { buildChatChannelContext, buildTelegramChatRequest } = require('./services/chat-channel');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -1189,16 +1190,6 @@ function parsePrice(text = '') {
   if (!match) return null;
   const amount = Number(match[1].replace(/,/g, ''));
   return Number.isFinite(amount) ? amount : null;
-}
-
-function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
-  const intent = calendarIntentKind(userMessage);
-  if (!Array.isArray(actions) || !actions.length) return [];
-  return actions.map(action => {
-    if (action?.type !== 'create_calendar_event') return action;
-    if (intent === 'write') return action;
-    return { ...buildCalendarReadAction(userMessage).actions[0], _reroutedFrom: 'create_calendar_event' };
-  });
 }
 
 function emailReadActionForMessage(message = '') {
@@ -3344,7 +3335,6 @@ const invokeDeclaredAdapter = createDeclaredAdapterInvoker({
 
 const executeActions = createActionExecution({
   invokeAdapter: invokeDeclaredAdapter,
-  normalizeAction: adaptActionForChannel,
   invalidateUserContextCache,
   setPendingAction,
   validateAction: validateActionWithContract,
@@ -3897,77 +3887,6 @@ async function setPreferenceValue(userId, key, value) {
     }, { onConflict: 'user_id,key' });
 }
 
-async function getLegacyPendingAction(userId) {
-  const { data, error } = await supabase
-    .from('preferences')
-    .select('value')
-    .eq('user_id', userId)
-    .eq('key', PENDING_ACTION_PREF)
-    .maybeSingle();
-  if (error || !data?.value) return null;
-  try {
-    const parsed = JSON.parse(data.value);
-    if (!parsed?.action?.type) return null;
-    parsed._raw = data.value;
-    parsed.storage = 'preference';
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-async function getPendingAction(userId, message = '') {
-  const runtime = await agentApprovals.listPendingApprovals(supabase, userId).catch(() => ({ available: false, approvals: [] }));
-  const legacy = await getLegacyPendingAction(userId);
-  const candidates = [
-    ...(runtime.available ? runtime.approvals : []),
-    ...(legacy ? [legacy] : [])
-  ];
-  return agentApprovals.selectPendingApproval(candidates, message);
-}
-
-async function setPendingAction(userId, action, context = {}) {
-  const payload = {
-    action,
-    createdAt: new Date().toISOString(),
-    userMessage: context.userMessage || '',
-    location: context.location || null,
-    nativeHints: context.nativeHints || null,
-    // Which background run asked for this, so approving it continues that run from its
-    // checkpoint rather than executing the action on its own and abandoning the goal.
-    taskId: context.persistedTaskId || null,
-    sessionId: context.runtimeSessionId || null,
-    taskGoal: context.taskGoal || null
-  };
-
-  // Once the approval table is installed, every durable run gets its own approval row.
-  // Restoring an already-claimed row is used when execution failed after the user had
-  // approved it; this avoids creating a second approval for the same action.
-  if (context.approvalId) {
-    const restored = await agentApprovals.restoreApproval(supabase, userId, context.approvalId).catch(() => false);
-    if (restored) return { ...payload, approvalId: context.approvalId, storage: 'runtime' };
-  }
-
-  const stored = await agentApprovals.createApproval(supabase, userId, payload).catch(error => ({
-    available: false,
-    error,
-    missingTable: agentApprovals.isMissingTable(error)
-  }));
-  if (stored.available && stored.approval) {
-    return {
-      ...payload,
-      approvalId: stored.approval.approvalId,
-      storage: 'runtime'
-    };
-  }
-
-  if (stored.error && !stored.missingTable) {
-    console.warn('[approval-runtime] durable approval unavailable; using legacy fallback:', stored.error.message || stored.error);
-  }
-  await setPreferenceValue(userId, PENDING_ACTION_PREF, JSON.stringify(payload));
-  return { ...payload, _raw: JSON.stringify(payload), storage: 'preference' };
-}
-
 async function resolveAgentTaskRoute(userId, task) {
   const stored = task?.metadata?.modelRoute;
   if (stored?.provider && stored?.model) {
@@ -4135,42 +4054,6 @@ async function cancelApprovalRun(userId, pendingAction) {
     throw error;
   }
   return true;
-}
-
-async function settlePendingAction(userId, pendingAction, status) {
-  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
-    return agentApprovals.settleApproval(supabase, userId, pendingAction.approvalId, status).catch(() => false);
-  }
-  return false;
-}
-
-async function clearPendingAction(userId, pendingAction = null) {
-  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
-    await settlePendingAction(userId, pendingAction, 'cancelled');
-  }
-  await supabase
-    .from('preferences')
-    .delete()
-    .eq('user_id', userId)
-    .eq('key', PENDING_ACTION_PREF);
-}
-
-// Compare-and-delete claim on the pending action. pendingActionConfirmLocks only covers one
-// machine; this is what stops two instances both running the same approved action.
-async function claimPendingAction(userId, pendingAction) {
-  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
-    return agentApprovals.claimApproval(supabase, userId, pendingAction.approvalId).catch(() => false);
-  }
-  if (!pendingAction?._raw) return false;
-  const { data, error } = await supabase
-    .from('preferences')
-    .delete()
-    .eq('user_id', userId)
-    .eq('key', PENDING_ACTION_PREF)
-    .eq('value', pendingAction._raw)
-    .select('value');
-  if (error) return false;
-  return Array.isArray(data) && data.length > 0;
 }
 
 async function getEnabledConnectors(userId, trace = null) {
@@ -4778,7 +4661,6 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       actions = [];
     }
     actions = mergeNativeToolCalls(streamedToolCalls, actions);
-    actions = guardCalendarActionsForUserMessage(actions, userText);
 
     let actionResults = [];
     let audioBase64 = null;
@@ -4943,7 +4825,6 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     });
     let { spoken, actions, parseError } = parseActions(brainRes.text || '');
     if (parseError) console.warn('[chat-with-image] one or more <action> blocks failed to parse; some actions may be missing');
-    actions = guardCalendarActionsForUserMessage(actions, message);
     let actionResults = [];
     let dataResults = [];
     if (actions.length > 0) {
@@ -5229,7 +5110,6 @@ const CONNECTOR_TYPES = {
 };
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
-const PENDING_ACTION_PREF = 'pending.action';
 const pendingActionConfirmLocks = new Set();
 
 // Concrete /connectors paths MUST stay above /connectors/:userId — see the note on
@@ -6086,25 +5966,13 @@ async function gatherCalendarContext(userId) {
 }
 
 async function gatherLifeBriefingSnapshot(userId, now = new Date()) {
-  const [tasks, emailContext, events, pending, legacyPending, scheduled] = await Promise.all([
+  const [tasks, emailContext, events, approvals, scheduled] = await Promise.all([
     delegatedRunLifecycle.list(userId, null).catch(() => []),
     gatherEmailContext(userId),
     gatherCalendarContext(userId),
-    agentApprovals.listPendingApprovals(supabase, userId).catch(() => ({ approvals: [] })),
-    getLegacyPendingAction(userId),
+    approvalRuntime.list(userId).catch(() => []),
     scheduledTasks.listScheduledTasks(userId).catch(() => ({ tasks: [] }))
   ]);
-
-  const approvals = [
-    ...(pending?.approvals || []),
-    ...(legacyPending ? [legacyPending] : [])
-  ].filter((approval, index, all) => {
-    const key = approval.approvalId || `${approval.taskId || ''}:${approval.action?.type || ''}:${approval.createdAt || ''}`;
-    return all.findIndex(candidate => {
-      const candidateKey = candidate.approvalId || `${candidate.taskId || ''}:${candidate.action?.type || ''}:${candidate.createdAt || ''}`;
-      return candidateKey === key;
-    }) === index;
-  });
 
   const briefing = buildLifeBriefing({
     tasks: tasks.map(safeAgentTaskSummary),
@@ -7256,7 +7124,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
 
-    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => getPendingAction(userId, message));
+    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => approvalRuntime.pending(userId, message));
     if (pendingAction?.ambiguous && (
       isPendingConfirmMessage(message) ||
       isPendingCancelMessage(message) ||
@@ -7277,7 +7145,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     if (pendingAction && isPendingCancelMessage(message)) {
       // Cancellation claims the same pending row as confirmation so a near-simultaneous
       // "yes" cannot execute the action after the task has been marked cancelled.
-      const claimed = await claimPendingAction(userId, pendingAction);
+      const claimed = await approvalRuntime.claim(userId, pendingAction);
       if (!claimed) {
         await respondWithResult({
           res,
@@ -7298,12 +7166,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         trace.log('pending_action.cancel_failed', error.message);
       }
       if (cancelled || !pendingAction.taskId) {
-        await settlePendingAction(userId, pendingAction, 'cancelled');
+        await approvalRuntime.settle(userId, pendingAction, 'cancelled');
       }
       if (pendingAction.taskId && !cancelled) {
-        // The preference was already claimed above. Put it back if task settlement
-        // failed, otherwise a transient database error would silently lose the user's
-        // only retry/cancel handle while the task remains resumable.
+        // Restore the claimed approval if task settlement failed, preserving the retry handle.
         await setPendingAction(userId, pendingAction.action, {
           userMessage: pendingAction.userMessage,
           location: pendingAction.location,
@@ -7355,9 +7221,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       }
       pendingActionConfirmLocks.add(pendingKey);
       try {
-        // The Set above only covers this process, and Fly runs several. The real guard is the
-        // compare-and-delete: only the request that removes the pending action runs it.
-        const claimed = await claimPendingAction(userId, pendingAction);
+        // The Set covers this process; the durable CAS claim covers every Fly machine.
+        const claimed = await approvalRuntime.claim(userId, pendingAction);
         if (!claimed) {
           await respondWithResult({
             res,
@@ -7384,7 +7249,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             trace
           }, trace);
           actionResults = normalizeActionResultsForClient(actionResults);
-          await settlePendingAction(
+          await approvalRuntime.settle(
             userId,
             pendingAction,
             approvedActionSucceeded(actionResults) ? 'approved' : 'failed'
@@ -8018,7 +7883,6 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           actions = [];
         }
         actions = mergeNativeToolCalls(streamedToolCalls, actions);
-        actions = guardCalendarActionsForUserMessage(actions, message);
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
@@ -8026,7 +7890,6 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             fullText = recovered;
             ({ spoken, actions, parseError } = parseActions(fullText));
             if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
-            actions = guardCalendarActionsForUserMessage(actions, message);
             if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
               trace.log('fast_model.actions_ignored', `count=${actions.length}`);
               actions = [];
@@ -8175,13 +8038,11 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
     if (nonStreamToolCalls.length) trace.log('brain.native_tool_calls', nonStreamToolCalls.map(fc => fc.name).join(','));
     actions = mergeNativeToolCalls(nonStreamToolCalls, actions);
-    actions = guardCalendarActionsForUserMessage(actions, message);
     if ((!rawText.trim() && !nonStreamToolCalls.length) || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions, parseError } = parseActions(recovered));
         if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
-        actions = guardCalendarActionsForUserMessage(actions, message);
         if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
           trace.log('fast_model.actions_ignored', `count=${actions.length}`);
           actions = [];

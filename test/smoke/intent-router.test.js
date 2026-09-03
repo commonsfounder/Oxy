@@ -69,15 +69,15 @@ test('an explicit trivia request reaches the conversation-first play capability'
   assert.notEqual(inferDeterministicAction('Play some calm instrumental music.')?.actions?.[0]?.type, 'play_game');
 });
 
-test('an outbound request that names its own channel reaches the review-gated action', () => {
+test('an outbound request that names its own channel reaches the declared action', () => {
   assert.deepEqual(inferOutboundCommunicationAction('Send Alex a telegram message saying I am running ten minutes late.'), {
     reason: 'send_telegram',
-    spoken: 'I’ll prepare that message for review.',
+    spoken: 'I’ll send that.',
     actions: [{ type: 'send_telegram', input: { contact: 'Alex', message: 'I am running ten minutes late.' } }]
   });
   assert.deepEqual(inferOutboundCommunicationAction('Send #general a slack message saying the deploy is done.'), {
     reason: 'send_slack_message',
-    spoken: 'I’ll prepare that message for review.',
+    spoken: 'I’ll send that.',
     actions: [{ type: 'send_slack_message', input: { channel: '#general', message: 'the deploy is done.' } }]
   });
 });

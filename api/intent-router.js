@@ -108,7 +108,7 @@ function inferOutboundCommunicationAction(message) {
   if (telegram) {
     return {
       reason: 'send_telegram',
-      spoken: 'I’ll prepare that message for review.',
+      spoken: 'I’ll send that.',
       actions: [{ type: 'send_telegram', input: { contact: trimTrailingPunctuation(telegram[1]), message: telegram[2].trim() } }]
     };
   }
@@ -117,7 +117,7 @@ function inferOutboundCommunicationAction(message) {
   if (slack) {
     return {
       reason: 'send_slack_message',
-      spoken: 'I’ll prepare that message for review.',
+      spoken: 'I’ll send that.',
       actions: [{ type: 'send_slack_message', input: { channel: slack[1], message: slack[2].trim() } }]
     };
   }

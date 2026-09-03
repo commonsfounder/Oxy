@@ -1,6 +1,5 @@
 -- Approval records belong to the delegated goal that created them.
--- The legacy preferences.pending.action value remains a compatibility fallback for
--- installations that have not applied this migration yet; new durable runs use this table.
+-- This table is the sole authority for pending approval state.
 
 CREATE TABLE IF NOT EXISTS agent_runtime_approvals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -27,4 +26,3 @@ CREATE INDEX IF NOT EXISTS agent_runtime_approvals_task_idx
   ON agent_runtime_approvals(user_id, task_id, created_at DESC);
 
 ALTER TABLE agent_runtime_approvals ENABLE ROW LEVEL SECURITY;
-

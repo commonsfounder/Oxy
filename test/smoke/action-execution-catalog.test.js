@@ -381,10 +381,11 @@ test('Action Execution reaches production adapter routing and preserves real out
   assert.equal(completed[4].result.nativeExecution, 'reminder');
 
   const calendar = { type: 'create_calendar_event', input: { title: 'Dentist', start_date: '2026-09-01T10:00:00Z', end_date: '2026-09-01T11:00:00Z' } };
-  const review = await execute('u', [calendar]);
+  const calendarContext = { userMessage: 'Add a dentist event to my calendar on 1 September at 10am' };
+  const review = await execute('u', [calendar], calendarContext);
   assert.equal(review[0].result.outcome, 'awaiting_user');
   assert.deepEqual(pending, ['create_calendar_event']);
-  const approved = await execute('u', [calendar], { bypassReview: true });
+  const approved = await execute('u', [calendar], { ...calendarContext, bypassReview: true });
   assert.equal(approved[0].result.outcome, 'completed');
   assert.equal(approved[0].result.eventId, 'event_fake');
 

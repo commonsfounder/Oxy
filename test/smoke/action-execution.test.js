@@ -14,7 +14,6 @@ function createActionRunner(options = {}) {
 }
 const { getActionContract } = require('../../api/action-contracts');
 const { adapterForAction } = require('../../api/services/action-catalog');
-const { adaptActionForChannel } = require('../../api/services/chat-channel');
 
 function syntheticResolver(type) {
   if (type === 'action_a' || type === 'action_b') {
@@ -49,10 +48,9 @@ test('action runner parks high-risk actions for review', async () => {
   assert.equal(logs[0].result.pending, true);
 });
 
-test('action runner normalizes a channel-specific action before applying review policy', async () => {
+test('action runner prepares a channel-specific action before applying review policy', async () => {
   const pending = [];
   const executeActions = createActionRunner({
-    normalizeAction: adaptActionForChannel,
     executeAction: async () => {
       throw new Error('should not execute before Telegram review');
     },
@@ -68,6 +66,48 @@ test('action runner normalizes a channel-specific action before applying review 
   assert.equal(result[0].action, 'send_telegram');
   assert.equal(result[0].result.pending, true);
   assert.equal(pending[0].action.type, 'send_telegram');
+});
+
+test('action runner reroutes a hallucinated calendar write at the execution seam', async () => {
+  const executed = [];
+  const pending = [];
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type, input) => {
+      executed.push({ userId, type, input });
+      return { success: true, events: [] };
+    },
+    setPendingAction: async (userId, action) => pending.push({ userId, action }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [{
+    type: 'create_calendar_event',
+    input: {
+      title: 'Invented event',
+      start_date: '2026-09-04T10:00:00Z',
+      end_date: '2026-09-04T11:00:00Z'
+    }
+  }], { userMessage: "What's on my calendar tomorrow?" });
+
+  assert.equal(result[0].action, 'get_calendar_events');
+  assert.equal(result[0].input.when, 'tomorrow');
+  assert.equal(result[0].input._reroutedFrom, undefined);
+  assert.deepEqual(executed.map(item => item.type), ['get_calendar_events']);
+  assert.equal(pending.length, 0);
+
+  const writeResult = await executeActions('user-1', [{
+    type: 'create_calendar_event',
+    input: {
+      title: 'Dentist',
+      start_date: '2026-09-04T10:00:00Z',
+      end_date: '2026-09-04T11:00:00Z'
+    }
+  }], { userMessage: 'Add a dentist event to my calendar tomorrow at 10am' });
+
+  assert.equal(writeResult[0].action, 'create_calendar_event');
+  assert.equal(writeResult[0].result.pending, true);
+  assert.deepEqual(pending.map(item => item.action.type), ['create_calendar_event']);
 });
 
 test('an explicit Telegram send command is the authorization and executes without a second approval', async () => {

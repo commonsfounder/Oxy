@@ -5,6 +5,7 @@ const {
   validateActionWithContract
 } = require('../action-contracts');
 const { adapterForAction } = require('./action-catalog');
+const { prepareActionForExecution } = require('./action-preparation');
 const { diagnoseConnectorIssue } = require('./connector-health');
 const { buildPendingReviewResult, MONEY_ACTION_TYPES } = require('./pending-review');
 const { normalizeActionOutcome } = require('./action-outcome');
@@ -73,7 +74,6 @@ function createActionExecution({
   getLinkedCardInfo = async () => null,
   resolveAdapter = adapterForAction,
   resolveContract = getActionContract,
-  normalizeAction = action => action
 }) {
   if (typeof invokeAdapter !== 'function') throw new TypeError('createActionExecution requires invokeAdapter');
   if (typeof setPendingAction !== 'function') throw new TypeError('createActionExecution requires setPendingAction');
@@ -133,8 +133,8 @@ function createActionExecution({
     // parallel batch with sibling effects that would outlive the handoff.
     const sequential = !!context.sequential || !!context.agentIteration || actions.some(action => action?.type === 'create_agent_task');
     const previousResults = context.previousResults || [];
-    const normalizedActions = actions.map(action => normalizeAction(action, context) || action);
-    const enrichedActions = normalizedActions.map(action => {
+    const preparedActions = actions.map(action => prepareActionForExecution(action, context) || action);
+    const enrichedActions = preparedActions.map(action => {
       const input = { ...(action.input || {}) };
       if (previousResults.length) {
         const last = previousResults[previousResults.length - 1];

@@ -72,12 +72,6 @@ function actionPayload(action) {
   };
 }
 
-function isMissingTable(error) {
-  const code = String(error?.code || '').toUpperCase();
-  const message = String(error?.message || error?.details || '').toLowerCase();
-  return code === '42P01' || code === 'PGRST205' || /relation .*agent_runtime_approvals.*does not exist|could not find the table/.test(message);
-}
-
 function approvalRow(userId, input = {}) {
   const action = normalizeAction(input.action);
   if (!action) throw new Error('A review approval needs an action.');
@@ -112,8 +106,7 @@ function normalizeApproval(row) {
     createdAt: row.created_at || null,
     userMessage: cleanText(row.user_message, '', MAX_TEXT),
     location: row.location || null,
-    nativeHints: row.native_hints || null,
-    storage: 'runtime'
+    nativeHints: row.native_hints || null
   };
 }
 
@@ -186,7 +179,7 @@ async function createApproval(supabase, userId, input = {}) {
     .insert(row)
     .select('*')
     .single();
-  if (result.error) return { available: false, error: result.error, missingTable: isMissingTable(result.error) };
+  if (result.error) return { available: false, error: result.error };
   return { available: true, approval: normalizeApproval(result.data || row) };
 }
 
@@ -197,7 +190,7 @@ async function listPendingApprovals(supabase, userId) {
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
     .limit(20);
-  if (result.error) return { available: false, error: result.error, missingTable: isMissingTable(result.error), approvals: [] };
+  if (result.error) return { available: false, error: result.error, approvals: [] };
   return { available: true, approvals: (result.data || []).map(normalizeApproval).filter(Boolean) };
 }
 
@@ -237,6 +230,54 @@ async function restoreApproval(supabase, userId, approvalId) {
   return !result.error && Boolean(result.data?.id);
 }
 
+function createApprovalRuntime(supabase, { now = () => new Date() } = {}) {
+  if (!supabase?.from) throw new TypeError('createApprovalRuntime requires a Supabase client');
+
+  async function list(userId) {
+    const result = await listPendingApprovals(supabase, userId);
+    if (!result.available) throw result.error || new Error('Pending approvals are unavailable.');
+    return result.approvals;
+  }
+
+  async function park(userId, action, context = {}) {
+    const payload = {
+      action,
+      createdAt: now().toISOString(),
+      userMessage: context.userMessage || '',
+      location: context.location || null,
+      nativeHints: context.nativeHints || null,
+      taskId: context.persistedTaskId || null,
+      sessionId: context.runtimeSessionId || null,
+      taskGoal: context.taskGoal || null
+    };
+
+    if (context.approvalId) {
+      const restored = await restoreApproval(supabase, userId, context.approvalId);
+      if (restored) return { ...payload, approvalId: context.approvalId };
+    }
+
+    const stored = await createApproval(supabase, userId, payload);
+    if (!stored.available || !stored.approval) {
+      throw stored.error || new Error('The approval could not be saved.');
+    }
+    return { ...payload, approvalId: stored.approval.approvalId };
+  }
+
+  return {
+    list,
+    park,
+    async pending(userId, message = '') {
+      return selectPendingApproval(await list(userId), message);
+    },
+    async claim(userId, pending) {
+      return claimApproval(supabase, userId, pending?.approvalId);
+    },
+    async settle(userId, pending, status) {
+      return settleApproval(supabase, userId, pending?.approvalId, status);
+    }
+  };
+}
+
 module.exports = {
   APPROVAL_TABLE,
   APPROVAL_STATES,
@@ -244,12 +285,12 @@ module.exports = {
   normalizeApproval,
   approvalSummary,
   actionPayload,
-  isMissingTable,
   selectPendingApproval,
   describeAmbiguousApprovals,
   createApproval,
   listPendingApprovals,
   claimApproval,
+  createApprovalRuntime,
   settleApproval,
   restoreApproval
 };

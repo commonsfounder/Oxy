@@ -105,8 +105,39 @@ test('runtime approval claim is single-flight and settles only the claimed row',
   assert.equal(await approvals.restoreApproval(db, 'user-1', id), false);
 });
 
-test('missing approval table is detectable for the legacy fallback', () => {
-  assert.equal(approvals.isMissingTable({ code: '42P01', message: 'relation "agent_runtime_approvals" does not exist' }), true);
-  assert.equal(approvals.isMissingTable({ code: 'PGRST205', message: 'Could not find the table' }), true);
-  assert.equal(approvals.isMissingTable({ code: '42501', message: 'permission denied' }), false);
+test('bound approval runtime owns park, selection, claim, and settlement', async () => {
+  const db = fakeSupabase();
+  const runtime = approvals.createApprovalRuntime(db, { now: () => new Date('2026-09-03T20:00:00.000Z') });
+
+  const parked = await runtime.park('user-1', action('send_email'), {
+    userMessage: 'Email the supplier for a quote',
+    persistedTaskId: 'task-supplier',
+    taskGoal: 'Ask the supplier for a quote'
+  });
+  assert.equal(parked.createdAt, '2026-09-03T20:00:00.000Z');
+
+  const selected = await runtime.pending('user-1', 'approve the supplier email');
+  assert.equal(selected.approvalId, parked.approvalId);
+  assert.equal(await runtime.claim('user-1', selected), true);
+  assert.equal(await runtime.settle('user-1', selected, 'approved'), true);
+  assert.equal((await runtime.list('user-1')).length, 0);
+});
+
+test('bound approval runtime fails closed when durable approval storage is unavailable', async () => {
+  const unavailable = new Error('approval database unavailable');
+  const chain = {
+    insert() { return chain; },
+    select() { return chain; },
+    eq() { return chain; },
+    order() { return chain; },
+    single: async () => ({ data: null, error: unavailable }),
+    limit: async () => ({ data: null, error: unavailable })
+  };
+  const runtime = approvals.createApprovalRuntime({ from: () => chain });
+
+  await assert.rejects(
+    () => runtime.park('user-1', action('send_email'), { userMessage: 'Email the supplier' }),
+    /approval database unavailable/
+  );
+  await assert.rejects(() => runtime.pending('user-1', 'yes'), /approval database unavailable/);
 });
