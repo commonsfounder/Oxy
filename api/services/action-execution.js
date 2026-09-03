@@ -89,7 +89,9 @@ function createActionExecution({
     }
 
     result = normalizeActionOutcome(result);
-    await safeLogAction(trace, `action_log.insert.${type || 'unknown'}`, () => logAction(userId, action, result));
+    if (trace?.persistArtifacts !== false) {
+      await safeLogAction(trace, `action_log.insert.${type || 'unknown'}`, () => logAction(userId, action, result));
+    }
     return { action: type, result, input: action?.input || {} };
   }
 

@@ -13,8 +13,10 @@ const {
   LAYERS,
   LAYER_ONE_GATE_TASK_IDS,
   LAYER_ONE_GAUNTLET_TASK_IDS,
+  parseArgs,
   selectTasks,
-  classify
+  classify,
+  runLive
 } = require('../../test/dev/real-user-task-matrix');
 
 test('real-user corpus is broad, unique, and points only at executable actions', () => {
@@ -44,6 +46,11 @@ test('matrix selection supports group, mode, id, layer, and limit slices', () =>
   assert.deepEqual(LAYERS, [1, 2, 3]);
   assert.ok(selectTasks({ layers: [1] }).every(task => task.layer === 1));
   assert.equal(selectTasks({ limit: 3 }).length, 3);
+});
+
+test('a live matrix run defaults to safe tasks unless a mutating slice is explicit', () => {
+  assert.deepEqual(parseArgs([]).modes, ['safe']);
+  assert.deepEqual(parseArgs(['--mode=approval']).modes, ['approval']);
 });
 
 test('layer one gate covers general agency without claiming household or delight work', () => {
@@ -92,6 +99,77 @@ test('approval classification accepts a review boundary and rejects an unreviewe
   assert.equal(classify(task, {
     actions: [{ action: 'send_email', result: { success: true, outcome: 'completed', text: 'Email sent.' } }]
   }).status, 'effect_risk');
+});
+
+test('approval-mode live runs refuse to create durable rows without cleanup', async () => {
+  const task = TASKS.find(candidate => candidate.id === 'telegram-contact');
+  let requests = 0;
+
+  await assert.rejects(
+    runLive({
+      base: 'https://example.test',
+      token: 'token',
+      userId: 'user-1',
+      tasks: [task],
+      verbose: false,
+      request: async () => { requests += 1; return {}; }
+    }),
+    /approval cleanup/i
+  );
+  assert.equal(requests, 0);
+});
+
+test('state-mode live runs refuse persistent test data without explicit opt-in', async () => {
+  const task = TASKS.find(candidate => candidate.mode === 'state');
+  let requests = 0;
+
+  await assert.rejects(
+    runLive({
+      base: 'https://example.test',
+      token: 'token',
+      userId: 'user-1',
+      tasks: [task],
+      verbose: false,
+      request: async () => { requests += 1; return {}; }
+    }),
+    /persistent state/i
+  );
+  assert.equal(requests, 0);
+});
+
+test('approval-mode live runs tag and clean every review artifact', async () => {
+  const task = TASKS.find(candidate => candidate.id === 'telegram-contact');
+  const requests = [];
+  const cleanups = [];
+
+  const results = await runLive({
+    base: 'https://example.test',
+    token: 'token',
+    userId: 'user-1',
+    tasks: [task],
+    verbose: false,
+    runId: 'acceptance-run-1',
+    runStartedAt: '2026-09-03T12:00:00.000Z',
+    request: async (...args) => {
+      requests.push(args);
+      return {
+        actions: [{
+          action: task.expectedAction,
+          result: { success: false, outcome: 'awaiting_user', text: 'Review before sending.' }
+        }]
+      };
+    },
+    cleanupApprovalArtifacts: async input => {
+      cleanups.push(input);
+      return ['approval-1'];
+    }
+  });
+
+  assert.equal(results[0].status, 'approval_boundary');
+  assert.deepEqual(requests[0][4], { acceptanceRunId: 'acceptance-run-1' });
+  assert.deepEqual(requests[0][5], { persistConversation: false, chatStartedAt: '2026-09-03T12:00:00.000Z' });
+  assert.deepEqual(cleanups, [{ userId: 'user-1', runId: 'acceptance-run-1' }]);
+  assert.deepEqual(results[0].cleanup, { cancelledApprovalIds: ['approval-1'] });
 });
 
 test('a digest that declares a connected source unavailable is a setup blocker, not a completed answer', () => {

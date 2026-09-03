@@ -658,7 +658,7 @@ async function withTelegramTyping(chatId, work) {
 }
 
 // Renders a pending review-gated action as Telegram inline buttons; a tap synthesizes the
-// same yes/cancel text the app sends, so there is one approval parser rather than two.
+// same confirm/cancel text the app sends, so there is one approval parser rather than two.
 async function sendChatResultToTelegram(chatId, result) {
   const pendingEntry = telegramBot.findPendingAction(result?.actions || []);
   if (pendingEntry) {
@@ -725,7 +725,7 @@ async function handleTelegramBotCallback(callbackQuery, req) {
   await telegramBot.answerCallbackQuery(callbackQuery.id);
   if (messageId != null) await telegramBot.clearInlineKeyboard(chatId, messageId);
 
-  const synthesized = callbackQuery.data === 'cancel' ? 'cancel' : 'yes';
+  const synthesized = callbackQuery.data === 'cancel' ? 'cancel' : 'confirm';
   const result = await bridgeToChatPipeline(userId, synthesized, req);
   await sendChatResultToTelegram(chatId, result);
 }
@@ -3820,7 +3820,12 @@ function buildConversationSessions(rows = []) {
     .slice(0, 30);
 }
 
+function shouldPersistChatTurn(requestedValue) {
+  return requestedValue !== false;
+}
+
 async function saveMessage(userId, role, content, trace = null) {
+  if (trace?.persistConversation === false) return;
   const insertMessage = () => supabase
     .from('conversations')
     .insert({
@@ -7158,6 +7163,7 @@ function getStructuredDataResults(actionResults, message = '') {
 
 // Fire-and-forget post-response tasks (memory + style preferences)
 function postResponseTasks(userId, message, extra = {}) {
+  if (extra.persistConversation === false) return;
   if (shouldSaveMemory(message) && !parseExplicitMemoryRequest(message)) {
     extractMemoryFact(userId, message).then(fact => {
       if (!fact) return;
@@ -7176,7 +7182,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
   const browserActions = (actionResults || []).map(enrichActionForBrowser);
   saveMessage(userId, 'assistant', { text: spoken, actions: browserActions }, trace)
     .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
-  postResponseTasks(userId, message);
+  postResponseTasks(userId, message, { persistConversation: trace?.persistConversation !== false });
 
   if (streaming) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -7236,6 +7242,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
+    const persistConversation = shouldPersistChatTurn(req.body.persistConversation);
+    trace.persistConversation = persistConversation;
+    trace.persistArtifacts = persistConversation;
     trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
     devTiming('chat', 'user_message_received', {
       streaming,
@@ -7445,7 +7454,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     if (deterministicQuickReply) {
       saveMessage(userId, 'assistant', { text: deterministicQuickReply, actions: [] }, trace)
         .catch(err => trace.log('supabase.conversations.insert_assistant.quick_async_fail', err.message));
-      postResponseTasks(userId, message);
+      postResponseTasks(userId, message, { persistConversation });
 
       if (streaming) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -7581,7 +7590,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
         saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
           .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
-        postResponseTasks(userId, message);
+        postResponseTasks(userId, message, { persistConversation });
         return;
       }
 
@@ -7626,7 +7635,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
       }
       res.json(result);
-      postResponseTasks(userId, message);
+      postResponseTasks(userId, message, { persistConversation });
       return;
     }
 
@@ -7682,52 +7691,54 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
       // The execution identity is created before the first model turn: it is what makes this a
       // durable delegated goal rather than a chat reply that calls tools.
-      try {
-        const identity = await startChatExecutionIdentity({
-          userId,
-          message,
-          autonomy: autonomyLevel,
-          metadata: {
-            guardMode: settings.guardMode === true,
-            modelRoute: { provider: chatProvider, model: chatModel },
-            useSearch: Boolean(isBroadMoneyGoal || useSearch),
-            deviceType: req.body?.deviceType || 'ambient_home'
-          },
-          runtime: {
-            deviceId: req.body?.deviceId,
-            deviceType: req.body?.deviceType || 'ambient_home',
-            projectRef: req.body?.projectRef,
-            kind: 'task'
-          },
-          lifecycle: delegatedRunLifecycle,
-          ensureRuntime: async executionTask => agentRuntime.ensureSession(supabase, userId, {
-            taskId: executionTask.id,
-            deviceId: req.body?.deviceId,
-            deviceType: req.body?.deviceType || 'ambient_home',
-            projectRef: req.body?.projectRef || executionTask.metadata?.projectRef,
-            title: executionTask.goal || message,
-            state: 'running'
-          }),
-          updateTaskMetadata: async (executionTask, session) => delegatedRunLifecycle.updateControls(userId, executionTask.id, {
+      if (persistConversation) {
+        try {
+          const identity = await startChatExecutionIdentity({
+            userId,
+            message,
+            autonomy: autonomyLevel,
             metadata: {
-              runtimeSessionId: session.id,
-              ...(req.body?.projectRef ? { projectRef: req.body.projectRef } : {}),
+              guardMode: settings.guardMode === true,
               modelRoute: { provider: chatProvider, model: chatModel },
               useSearch: Boolean(isBroadMoneyGoal || useSearch),
-              deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
-            }
-          })
-        });
-        if (identity.error) {
-          runtimeStartError = identity.error;
-          throw new Error(identity.error);
+              deviceType: req.body?.deviceType || 'ambient_home'
+            },
+            runtime: {
+              deviceId: req.body?.deviceId,
+              deviceType: req.body?.deviceType || 'ambient_home',
+              projectRef: req.body?.projectRef,
+              kind: 'task'
+            },
+            lifecycle: delegatedRunLifecycle,
+            ensureRuntime: async executionTask => agentRuntime.ensureSession(supabase, userId, {
+              taskId: executionTask.id,
+              deviceId: req.body?.deviceId,
+              deviceType: req.body?.deviceType || 'ambient_home',
+              projectRef: req.body?.projectRef || executionTask.metadata?.projectRef,
+              title: executionTask.goal || message,
+              state: 'running'
+            }),
+            updateTaskMetadata: async (executionTask, session) => delegatedRunLifecycle.updateControls(userId, executionTask.id, {
+              metadata: {
+                runtimeSessionId: session.id,
+                ...(req.body?.projectRef ? { projectRef: req.body.projectRef } : {}),
+                modelRoute: { provider: chatProvider, model: chatModel },
+                useSearch: Boolean(isBroadMoneyGoal || useSearch),
+                deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
+              }
+            })
+          });
+          if (identity.error) {
+            runtimeStartError = identity.error;
+            throw new Error(identity.error);
+          }
+          matchedTask = identity.matchedTask;
+          runtimeTaskId = identity.executionTask.id;
+          runtimeSessionId = identity.session.id;
+        } catch (error) {
+          trace.log('agent.runtime_session.start_failed', String(error?.message || error).slice(0, 240));
+          if (!runtimeStartError) runtimeStartError = 'The work session could not be started. Nothing was run.';
         }
-        matchedTask = identity.matchedTask;
-        runtimeTaskId = identity.executionTask.id;
-        runtimeSessionId = identity.session.id;
-      } catch (error) {
-        trace.log('agent.runtime_session.start_failed', String(error?.message || error).slice(0, 240));
-        if (!runtimeStartError) runtimeStartError = 'The work session could not be started. Nothing was run.';
       }
 
       // The stream opens before the loop runs, so the orchestrator's per-phase onStep calls
@@ -7753,7 +7764,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           res.json({ text: spoken, actions: [] });
         }
         saveMessage(userId, 'assistant', { text: spoken, actions: [] }, trace).catch(() => {});
-        postResponseTasks(userId, message);
+        postResponseTasks(userId, message, { persistConversation });
         return;
       }
 
@@ -7808,7 +7819,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
                 }
               }
             },
-            persistTask: true,
+            persistTask: persistConversation,
             existingTaskId: runtimeTaskId || null
           }),
           settle: async () => {
@@ -7872,7 +7883,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
 
         saveMessage(userId, 'assistant', { text: spoken, actions: actionResults, agentic: true }, trace).catch(() => {});
-        postResponseTasks(userId, message, { agentic: true, agentTraceId: agentResult.traceId, taskId: agentResult.taskId });
+        postResponseTasks(userId, message, { agentic: true, agentTraceId: agentResult.traceId, taskId: agentResult.taskId, persistConversation });
         return;
       } catch (agentErr) {
         clearInterval(heartbeat);
@@ -8136,7 +8147,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // Fire-and-forget: save assistant message + memory/preferences
         saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
           .catch(err => trace.log('supabase.conversations.insert_assistant.async_fail', err.message));
-        postResponseTasks(userId, message);
+        postResponseTasks(userId, message, { persistConversation });
 
       } catch (err) {
         trace.log('request.error', err.message);
@@ -8253,7 +8264,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     trace.log('request.total');
     devTiming('chat', 'request_total.end', { durationMs: Date.now() - requestStarted });
     res.json(result);
-    postResponseTasks(userId, message);
+    postResponseTasks(userId, message, { persistConversation });
 
   } catch (err) {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
@@ -9986,6 +9997,7 @@ module.exports.mergeNativeToolCalls = mergeNativeToolCalls;
 module.exports.buildModernGenerateRequest = buildModernGenerateRequest;
 module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
 module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActions;
+module.exports.shouldPersistChatTurn = shouldPersistChatTurn;
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.emailTriageSignals = emailTriageSignals;

@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 // A broad, redacted acceptance corpus for the things people actually ask a
 // household worker to do. This is deliberately separate from the 50-site
 // shopping benchmark: shopping is one slice of a consumer agent, not the whole
@@ -189,6 +191,8 @@ function parseArgs(argv = process.argv.slice(2)) {
       process.exit(0);
     }
   }
+  const hasExplicitSelection = options.groups.length || options.modes.length || options.ids.length || options.layers.length || options.gauntlet;
+  if (!hasExplicitSelection) options.modes.push('safe');
   return options;
 }
 
@@ -227,14 +231,20 @@ function classify(task, reply) {
   return { status: result.success === false ? 'failed' : 'incomplete', receipts };
 }
 
-async function postChat(base, token, task, userId) {
+async function postChat(base, token, task, userId, nativeHints = null, requestOptions = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Number(process.env.OXY_MATRIX_TURN_TIMEOUT_MS || 120000));
   try {
     const response = await fetch(`${base}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ userId, message: task.message }),
+      body: JSON.stringify({
+        userId,
+        message: task.message,
+        ...(nativeHints ? { nativeHints } : {}),
+        ...(requestOptions.chatStartedAt ? { chatStartedAt: requestOptions.chatStartedAt } : {}),
+        persistConversation: requestOptions.persistConversation !== false
+      }),
       signal: controller.signal
     });
     const body = await response.json().catch(() => ({}));
@@ -247,15 +257,84 @@ async function postChat(base, token, task, userId) {
   }
 }
 
-async function runLive({ base, token, userId, tasks, verbose = true, delayMs = 0 }) {
+function createApprovalArtifactCleanup(supabase) {
+  return async function cleanupApprovalArtifacts({ userId, runId }) {
+    const pending = await supabase.from('agent_runtime_approvals')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .contains('native_hints', { acceptanceRunId: runId });
+    if (pending.error) throw new Error(`Approval cleanup lookup failed: ${pending.error.message}`);
+
+    const ids = (pending.data || []).map(row => row.id).filter(Boolean);
+    if (!ids.length) return [];
+
+    const settledAt = new Date().toISOString();
+    const cancelled = await supabase.from('agent_runtime_approvals')
+      .update({ status: 'cancelled', claimed_at: null, settled_at: settledAt })
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .in('id', ids)
+      .select('id');
+    if (cancelled.error) throw new Error(`Approval cleanup update failed: ${cancelled.error.message}`);
+
+    const cancelledIds = (cancelled.data || []).map(row => row.id).filter(Boolean);
+    if (cancelledIds.length !== ids.length) {
+      throw new Error(`Approval cleanup was incomplete: cancelled ${cancelledIds.length} of ${ids.length} rows.`);
+    }
+    return cancelledIds;
+  };
+}
+
+async function runLive({
+  base,
+  token,
+  userId,
+  tasks,
+  verbose = true,
+  delayMs = 0,
+  runId = crypto.randomUUID(),
+  runStartedAt = new Date().toISOString(),
+  request = postChat,
+  cleanupApprovalArtifacts = null,
+  allowPersistentState = false
+}) {
+  if (tasks.some(task => task.mode === 'approval') && typeof cleanupApprovalArtifacts !== 'function') {
+    throw new Error('Approval cleanup is required before running approval-mode acceptance tasks.');
+  }
+  if (tasks.some(task => task.mode === 'state') && !allowPersistentState) {
+    throw new Error('Persistent state acceptance tasks require OXY_MATRIX_ALLOW_PERSISTENT_STATE=1 and an isolated test account.');
+  }
+
   const results = [];
   for (const task of tasks) {
     if (delayMs > 0 && results.length) await new Promise(resolve => setTimeout(resolve, delayMs));
-    const reply = await postChat(base, token, task, userId);
+    const nativeHints = task.mode === 'approval' ? { acceptanceRunId: runId } : null;
+    let reply;
+    let cancelledApprovalIds = [];
+    try {
+      reply = await request(base, token, task, userId, nativeHints, {
+        persistConversation: false,
+        chatStartedAt: runStartedAt
+      });
+    } finally {
+      if (task.mode === 'approval') {
+        cancelledApprovalIds = await cleanupApprovalArtifacts({ userId, runId });
+      }
+    }
     const classification = reply.error || reply.httpStatus
       ? { status: 'http_error', receipts: [], error: reply.error || `HTTP ${reply.httpStatus}` }
       : classify(task, reply);
-    const result = { id: task.id, group: task.group, mode: task.mode, layer: task.layer, expectedAction: task.expectedAction, message: task.message, ...classification };
+    const result = {
+      id: task.id,
+      group: task.group,
+      mode: task.mode,
+      layer: task.layer,
+      expectedAction: task.expectedAction,
+      message: task.message,
+      ...classification,
+      ...(task.mode === 'approval' ? { cleanup: { cancelledApprovalIds } } : {})
+    };
     results.push(result);
     if (verbose) console.log(JSON.stringify(result));
   }
@@ -263,6 +342,7 @@ async function runLive({ base, token, userId, tasks, verbose = true, delayMs = 0
 }
 
 if (require.main === module) {
+  require('dotenv').config();
   const options = parseArgs();
   const base = (process.env.OXY_MATRIX_API_URL || 'https://milgrain-live-2026.fly.dev').replace(/\/+$/, '');
   const token = process.env.OXY_MATRIX_SESSION_TOKEN;
@@ -272,11 +352,44 @@ if (require.main === module) {
     process.exit(1);
   }
   const delayMs = Number(process.env.OXY_MATRIX_DELAY_MS || 0);
-  const results = runLive({ base, token, userId, tasks: selectTasks(options), delayMs });
+  const tasks = selectTasks(options);
+  let cleanupApprovalArtifacts = null;
+  if (tasks.some(task => task.mode === 'approval')) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+      console.error('Approval-mode runs require SUPABASE_URL and SUPABASE_KEY so test approvals can be cancelled immediately.');
+      process.exit(1);
+    }
+    const { createClient } = require('@supabase/supabase-js');
+    cleanupApprovalArtifacts = createApprovalArtifactCleanup(
+      createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
+    );
+  }
+  const results = runLive({
+    base,
+    token,
+    userId,
+    tasks,
+    delayMs,
+    cleanupApprovalArtifacts,
+    allowPersistentState: process.env.OXY_MATRIX_ALLOW_PERSISTENT_STATE === '1'
+  });
   results.then(rows => {
     const counts = rows.reduce((out, row) => { out[row.status] = (out[row.status] || 0) + 1; return out; }, {});
     console.log(JSON.stringify({ total: rows.length, counts }, null, 2));
   }).catch(error => { console.error(error.stack || error.message); process.exit(1); });
 }
 
-module.exports = { TASKS, GROUPS, MODES, LAYERS, LAYER_ONE_GATE_TASK_IDS, LAYER_ONE_GAUNTLET_TASK_IDS, selectTasks, actionReceipt, classify, runLive };
+module.exports = {
+  TASKS,
+  GROUPS,
+  MODES,
+  LAYERS,
+  LAYER_ONE_GATE_TASK_IDS,
+  LAYER_ONE_GAUNTLET_TASK_IDS,
+  parseArgs,
+  selectTasks,
+  actionReceipt,
+  classify,
+  createApprovalArtifactCleanup,
+  runLive
+};

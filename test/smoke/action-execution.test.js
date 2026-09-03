@@ -309,6 +309,32 @@ function fakeSupabaseBuilder() {
   return { then(resolve) { resolve(); } };
 }
 
+test('ephemeral acceptance turns execute actions without writing action logs', async () => {
+  let executed = 0;
+  const logs = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => {
+      executed += 1;
+      return { success: true, text: '2' };
+    },
+    setPendingAction: async () => {},
+    logAction: async (userId, action, result) => logs.push({ userId, action, result }),
+    invalidateUserContextCache: () => {}
+  });
+  const trace = {
+    persistArtifacts: false,
+    async run(label, fn) { return fn(); }
+  };
+
+  const result = await executeActions('user-1', [
+    { type: 'calculate', input: { expression: '1+1' } }
+  ], {}, trace);
+
+  assert.equal(executed, 1);
+  assert.equal(result[0].result.success, true);
+  assert.equal(logs.length, 0);
+});
+
 test('a logAction that returns a thenable-without-.catch (Supabase-shaped) does not fail the action, sequential mode, no trace', async () => {
   const executeActions = createActionRunner({
     resolveContract: syntheticResolver,

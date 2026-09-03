@@ -17,6 +17,7 @@ const {
   getStructuredDataResults,
   guardVisibleDataResponse,
   isPureContentGenerationTurn,
+  shouldPersistChatTurn,
   shouldUseAgenticLoopForMessage,
   shouldIgnoreModelAuthoredActions,
   triageEmailsForRequest,
@@ -25,6 +26,12 @@ const {
   isEmailDraftRequest,
   findRecentEmailTarget
 } = require('../../api/index.js');
+
+test('ephemeral acceptance turns never enter personal conversation history', () => {
+  assert.equal(shouldPersistChatTurn(undefined), true);
+  assert.equal(shouldPersistChatTurn(true), true);
+  assert.equal(shouldPersistChatTurn(false), false);
+});
 
 test('parseActions extracts a single action block and strips it from spoken text', () => {
   const { spoken, actions, parseError } = parseActions(

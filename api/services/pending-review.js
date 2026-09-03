@@ -17,7 +17,7 @@ function isPendingConfirmMessage(message) {
   if (/\b(wait|hold on|actually|change|edit|instead|but|before|not yet|don't|do not|stop|cancel)\b/i.test(text)) {
     return false;
   }
-  return /^(yes|yeah|yep|yup|ok|okay|sure|confirm|confirmed|approve|approved|proceed)$/i.test(text) ||
+  return /^(yes|yeah|yep|yup|confirm|confirmed|approve|approved|proceed)$/i.test(text) ||
     /\b(yes please|looks good|go ahead|do it|send it|send now|send the message|send that message|message them|book it|order it|call them|open it|that's fine|that is fine|all good)\b/i.test(text) ||
     /\b(approve|approved|confirm|confirmed|proceed with|go ahead with)\b.+/i.test(text);
 }

@@ -20,6 +20,9 @@ test('pending review accepts natural confirmation phrases', () => {
   assert.equal(isPendingConfirmMessage('send that message'), true);
   assert.equal(isPendingConfirmMessage('go ahead'), true);
   assert.equal(isPendingConfirmMessage('approve the website task'), true);
+  assert.equal(isPendingConfirmMessage('okay'), false);
+  assert.equal(isPendingConfirmMessage('ok'), false);
+  assert.equal(isPendingConfirmMessage('sure'), false);
   assert.equal(isPendingCancelMessage('cancel the supplier task'), true);
 });
 
