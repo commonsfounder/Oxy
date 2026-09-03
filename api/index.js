@@ -639,7 +639,7 @@ async function bridgeToChatPipeline(userId, message, req) {
   const chatRes = await fetch(`${baseUrl}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
-    body: JSON.stringify({ userId, message })
+    body: JSON.stringify(buildTelegramChatRequest(userId, message))
   });
   if (!chatRes.ok) throw new Error(`chat bridge returned ${chatRes.status}`);
   return chatRes.json();
@@ -1132,6 +1132,7 @@ async function refreshBriefingSourceData(userId, todayKey, snapshot) {
 }
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
+const { adaptActionForChannel, buildChatChannelContext, buildTelegramChatRequest } = require('./services/chat-channel');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -3334,6 +3335,7 @@ const invokeDeclaredAdapter = createDeclaredAdapterInvoker({
 
 const executeActions = createActionExecution({
   invokeAdapter: invokeDeclaredAdapter,
+  normalizeAction: adaptActionForChannel,
   invalidateUserContextCache,
   setPendingAction,
   validateAction: validateActionWithContract,
@@ -5747,6 +5749,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
       [
         userContext,
         buildLocationContext(requestContext.location),
+        buildChatChannelContext(requestContext.channel),
         buildNativeHintsContext(requestContext.nativeHints),
         buildPendingActionContext(requestContext.pendingAction),
         emailReplyContext,
@@ -7210,7 +7213,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
   const requestStarted = Date.now();
 
   try {
-    const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null } = req.body;
+    const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null, channel = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
     // Real saved home address (set in iOS Settings), not device GPS — "book a ride home"
@@ -7531,6 +7534,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           location,
           homeLocation,
           nativeHints,
+          channel,
           trace,
           sequential: deterministicAction.actions.length > 1,
           guardMode: settings.guardMode
@@ -7580,6 +7584,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         location,
         homeLocation,
         nativeHints,
+        channel,
         trace,
         sequential: deterministicAction.actions.length > 1,
         guardMode: settings.guardMode
@@ -7620,6 +7625,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     const requestContext = {
       location,
       nativeHints,
+      channel,
       chatStartedAt,
       pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
     };
@@ -7765,6 +7771,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               userMessage: message,
               location,
               nativeHints,
+              channel,
               autonomy: autonomyLevel,
               modelRoute: { provider: chatProvider, model: chatModel },
               useSearch: isBroadMoneyGoal || useSearch,
@@ -8021,7 +8028,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           actionResults = await timedDev('chat', 'action_execution', {
             actionCount: actions.length,
             actions: actions.map(action => action.type)
-          }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, trace, guardMode: settings.guardMode }, trace, {
+          }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, channel, trace, guardMode: settings.guardMode }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
               action: action.type,
@@ -8169,7 +8176,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       actionResults = await timedDev('chat', 'action_execution', {
         actionCount: actions.length,
         actions: actions.map(action => action.type)
-      }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, trace, guardMode: settings.guardMode }, trace));
+      }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, channel, trace, guardMode: settings.guardMode }, trace));
       dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }

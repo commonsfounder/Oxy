@@ -14,6 +14,7 @@ function createActionRunner(options = {}) {
 }
 const { getActionContract } = require('../../api/action-contracts');
 const { adapterForAction } = require('../../api/services/action-catalog');
+const { adaptActionForChannel } = require('../../api/services/chat-channel');
 
 function syntheticResolver(type) {
   if (type === 'action_a' || type === 'action_b') {
@@ -46,6 +47,27 @@ test('action runner parks high-risk actions for review', async () => {
   assert.equal(result[0].result.actionSummary, 'Email ready to send');
   assert.equal(pending.length, 1);
   assert.equal(logs[0].result.pending, true);
+});
+
+test('action runner normalizes a channel-specific action before applying review policy', async () => {
+  const pending = [];
+  const executeActions = createActionRunner({
+    normalizeAction: adaptActionForChannel,
+    executeAction: async () => {
+      throw new Error('should not execute before Telegram review');
+    },
+    setPendingAction: async (userId, action) => pending.push({ userId, action }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'send_message', input: { contact: 'Arina', message: 'Hello.' } }
+  ], { userMessage: 'Can you text Arina', channel: 'telegram_bot' });
+
+  assert.equal(result[0].action, 'send_telegram');
+  assert.equal(result[0].result.pending, true);
+  assert.equal(pending[0].action.type, 'send_telegram');
 });
 
 test('appointment booking waits for an explicit OK before it runs', async () => {

@@ -45,7 +45,8 @@ function createActionExecution({
   validateAction = validateActionWithContract,
   getLinkedCardInfo = async () => null,
   resolveAdapter = adapterForAction,
-  resolveContract = getActionContract
+  resolveContract = getActionContract,
+  normalizeAction = action => action
 }) {
   if (typeof invokeAdapter !== 'function') throw new TypeError('createActionExecution requires invokeAdapter');
   if (typeof setPendingAction !== 'function') throw new TypeError('createActionExecution requires setPendingAction');
@@ -98,7 +99,8 @@ function createActionExecution({
     // parallel batch with sibling effects that would outlive the handoff.
     const sequential = !!context.sequential || !!context.agentIteration || actions.some(action => action?.type === 'create_agent_task');
     const previousResults = context.previousResults || [];
-    const enrichedActions = actions.map(action => {
+    const normalizedActions = actions.map(action => normalizeAction(action, context) || action);
+    const enrichedActions = normalizedActions.map(action => {
       const input = { ...(action.input || {}) };
       if (previousResults.length) {
         const last = previousResults[previousResults.length - 1];
