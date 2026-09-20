@@ -9,46 +9,46 @@ private func appDynamicColor(dark: Color, light: Color) -> Color {
 
 extension Color {
     static let appBackground = appDynamicColor(
-        dark: Color(red: 0.047, green: 0.043, blue: 0.043),   // #0C0B0B
-        light: Color(red: 0.965, green: 0.953, blue: 0.933)   // warm paper
+        dark: Color(red: 0.035, green: 0.035, blue: 0.035),   // #090909
+        light: Color(red: 0.969, green: 0.969, blue: 0.961)   // #F7F7F5
     )
 
     static let appSurface = appDynamicColor(
-        dark: Color(red: 0.082, green: 0.078, blue: 0.075),   // #151413
-        light: Color(red: 0.988, green: 0.980, blue: 0.963)   // raised paper
+        dark: Color(red: 0.082, green: 0.082, blue: 0.082),   // #151515
+        light: Color.white
     )
 
     static let appSurface2 = appDynamicColor(
-        dark: Color(red: 0.118, green: 0.110, blue: 0.102),   // #1E1C1A
-        light: Color(red: 0.918, green: 0.894, blue: 0.858)   // sand inset
+        dark: Color(red: 0.114, green: 0.114, blue: 0.114),   // #1D1D1D
+        light: Color(red: 0.945, green: 0.945, blue: 0.937)   // #F1F1EF
     )
 
     static let appHairline = appDynamicColor(
-        dark: Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10),
-        light: Color(red: 0.18, green: 0.19, blue: 0.22).opacity(0.10)
+        dark: Color.white.opacity(0.08),
+        light: Color.black.opacity(0.07)
     )
 
     static let appInk = appDynamicColor(
-        dark: Color(red: 0.949, green: 0.933, blue: 0.906),   // #F2EEE7
-        light: Color(red: 0.145, green: 0.133, blue: 0.118)   // deep umber
+        dark: Color(red: 0.961, green: 0.961, blue: 0.961),   // #F5F5F5
+        light: Color(red: 0.067, green: 0.067, blue: 0.067)   // #111111
     )
 
     static let appMuted = appDynamicColor(
-        dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
-        light: Color(red: 0.420, green: 0.391, blue: 0.350)   // warm secondary
+        dark: Color(red: 0.580, green: 0.580, blue: 0.580),
+        light: Color(red: 0.420, green: 0.420, blue: 0.420)
     )
 
     static let appAccent = appDynamicColor(
-        dark: Color(red: 0.784, green: 0.663, blue: 0.420),   // #C8A96B
-        light: Color(red: 0.575, green: 0.407, blue: 0.145)   // antique gold
+        dark: Color(red: 0.302, green: 0.557, blue: 1.000),   // #4D8EFF
+        light: Color(red: 0.075, green: 0.369, blue: 0.882)   // #135EE1
     )
 
     /// The two accents sit on opposite sides of mid-luminance, so a single fixed
     /// foreground can't serve both: near-black on the light-mode antique gold is
     /// 3.5:1. Pairing each accent with its own ink gives 7.8:1 dark / 5.0:1 light.
     static let appOnAccent = appDynamicColor(
-        dark: Color(red: 0.106, green: 0.098, blue: 0.086),
-        light: Color(red: 0.992, green: 0.988, blue: 0.980)
+        dark: Color.white,
+        light: Color.white
     )
 
     // MARK: - Semantic (for trust and safety)
@@ -95,12 +95,12 @@ extension Font {
 
 // MARK: - Radius
 enum AppRadius {
-    static let sm: CGFloat = 6
+    static let sm: CGFloat = 10
     static let md: CGFloat = 10
-    static let lg: CGFloat = 16
-    static let xl: CGFloat = 22
+    static let lg: CGFloat = 18
+    static let xl: CGFloat = 24
     static let bubble: CGFloat = 18
-    static let card: CGFloat = lg
+    static let card: CGFloat = 18
 }
 
 // MARK: - Motion
@@ -122,11 +122,12 @@ extension View {
 }
 
 struct AppScaleButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var amount: CGFloat = 0.96
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? amount : 1)
-            .animation(.appFast, value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? amount : 1)
+            .animation(reduceMotion ? nil : .appFast, value: configuration.isPressed)
     }
 }
 
@@ -446,20 +447,95 @@ struct AppCard<Content: View>: View {
 
 // MARK: - BrandWordmark
 //
-// Set live in Fraunces rather than shipped as artwork, so the wordmark inherits the
-// app's display face and any tint. `height` stays the API — it is a cap-height
-// target, and the point size is derived from it.
+// The supplied architectural mark is rebuilt as live geometry so it remains crisp
+// in compact chrome and large identity moments alike.
 
 struct BrandWordmark: View {
     var height: CGFloat = 14
-    var color: Color = .appMuted
+    var color: Color = .appInk
 
     var body: some View {
-        Text("ADAM")
-            .font(.appEditorial(height * 1.35, weight: 420, soft: 30, relativeTo: .caption1))
-            .tracking(height * 0.22)
-            .foregroundStyle(color)
-            .accessibilityLabel("Adam")
+        HStack(spacing: height * 0.58) {
+            AdamMark()
+                .frame(width: height * 1.42, height: height)
+            Text("ADAM")
+                .font(.appBody(height * 0.78, weight: .bold))
+                .tracking(height * 0.16)
+                .foregroundStyle(color)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Adam")
+    }
+}
+
+/// The dark frame carries the identity; the blue channels are reserved for
+/// activity and action throughout the interface.
+struct AdamMark: View {
+    var active = true
+
+    var body: some View {
+        ZStack {
+            AdamEnergyShape()
+                .fill(active ? Color.appAccent : Color.appMuted.opacity(0.35))
+            AdamFrameShape()
+                .fill(Color.appInk)
+        }
+        .aspectRatio(1.42, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AdamFrameShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+        var path = Path()
+        path.move(to: point(0.27, 0.08))
+        path.addLine(to: point(0.73, 0.08))
+        path.addLine(to: point(0.94, 0.92))
+        path.addCurve(to: point(0.63, 0.51), control1: point(0.78, 0.92), control2: point(0.69, 0.82))
+        path.addLine(to: point(0.63, 0.30))
+        path.addLine(to: point(0.56, 0.30))
+        path.addLine(to: point(0.56, 0.51))
+        path.addLine(to: point(0.51, 0.51))
+        path.addLine(to: point(0.51, 0.30))
+        path.addLine(to: point(0.44, 0.30))
+        path.addLine(to: point(0.44, 0.51))
+        path.addLine(to: point(0.37, 0.51))
+        path.addCurve(to: point(0.06, 0.92), control1: point(0.31, 0.82), control2: point(0.22, 0.92))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct AdamEnergyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+        var path = Path()
+
+        path.move(to: point(0.37, 0.45))
+        path.addLine(to: point(0.42, 0.45))
+        path.addCurve(to: point(0.38, 0.92), control1: point(0.42, 0.68), control2: point(0.41, 0.82))
+        path.addLine(to: point(0.25, 0.92))
+        path.addCurve(to: point(0.37, 0.45), control1: point(0.34, 0.80), control2: point(0.37, 0.65))
+        path.closeSubpath()
+
+        path.move(to: point(0.47, 0.45))
+        path.addLine(to: point(0.53, 0.45))
+        path.addLine(to: point(0.56, 0.92))
+        path.addLine(to: point(0.44, 0.92))
+        path.closeSubpath()
+
+        path.move(to: point(0.58, 0.45))
+        path.addLine(to: point(0.63, 0.45))
+        path.addCurve(to: point(0.75, 0.92), control1: point(0.63, 0.65), control2: point(0.66, 0.80))
+        path.addLine(to: point(0.62, 0.92))
+        path.addCurve(to: point(0.58, 0.45), control1: point(0.59, 0.82), control2: point(0.58, 0.68))
+        path.closeSubpath()
+        return path
     }
 }
 

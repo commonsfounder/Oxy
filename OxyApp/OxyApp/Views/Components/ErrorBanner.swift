@@ -1,31 +1,35 @@
 import SwiftUI
 
 struct ErrorBanner: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let message: String
     var onRetry: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        layout {
             AppIcon("wifi-alert", size: 14)
                 .foregroundStyle(Color.appMuted)
 
             Text(message)
-                .font(Font.appBody(13))
+                .font(.subheadline)
                 .foregroundStyle(Color.appMuted)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: 8)
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
 
             if let onRetry {
                 Button(action: onRetry) {
                     Text("Retry")
-                        .font(.appBody(12, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .tracking(0.3)
                         .foregroundStyle(Color.appAccent)
-                        // Pad the label to a ~40pt tap target without distorting the row.
                         .padding(.vertical, 11)
                         .padding(.horizontal, 4)
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.appScale)
@@ -35,10 +39,11 @@ struct ErrorBanner: View {
                 Button(action: onDismiss) {
                     AppIcon("xmark", size: 12)
                         .foregroundStyle(Color.appMuted)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.appScale)
+                .accessibilityLabel("Dismiss error")
             }
         }
         .padding(.horizontal, 14)

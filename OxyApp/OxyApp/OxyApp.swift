@@ -14,7 +14,6 @@ struct OxyApp: App {
             RootView()
                 .environment(appState)
                 .tint(Color.appAccent)
-                .preferredColorScheme(.light)
         }
     }
 }

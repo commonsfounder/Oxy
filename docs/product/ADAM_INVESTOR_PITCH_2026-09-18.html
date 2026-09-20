@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Adam — Investor Pitch</title>
+<style>
+:root{--canvas:#F6F9FD;--surface:#fff;--inset:#E8F0FB;--ink:#101721;--muted:#5C697A;--accent:#135EE1;--hair:rgba(16,23,33,.11)}
+*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif}
+.deck{min-height:100vh;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;gap:12px;padding:14px 22px;background:var(--surface);border-bottom:1px solid var(--hair)}
+.mark{width:26px;height:26px;border:3px solid var(--ink);border-radius:7px;position:relative;flex:none}
+.mark:before,.mark:after{content:"";position:absolute;top:2px;bottom:2px;width:3px;background:var(--accent);border-radius:2px}
+.mark:before{left:5px}.mark:after{left:11px}
+.bar b{font-size:13px;letter-spacing:.12em}
+.bar span{color:var(--muted);font-size:13px;margin-left:auto}
+.stage{flex:1;display:flex;align-items:center;justify-content:center;padding:28px}
+.slide{display:none;max-width:860px;width:100%;background:var(--surface);border:1px solid var(--hair);border-radius:22px;padding:48px 52px;box-shadow:0 12px 40px rgba(16,23,33,.08)}
+.slide.active{display:block}
+.k{color:var(--muted);font-weight:600;font-size:13px;margin:0 0 10px}
+h1{font-size:32px;line-height:1.1;letter-spacing:-.02em;margin:0 0 12px}
+h2{font-size:28px;letter-spacing:-.02em;margin:0 0 12px}
+p{font-size:17px;line-height:1.55;margin:8px 0;color:var(--ink)}
+.mut{color:var(--muted);font-size:14px}
+ul{font-size:16px;line-height:1.6;padding-left:20px;margin:10px 0}
+li{margin:6px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.card{background:var(--canvas);border:1px solid var(--hair);border-radius:16px;padding:14px 16px;font-size:15px}
+.nav{display:flex;align-items:center;gap:10px;padding:16px 22px;background:var(--surface);border-top:1px solid var(--hair)}
+button{font:inherit;font-weight:600;border:1px solid var(--hair);background:var(--canvas);border-radius:13px;padding:10px 16px;cursor:pointer}
+button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.dots{display:flex;gap:6px;margin-left:auto}
+.dots i{width:8px;height:8px;border-radius:50%;background:#c8d5ea}
+.dots i.on{background:var(--accent)}
+@media(max-width:640px){.slide{padding:28px 24px}.grid{grid-template-columns:1fr}}
+@media print{.nav,.bar span{display:none}.slide{display:block;break-inside:avoid;margin:0 0 16px}}
+</style>
+</head>
+<body>
+<div class="deck">
+<div class="bar"><div class="mark"></div><b>ADAM</b><span>Investor pitch · 10 slides · grounded in PRODUCT / NORTH_STAR / device contract</span></div>
+<div class="stage">
+
+<section class="slide active"><p class="k">01 / TITLE</p><h1>Give it the outcome. It does the legwork.</h1><p>Adam is a general-purpose personal-AI worker for the household. You state the intended outcome and grant access; Adam composes browser use, connected services, memory, communication, files, long-running work, and verification inside deterministic safety boundaries.</p><p class="mut">Companion surface: iPhone app — Home / Ask Adam / Activity / Services / Settings.</p></section>
+
+<section class="slide"><p class="k">02 / PROBLEM</p><h2>Households drown in digital legwork.</h2><ul><li>Shopping, booking, forms, account admin, reminders, subscriptions.</li><li>Chatbot shells hide every capability behind a composer.</li><li>Task managers make you operate the queue.</li><li>Integration catalogues connect accounts but do no work.</li><li>Smart-home demos fake rooms, presence, sensors.</li></ul><p>Nobody wants to operate computers step by step. They want to delegate.</p></section>
+
+<section class="slide"><p class="k">03 / PRODUCT</p><h2>Home answers four questions.</h2><div class="grid"><div class="card"><b>What does Adam know?</b><br><span class="mut">Household state now.</span></div><div class="card"><b>Does anything need me?</b><br><span class="mut">Approvals with real context.</span></div><div class="card"><b>What is Adam doing?</b><br><span class="mut">Live work + watches.</span></div><div class="card"><b>What changed?</b><br><span class="mut">Outcomes, deduplicated.</span></div></div><p class="mut">Ask Adam (voice + text) is a mode, one tap away. Calm, capable, discreet, concrete.</p></section>
+
+<section class="slide"><p class="k">04 / HOW IT WORKS</p><h2>One runtime, not domain agents.</h2><ul><li><b>Orchestrator:</b> think → act → observe → adapt, checkpointed.</li><li><b>Execution boundary:</b> validate → review gate → invoke → log.</li><li><b>Browser as environment:</b> open, observe, fill, checkout.</li><li><b>Money guard:</b> spend caps + review-gated payment, amount re-read off the live page.</li></ul><p class="mut">New task ⇒ no new subsystem. Connectors are real actions or handoff deep-links.</p></section>
+
+<section class="slide"><p class="k">05 / LIVE PROOF</p><h2>Verified in prod, not demos.</h2><ul><li><b>Browser agent</b> (most mature): persistent sessions, logins, real live purchases.</li><li>Appointment booking: choices → explicit approval → booking + calendar + Home confirmation (sandbox).</li><li>Durable approvals + per-goal sessions with real prod writes.</li><li>Voice I/O runs; core promise proven via typed chat so far.</li></ul><p class="mut">Honest gap: some bot-walled sites (Magento/BigCommerce class) have no viable path yet.</p></section>
+
+<section class="slide"><p class="k">06 / SAFETY + TRUTH</p><h2>Reasoning is probabilistic. Authority is not.</h2><ul><li>Payments, destructive, identity, irreversible actions stay gated at the boundary.</li><li>"Tool invoked" ≠ done. Success only after state is re-read.</li><li>Unknown / unavailable / not configured are designed states — never faked.</li><li>Vault RLS closed and verified both directions; audit history explicit.</li></ul></section>
+
+<section class="slide"><p class="k">07 / WEDGE</p><h2>Phone first. Hardware earned.</h2><p>The wedge is the phone + shipped transacting capability: basket, guest checkout, card fill, reauth walls, honest outcome reporting.</p><p class="mut">A home-device pivot was tested and rejected (Aug 2026): hardware is earned once software demand is undeniable, not the opener.</p></section>
+
+<section class="slide"><p class="k">08 / HARDWARE VISION</p><h2>North star, deferred by choice.</h2><ul><li>Always-available device, far-field mic, speaker, wake word, physical privacy control, OTA, encryption.</li><li>Today: iPhone only. Canonical path is runtime → bounded event → authenticated paired browser → ack.</li><li>XIAO BLE prototypes + ESP32 beacon are experiments — no frozen PCB contract.</li></ul><p class="mut">Build gates: transport vocabulary, pairing/offline, mic latency, battery/thermal, controls, BOM/antenna, updates, privacy, month-long household proof.</p></section>
+
+<section class="slide"><p class="k">09 / BUSINESS</p><h2>Work done, not accounts connected.</h2><ul><li>Household worker across shopping, travel, banking visibility, smart home, subscriptions (partly built).</li><li>Real payment rails with caps + review (Stripe card flow; bank top-up shipped).</li><li>Trust surfaces — permissions, approvals, audit — as the moat.</li></ul><p class="mut">Stage: early. Verified single behaviours in prod; next is dependable week-long coverage.</p></section>
+
+<section class="slide"><p class="k">10 / ASK</p><h2>From verified behaviours to dependable coverage.</h2><ul><li>Week-long watches → Home cards → verified outcomes.</li><li>Widen ecosystem where real; harden permission coverage.</li><li>Prove voice end-to-end; graduate one commodity ambient output first.</li></ul><p><b>Ask:</b> capital to turn live single behaviours into household coverage — hardware earned, not opened.</p></section>
+
+</div>
+<div class="nav"><button id="p">← Back</button><button id="n" class="pri">Next →</button><span class="mut" id="c">1 / 10</span><div class="dots" id="d"></div></div>
+</div>
+<script>
+(function(){var s=[].slice.call(document.querySelectorAll('.slide')),i=0,d=document.getElementById('d'),c=document.getElementById('c');
+s.forEach(function(_,k){var e=document.createElement('i');if(!k)e.className='on';d.appendChild(e)});
+function go(k){i=Math.max(0,Math.min(s.length-1,k));s.forEach(function(el,j){el.classList.toggle('active',j===i)});c.textContent=(i+1)+' / '+s.length;[].forEach.call(d.children,function(el,j){el.className=j===i?'on':''})}
+document.getElementById('p').onclick=function(){go(i-1)};document.getElementById('n').onclick=function(){go(i+1)};
+document.addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key===' ')go(i+1);if(e.key==='ArrowLeft')go(i-1)});
+var t=0;document.querySelector('.stage').addEventListener('click',function(){clearTimeout(t);t=setTimeout(function(){go(i+1)},200)})})();
+</script>
+</body>
+</html>

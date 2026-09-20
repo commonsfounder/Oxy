@@ -50,6 +50,7 @@ final class AppState {
         if !isDemoSession {
             Task { @MainActor in
                 NativeIntegrationManager.shared.bootstrap(userId: savedUserId)
+                await HouseholdSoundMonitor.shared.configure(userId: savedUserId)
             }
         }
     }
@@ -78,11 +79,15 @@ final class AppState {
         if !isDemo {
             Task { @MainActor in
                 NativeIntegrationManager.shared.bootstrap(userId: userId)
+                await HouseholdSoundMonitor.shared.configure(userId: userId)
             }
         }
     }
 
     func logout() {
+        Task { @MainActor in
+            HouseholdSoundMonitor.shared.stopAndForgetUser()
+        }
         keychain.delete(key: "session_token")
         keychain.delete(key: "user_id")
         keychain.delete(key: "demo_session")

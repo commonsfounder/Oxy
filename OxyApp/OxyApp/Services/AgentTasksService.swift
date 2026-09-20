@@ -3,6 +3,28 @@ import Foundation
 /// Persistent agent work: goals survive the current chat turn and can be resumed
 /// from Home or the Work surface.
 enum AgentTasksService {
+    static func fetchTask(id: String) async throws -> AgentTask {
+        let data = try await APIClient.shared.request(path: "/agent/tasks/\(id)")
+        return try JSONDecoder().decode(AgentTaskEnvelope.self, from: data).task
+    }
+
+    static func fetchReviews(taskID: String) async throws -> [AgentTaskReview] {
+        let data = try await APIClient.shared.request(path: "/agent/tasks/\(taskID)/reviews")
+        return try JSONDecoder().decode(AgentTaskReviews.self, from: data).reviews
+    }
+
+    static func decide(review: AgentTaskReview, approved: Bool) async throws {
+        guard let userID = KeychainHelper.shared.read(key: "user_id"), !userID.isEmpty else {
+            throw APIError.server(401, "Sign in again.")
+        }
+        _ = try await APIClient.shared.request(path: "/chat", method: "POST", body: [
+            "userId": userID,
+            "message": approved ? "Yes, confirm." : "Cancel.",
+            "approvalId": review.id,
+            "approvalTaskId": review.taskId
+        ])
+    }
+
     static func createTask(goal: String, autonomy: String, guardMode: Bool) async throws -> AgentTask {
         let data = try await APIClient.shared.request(
             path: "/agent/tasks",
@@ -61,6 +83,18 @@ enum AgentTasksService {
 
 private struct AgentTaskEnvelope: Codable {
     let task: AgentTask
+}
+
+struct AgentTaskReview: Codable, Identifiable {
+    let id: String
+    let taskId: String
+    let title: String
+    let detail: String
+    let canApprove: Bool
+}
+
+private struct AgentTaskReviews: Codable {
+    let reviews: [AgentTaskReview]
 }
 
 private struct AgentRuntimeEnvelope: Codable {

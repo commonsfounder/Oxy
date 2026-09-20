@@ -75,3 +75,39 @@ test('household state fails closed on malformed collections', () => {
   assert.deepEqual(state.openCommitments, []);
   assert.deepEqual(state.activePlans, []);
 });
+
+test('invalid coordinates cannot establish either presence or a configured home', () => {
+  const now = new Date('2026-09-08T18:00:00.000Z');
+  const invalid = [
+    { latitude: '', longitude: '' },
+    { latitude: '  ', longitude: '  ' },
+    { latitude: false, longitude: false },
+    { latitude: null, longitude: null },
+    { latitude: [], longitude: [] },
+    { latitude: 91, longitude: 0 },
+    { latitude: 0, longitude: -181 },
+    { latitude: Infinity, longitude: 0 }
+  ];
+  for (const location of invalid) {
+    for (const home of [HOME, location]) {
+      const { presence } = normalizeHouseholdState({
+        nativeContext: { location, settings: { homeLocation: home }, updated_at: now.toISOString() }, now
+      });
+      assert.equal(presence.state, 'unknown', JSON.stringify(location));
+      assert.equal(presence.homeConfigured, home === HOME);
+    }
+  }
+});
+
+test('valid zero coordinates and numeric aliases still establish presence', () => {
+  const now = new Date('2026-09-08T18:00:00.000Z');
+  const { presence } = normalizeHouseholdState({
+    nativeContext: {
+      location: { lat: '0', lng: '0' },
+      settings: { homeLocation: { latitude: 0, longitude: 0 } },
+      updated_at: now.toISOString()
+    }, now
+  });
+  assert.equal(presence.state, 'home');
+  assert.equal(presence.homeConfigured, true);
+});

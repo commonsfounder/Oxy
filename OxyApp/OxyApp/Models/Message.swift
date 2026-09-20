@@ -142,10 +142,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let distanceText: String?
     let recoverable: Bool?
     let recoveryAction: BrowserRecoveryAction?
-    /// What this result is ABOUT, whatever kind of thing it is: an order, a booking, a form,
-    /// a document, an account. Commerce used to have its own first-class fields here
-    /// (productName/price/total/colorOptions), which made every other kind of work a
-    /// second-class citizen of the message model.
     let subject: ResultSubject?
     /// Completed browser-task identifier.
     let taskId: String?

@@ -190,6 +190,7 @@ final class NativeIntegrationManager {
     private var lastLocationSyncAt = Date.distantPast
     private var healthObserverQueries: [HKObserverQuery] = []
     private var lastHealthContextSyncAt = Date.distantPast
+    private var lastDoorwayPresenceAt = Date.distantPast
     let pendant = PendantBLEManager()
 
     private init() {}
@@ -197,6 +198,7 @@ final class NativeIntegrationManager {
     func bootstrap(userId: String) {
         guard !userId.isEmpty else { return }
         activeUserId = userId
+        configureDoorwayPresenceSync()
         if locationSyncTask == nil {
             locationSyncTask = Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(named: LocationManager.didChangeLocation) {
@@ -213,6 +215,39 @@ final class NativeIntegrationManager {
         Task {
             await requestNotificationPermission(userId: userId)
             await syncNativeContext(userId: userId)
+        }
+    }
+
+    private func configureDoorwayPresenceSync() {
+        pendant.onTrustedDoorwayPresence = { [weak self] beaconID in
+            guard let self, let userId = self.activeUserId else { return }
+            let now = Date()
+            // A connected beacon notifies periodically so the app can recover
+            // from a missed subscription. One doorway observation per fifteen
+            // minutes is enough; the server applies its own dedupe too.
+            guard now.timeIntervalSince(self.lastDoorwayPresenceAt) >= 15 * 60 else { return }
+            self.lastDoorwayPresenceAt = now
+            let bucket = Int(now.timeIntervalSince1970 / (15 * 60))
+            let event: [String: Any] = [
+                "id": "ble:\(beaconID):\(bucket)",
+                "type": "person_near_door",
+                "subject": "Known device near the door",
+                "title": "Known device nearby",
+                "body": "An approved Adam device is near the door.",
+                "occurredAt": now.ISO8601Format(),
+                "source": "ios_ble_presence",
+                "confidence": 0.9,
+                "relevance": 0.8,
+                "actionable": true,
+                "interruptionCost": "low"
+            ]
+            Task { [weak self] in
+                guard let self else { return }
+                let accepted = await self.syncNativeContext(userId: userId, events: [event])
+                #if DEBUG
+                print("[DoorwayPresence] submitted beacon=\(beaconID) accepted=\(accepted)")
+                #endif
+            }
         }
     }
 
@@ -429,8 +464,9 @@ final class NativeIntegrationManager {
         return rounded > 0 ? rounded : nil
     }
 
-    func syncNativeContext(userId: String) async {
-        guard !userId.isEmpty else { return }
+    @discardableResult
+    func syncNativeContext(userId: String, events: [[String: Any]] = []) async -> Bool {
+        guard !userId.isEmpty else { return false }
         let settings = loadSettings()
         let health = await healthSnapshot()
         let capabilities = await nativeCapabilities()
@@ -438,14 +474,18 @@ final class NativeIntegrationManager {
             "userId": userId,
             "health": health.dictionary,
             "capabilities": capabilities.dictionary,
-            "settings": settings.nativeDictionary
+            "settings": settings.nativeDictionary,
+            "events": events
         ]
         if let location = LocationManager.shared.locationDict {
             body["location"] = location
         }
         do {
             _ = try await APIClient.shared.request(path: "/native/context", method: "POST", body: body)
-        } catch {}
+            return true
+        } catch {
+            return false
+        }
     }
 
     func markCurrentLocationAsHome(userId: String) async {
@@ -3033,10 +3073,19 @@ final class PendantBLEManager: NSObject {
     var isConnected: Bool { connectionState == .connected }
     private(set) var lastError: String?
     var peripheralName: String? { peripheral?.name }
+    var isCurrentBeaconTrustedForDoorwayPresence: Bool {
+        guard let peripheral else { return false }
+        return UserDefaults.standard.string(forKey: Self.doorwayPresenceBeaconKey) == peripheral.identifier.uuidString
+    }
 
     /// Streaming audio hook. When set, complete utterances (chunks terminated by
     /// the DONE signal) are delivered here instead of via `didReceiveData`.
     var onAudioData: ((Data) -> Void)?
+
+    /// A trusted beacon may send a short presence frame after it connects. The
+    /// receiver owns the policy and the resulting household event; BLE itself
+    /// supplies only the bounded observation.
+    var onTrustedDoorwayPresence: ((String) -> Void)?
 
     private enum UART {
         static let service    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -3054,6 +3103,8 @@ final class PendantBLEManager: NSObject {
     private var recordingCompletion: ((Data) -> Void)?
 
     private static let doneSignal = Data("DONE".utf8)
+    private static let doorwayPresenceFrame = Data("PRESENCE:doorway-v1".utf8)
+    private static let doorwayPresenceBeaconKey = "adam_doorway_presence_beacon_id"
 
     override init() {
         super.init()
@@ -3100,6 +3151,9 @@ final class PendantBLEManager: NSObject {
 
     /// Disconnects and forgets the currently paired pendant.
     func unpair() {
+        if isCurrentBeaconTrustedForDoorwayPresence {
+            UserDefaults.standard.removeObject(forKey: Self.doorwayPresenceBeaconKey)
+        }
         if let peripheral {
             central.cancelPeripheralConnection(peripheral)
         }
@@ -3108,6 +3162,18 @@ final class PendantBLEManager: NSObject {
         txCharacteristic = nil
         peripheral = nil
         connectionState = .disconnected
+    }
+
+    @discardableResult
+    func useConnectedBeaconForDoorwayPresence() -> Bool {
+        guard let peripheral, peripheral.state == .connected else { return false }
+        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.doorwayPresenceBeaconKey)
+        return true
+    }
+
+    func stopUsingConnectedBeaconForDoorwayPresence() {
+        guard isCurrentBeaconTrustedForDoorwayPresence else { return }
+        UserDefaults.standard.removeObject(forKey: Self.doorwayPresenceBeaconKey)
     }
 }
 
@@ -3208,6 +3274,11 @@ extension PendantBLEManager: CBPeripheralDelegate {
                     error: Error?) {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
+
+        if data == Self.doorwayPresenceFrame, isCurrentBeaconTrustedForDoorwayPresence {
+            onTrustedDoorwayPresence?("doorway-v1")
+            return
+        }
 
         // The control firmware and the audio-streaming experiment share the
         // Nordic UART characteristic. Recognize a bounded text control frame

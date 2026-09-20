@@ -213,6 +213,7 @@ const {
   providerConfiguration
 } = require('./services/model-routing');
 const { geocodeLocation } = require('./geocoding');
+const { lookupHomeAddresses } = require('./services/ideal-postcodes');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 const {
   createAppointmentBookingService,
@@ -1133,7 +1134,7 @@ async function refreshBriefingSourceData(userId, todayKey, snapshot) {
 }
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
-const { buildChatChannelContext, buildTelegramChatRequest } = require('./services/chat-channel');
+const { buildChatChannelContext, buildTelegramChatRequest, normalizeChatChannel } = require('./services/chat-channel');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -3730,6 +3731,7 @@ function serializeConversationContent(payload) {
   if (Array.isArray(payload.actions) && payload.actions.length) next.actions = payload.actions;
   if (typeof payload.audio === 'string') next.audio = payload.audio;
   if (typeof payload.kind === 'string') next.kind = payload.kind;
+  if (typeof payload.channel === 'string' && payload.channel.trim()) next.channel = payload.channel.trim();
 
   return Object.keys(next).length === 1 && typeof next.text === 'string'
     ? next.text
@@ -3749,13 +3751,18 @@ function conversationFallbackText(entry) {
 function normalizeConversationRow(row) {
   const parsed = safeParseJSON(row?.content);
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+    const actionChannel = actions.some(action =>
+      action?.action === 'send_telegram' || action?.type === 'send_telegram'
+    ) ? 'telegram_bot' : null;
     return {
       ...row,
       content: typeof parsed.text === 'string' ? parsed.text : '',
       image: typeof parsed.image === 'string' ? parsed.image : null,
-      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      actions,
       audio: typeof parsed.audio === 'string' ? parsed.audio : null,
-      kind: typeof parsed.kind === 'string' ? parsed.kind : null
+      kind: typeof parsed.kind === 'string' ? parsed.kind : null,
+      channel: typeof parsed.channel === 'string' ? parsed.channel : actionChannel
     };
   }
   return {
@@ -3764,7 +3771,8 @@ function normalizeConversationRow(row) {
     image: null,
     actions: [],
     audio: null,
-    kind: null
+    kind: null,
+    channel: null
   };
 }
 
@@ -3782,14 +3790,17 @@ function buildConversationSessions(rows = []) {
     const lastAt = lastSession ? new Date(lastSession.last_at) : null;
     const dayChanged = lastAt && createdAt.toISOString().slice(0, 10) !== lastAt.toISOString().slice(0, 10);
     const gapChanged = lastAt && createdAt.getTime() - lastAt.getTime() > gapMs;
-    if (!lastSession || dayChanged || gapChanged) {
+    const channelChanged = lastSession && lastSession.channel !== row.channel &&
+      (lastSession.channel || row.channel);
+    if (!lastSession || dayChanged || gapChanged || channelChanged) {
       sessions.push({
         id: row.id || row.created_at,
         title: '',
         preview: '',
         started_at: row.created_at,
         last_at: row.created_at,
-        message_count: 0
+        message_count: 0,
+        channel: row.channel || null
       });
     }
 
@@ -3797,6 +3808,7 @@ function buildConversationSessions(rows = []) {
     const text = conversationFallbackText(row).trim();
     session.last_at = row.created_at;
     session.message_count += 1;
+    if (!session.channel && row.channel) session.channel = row.channel;
     if (!session.title && row.role === 'user' && text) session.title = text.slice(0, 80);
     if (text) session.preview = text.slice(0, 140);
   }
@@ -3816,12 +3828,18 @@ function shouldPersistChatTurn(requestedValue) {
 
 async function saveMessage(userId, role, content, trace = null) {
   if (trace?.persistConversation === false) return;
+  const channel = typeof trace?.channel === 'string' ? trace.channel : null;
+  const contentWithChannel = channel && typeof content === 'string'
+    ? { text: content, channel }
+    : channel && content && typeof content === 'object' && !Array.isArray(content)
+      ? { ...content, channel: content.channel || channel }
+      : content;
   const insertMessage = () => supabase
     .from('conversations')
     .insert({
       user_id: userId,
       role,
-      content: serializeConversationContent(content),
+      content: serializeConversationContent(contentWithChannel),
       created_at: new Date().toISOString()
     });
   if (trace) {
@@ -7113,6 +7131,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     const persistConversation = shouldPersistChatTurn(req.body.persistConversation);
     trace.persistConversation = persistConversation;
     trace.persistArtifacts = persistConversation;
+    trace.channel = normalizeChatChannel(channel);
     trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
     devTiming('chat', 'user_message_received', {
       streaming,
@@ -7121,10 +7140,21 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       messageLength: String(message || '').length
     });
 
-    // Let the model start as soon as context is ready instead of waiting on the DB write.
+    const hasReviewSelection = req.body.approvalId !== undefined || req.body.approvalTaskId !== undefined;
+    if (hasReviewSelection && (
+      !isNonEmptyString(req.body.approvalId) || req.body.approvalId.length > 120 ||
+      !isNonEmptyString(req.body.approvalTaskId) || req.body.approvalTaskId.length > 120 ||
+      !(isPendingConfirmMessage(message) || isPendingCancelMessage(message))
+    )) return res.status(400).json({ error: 'A review decision needs its approval and task identifiers.' });
+    const selection = hasReviewSelection
+      ? { approvalId: req.body.approvalId, taskId: req.body.approvalTaskId }
+      : null;
+    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => approvalRuntime.pending(userId, message, selection));
+    if (selection && !pendingAction) {
+      return res.status(409).json({ error: 'That review is no longer pending. Refresh the task.' });
+    }
+    // Invalid review selections must not enter the conversation or reasoning loop.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
-
-    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => approvalRuntime.pending(userId, message));
     if (pendingAction?.ambiguous && (
       isPendingConfirmMessage(message) ||
       isPendingCancelMessage(message) ||
@@ -7566,7 +7596,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               guardMode: settings.guardMode === true,
               modelRoute: { provider: chatProvider, model: chatModel },
               useSearch: Boolean(isBroadMoneyGoal || useSearch),
-              deviceType: req.body?.deviceType || 'ambient_home'
+              deviceType: req.body?.deviceType || 'ambient_home',
+              ...(trace.channel ? { channel: trace.channel } : {})
             },
             runtime: {
               deviceId: req.body?.deviceId,
@@ -7589,7 +7620,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
                 ...(req.body?.projectRef ? { projectRef: req.body.projectRef } : {}),
                 modelRoute: { provider: chatProvider, model: chatModel },
                 useSearch: Boolean(isBroadMoneyGoal || useSearch),
-                deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
+                deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home',
+                ...(trace.channel ? { channel: trace.channel } : {})
               }
             })
           });
@@ -9086,6 +9118,20 @@ app.get('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/agent/tasks/:id/reviews', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    const { taskReview } = require('./services/task-review');
+    const pending = await approvalRuntime.list(userId);
+    res.json({ reviews: pending.filter(item => item.taskId === task.id).map(taskReview) });
+  } catch (error) {
+    res.status(503).json({ error: 'Reviews are unavailable. Try again.' });
+  }
+});
+
 app.get('/agent/scheduled-tasks', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9618,6 +9664,20 @@ app.post('/geocode', requireSessionAuth, async (req, res) => {
     res.json({ lat: result.lat, lng: result.lng, formattedAddress: result.formattedAddress });
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Resolves UK home addresses server-side so the Ideal Postcodes key never enters the app.
+app.post('/home-addresses', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const query = String(req.body?.query || '').trim();
+  if (!query) return res.status(400).json({ error: 'query is required.' });
+  try {
+    res.json({ addresses: await lookupHomeAddresses(query) });
+  } catch (e) {
+    if (e.code === 'ADDRESS_LOOKUP_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
+    res.status(400).json({ error: 'Could not find an address for that search.' });
   }
 });
 

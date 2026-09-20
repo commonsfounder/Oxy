@@ -266,8 +266,13 @@ function createApprovalRuntime(supabase, { now = () => new Date() } = {}) {
   return {
     list,
     park,
-    async pending(userId, message = '') {
-      return selectPendingApproval(await list(userId), message);
+    async pending(userId, message = '', selection = null) {
+      const approvals = await list(userId);
+      if (selection) {
+        return approvals.find(approval => approval.approvalId === selection.approvalId
+          && approval.taskId === selection.taskId) || null;
+      }
+      return selectPendingApproval(approvals, message);
     },
     async claim(userId, pending) {
       return claimApproval(supabase, userId, pending?.approvalId);

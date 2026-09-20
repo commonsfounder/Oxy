@@ -183,7 +183,11 @@ struct ChatHomeView: View {
                                 HapticManager.shared.impact(.light)
                                 open(session)
                             } label: {
-                                SidebarRow(title: session.title, trailing: session.relativeTime)
+                                SidebarRow(
+                                    title: session.title,
+                                    channel: session.channelLabel,
+                                    trailing: session.relativeTime
+                                )
                             }
                             .buttonStyle(.appScale(0.98))
                             .listRowInsets(EdgeInsets())
@@ -480,6 +484,7 @@ private struct SidebarSkeleton: View {
 
 private struct SidebarRow: View {
     let title: String
+    let channel: String?
     let trailing: String
 
     var body: some View {
@@ -490,6 +495,16 @@ private struct SidebarRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 12)
+            if let channel, !channel.isEmpty {
+                Text(channel)
+                    .font(.appMono(9))
+                    .foregroundStyle(Color.appAccent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.appAccent.opacity(0.1), in: Capsule())
+                    .fixedSize()
+                    .padding(.trailing, 8)
+            }
             Text(trailing)
                 .font(.appMono(11))
                 .monospacedDigit()

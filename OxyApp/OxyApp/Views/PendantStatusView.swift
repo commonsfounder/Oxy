@@ -165,6 +165,30 @@ private struct PendantPairingSection: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
+                if pendant.isConnected {
+                    SettingsDivider()
+                    HStack {
+                        Text("Doorway presence")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                        Spacer()
+                        if pendant.isCurrentBeaconTrustedForDoorwayPresence {
+                            Button("Stop using") {
+                                pendant.stopUsingConnectedBeaconForDoorwayPresence()
+                            }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.appDestructive)
+                        } else {
+                            Button("Use this device") {
+                                _ = pendant.useConnectedBeaconForDoorwayPresence()
+                            }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                        }
+                    }
+                    .padding(.vertical, 16)
+                }
+
                 SettingsDivider()
 
                 HStack(spacing: 12) {

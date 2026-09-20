@@ -24,9 +24,12 @@ function clean(value, max = MAX_TEXT) {
 
 function coordinate(value) {
   const source = parseObject(value);
-  const latitude = Number(source.latitude ?? source.lat);
-  const longitude = Number(source.longitude ?? source.lng);
-  return Number.isFinite(latitude) && Number.isFinite(longitude)
+  const values = [source.latitude ?? source.lat, source.longitude ?? source.lng];
+  if (values.some(item => (typeof item !== 'number' && typeof item !== 'string')
+    || (typeof item === 'string' && !item.trim()))) return null;
+  const [latitude, longitude] = values.map(Number);
+  return Number.isFinite(latitude) && Math.abs(latitude) <= 90
+    && Number.isFinite(longitude) && Math.abs(longitude) <= 180
     ? { latitude, longitude }
     : null;
 }

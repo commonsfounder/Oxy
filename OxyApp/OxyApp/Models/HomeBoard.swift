@@ -73,6 +73,7 @@ struct BoardCounts: Codable, Equatable {
 
 struct HomeBoard: Codable, Equatable {
     let generatedAt: String?
+    var unavailableSources: [String]? = nil
     let lastSeenAt: String?
     let needsYou: [BoardItem]
     let handling: [BoardItem]

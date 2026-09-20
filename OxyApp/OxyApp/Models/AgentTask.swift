@@ -78,6 +78,44 @@ struct AgentTask: Codable, Identifiable, Equatable {
             .replacingOccurrences(of: "a appointment", with: "an appointment", options: .caseInsensitive)
     }
 
+    /// The list surface is a place to recognise work at a glance, not to reread
+    /// the original request. Full wording remains available after opening it.
+    var activityTitle: String {
+        let request = displayGoal
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstSentence = request.split(whereSeparator: { ".!?\n".contains($0) }).first.map(String.init) ?? request
+        let stripped = firstSentence.replacingOccurrences(
+            of: #"^(please |can you |could you |would you |i need you to |i want you to )"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let match = stripped.range(of: #"^research (?:the )?(?:best )?(.+?) available under ([£$]\d+)"#, options: .regularExpression) {
+            let parts = String(stripped[match]).replacingOccurrences(of: #"^research (?:the )?(?:best )?"#, with: "", options: .regularExpression)
+            if let amountRange = parts.range(of: #"\s+available under\s+"#, options: .regularExpression) {
+                return "\(parts[..<amountRange.lowerBound].capitalized) under \(parts[amountRange.upperBound...])"
+            }
+        }
+        return Self.compactLabel(stripped)
+    }
+
+    var activityDetail: String? {
+        if status.lowercased() == "completed", let outcome = activities.last(where: \.success)?.summary,
+           !outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return outcome
+        }
+        return interruptionMessage
+    }
+
+    private static func compactLabel(_ text: String, maximumLength: Int = 54) -> String {
+        guard text.count > maximumLength else { return text.isEmpty ? "Untitled task" : text }
+        let boundary = text.index(text.startIndex, offsetBy: maximumLength)
+        let prefix = String(text[..<boundary])
+        let wordBoundary = prefix.lastIndex(of: " ") ?? prefix.endIndex
+        return String(prefix[..<wordBoundary]).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
     var interruptionMessage: String? {
         guard let lastError = lastError?.trimmingCharacters(in: .whitespacesAndNewlines), !lastError.isEmpty else {
             return nil

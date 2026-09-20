@@ -962,12 +962,18 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let startedAt: String?
     let lastAt: String?
     let messageCount: Int
+    let channel: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, preview
         case startedAt = "started_at"
         case lastAt = "last_at"
         case messageCount = "message_count"
+        case channel
+    }
+
+    var channelLabel: String? {
+        channel == "telegram_bot" ? "Telegram" : nil
     }
 
     var formattedDate: String? {

@@ -35,6 +35,21 @@ function fakeSupabase() {
 
 const action = type => ({ type, input: { title: type === 'create_github_issue' ? 'Website battery issue' : 'Supplier quote' } });
 
+test('cross-device review selects only the exact owned task and never falls back', async () => {
+  const db = fakeSupabase();
+  const runtime = approvals.createApprovalRuntime(db);
+  const first = await runtime.park('user-1', action('send_email'), { persistedTaskId: 'task-1' });
+  await runtime.park('user-1', action('send_email'), { persistedTaskId: 'task-2' });
+  const selection = { approvalId: first.approvalId, taskId: 'task-1' };
+  assert.equal((await runtime.pending('user-1', 'yes', selection)).approvalId, first.approvalId);
+  assert.equal(await runtime.pending('user-2', 'yes', selection), null);
+  assert.equal(await runtime.pending('user-1', 'yes', { ...selection, taskId: 'task-2' }), null);
+  assert.equal(await runtime.pending('user-1', 'yes', { ...selection, approvalId: 'expired' }), null);
+  assert.equal(await runtime.claim('user-1', first), true);
+  assert.equal(await runtime.claim('user-1', first), false);
+  assert.equal(await runtime.pending('user-1', 'yes', selection), null);
+});
+
 test('approval rows retain task and runtime identity without unbounded payloads', () => {
   const row = approvals.approvalRow('user-1', {
     taskId: 'task-1',

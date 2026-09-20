@@ -26,11 +26,27 @@ const DEFAULT_CHANGED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const MAX_PER_LANE = 12;
 
+// A channel-bound chat turn has a durable transcript in Conversations. It is not a piece
+// of household work and must not be promoted into Home's changed/completed lanes. The
+// channel is explicit metadata rather than a title or provider-name heuristic. The result
+// check is only a compatibility bridge for older Telegram task rows written before channel
+// metadata was persisted.
+function isConversationalTask(task) {
+  const channel = task?.metadata?.channel;
+  if (typeof channel === 'string' && channel.trim().length > 0) return true;
+  const results = Array.isArray(task?.results) ? task.results : [];
+  return results.some(entry =>
+    entry?.action === 'send_telegram' || entry?.type === 'send_telegram' ||
+    entry?.result?.action === 'send_telegram' || entry?.result?.type === 'send_telegram'
+  );
+}
+
 // --- Watermark ---------------------------------------------------------------------
 
 async function getLastSeen(supabase, userId) {
-  const { data } = await supabase.from('preferences')
+  const { data, error } = await supabase.from('preferences')
     .select('value').eq('user_id', userId).eq('key', LAST_SEEN_KEY).limit(1);
+  if (error) throw error;
   const raw = data?.[0]?.value;
   const parsed = raw ? Date.parse(raw) : NaN;
   return Number.isFinite(parsed) ? new Date(parsed) : null;
@@ -60,14 +76,33 @@ function detailFor(workflow, pendingPrompt) {
   return pendingPrompt || workflow.next_action || workflow.current_step || '';
 }
 
+// Activity is a glanceable record, not a transcript title. The durable goal is
+// still available in the work detail, but a timeline row needs the subject of
+// the request in one short line. This is deliberately deterministic: it never
+// invents a summary or changes the task the user asked Adam to perform.
+function activityTitle(goal, maxLength = 72) {
+  const firstThought = String(goal || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s|\n/, 1)[0]
+    .replace(/^(?:please |can you |could you |would you |i need you to |i want you to )/i, '')
+    .trim();
+  if (firstThought.length <= maxLength) return firstThought || 'Untitled task';
+
+  const boundary = firstThought.lastIndexOf(' ', maxLength - 1);
+  const shortened = firstThought.slice(0, boundary > 24 ? boundary : maxLength).trim();
+  return `${shortened.replace(/[,:;\-–—]+$/, '')}…`;
+}
+
 async function buildFromWorkflows(supabase, userId, { since, now }) {
   const handling = [];
   const needsYou = [];
   const changed = [];
   const completed = [];
 
-  const { data: rows } = await supabase.from('workflows').select('*')
+  const { data: rows, error } = await supabase.from('workflows').select('*')
     .eq('user_id', userId).order('updated_at', { ascending: false });
+  if (error) throw error;
   const all = rows || [];
   if (!all.length) return { handling, needsYou, changed, completed };
 
@@ -78,8 +113,9 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
   const activeIds = active.map(w => w.id);
   let pendingByWorkflow = new Map();
   if (activeIds.length) {
-    const { data: checkpoints } = await supabase.from('workflow_checkpoints')
+    const { data: checkpoints, error: checkpointError } = await supabase.from('workflow_checkpoints')
       .select('*').in('workflow_id', activeIds).eq('status', 'pending');
+    if (checkpointError) throw checkpointError;
     for (const checkpoint of checkpoints || []) {
       if (!pendingByWorkflow.has(checkpoint.workflow_id)) {
         pendingByWorkflow.set(checkpoint.workflow_id, checkpoint);
@@ -94,7 +130,7 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
       id: `workflow-${workflow.id}`,
       workflowId: workflow.id,
       kind: workflow.type || 'general',
-      title: workflow.goal,
+      title: activityTitle(workflow.goal),
       detail: detailFor(workflow, checkpoint?.prompt),
       at: lastActivityOf(workflow),
       deadline: workflow.deadline || null
@@ -125,7 +161,7 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
       id: `workflow-${workflow.id}`,
       workflowId: workflow.id,
       kind: workflow.type || 'general',
-      title: workflow.goal,
+      title: activityTitle(workflow.goal),
       detail: workflow.status === 'completed' ? (workflow.current_step || '') : workflow.blocked_reason || '',
       at: workflow.closed_at,
       failed: workflow.status !== 'completed'
@@ -136,12 +172,13 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
   // authored by the user themselves are excluded — being told what you just did is noise.
   const allIds = all.map(w => w.id);
   if (allIds.length) {
-    const { data: events } = await supabase.from('workflow_events')
+    const { data: events, error: eventsError } = await supabase.from('workflow_events')
       .select('*').in('workflow_id', allIds)
       .gt('created_at', since.toISOString())
       .order('created_at', { ascending: false })
       .limit(MAX_PER_LANE * 2);
-    const titleById = new Map(all.map(w => [w.id, w.goal]));
+    if (eventsError) throw eventsError;
+    const titleById = new Map(all.map(w => [w.id, activityTitle(w.goal)]));
     for (const event of events || []) {
       if (event.actor === 'user') continue;
       // What happened is the headline; which piece of work it belongs to is the context.
@@ -169,12 +206,14 @@ async function buildFromTasks(supabase, userId, { since, now }) {
   const changed = [];
   const completed = [];
 
-  const { data: rows } = await supabase.from('agent_tasks').select('*')
+  const { data: rows, error } = await supabase.from('agent_tasks').select('*')
     .eq('user_id', userId).order('updated_at', { ascending: false }).limit(60);
+  if (error) throw error;
 
   const completedCutoff = new Date(now.getTime() - COMPLETED_WINDOW_MS);
   for (const task of rows || []) {
     if (task.workflow_id) continue;
+    if (isConversationalTask(task)) continue;
     const status = String(task.status || '').toLowerCase();
     if (status === 'recipe') continue;
 
@@ -184,7 +223,7 @@ async function buildFromTasks(supabase, userId, { since, now }) {
         id: `task-${task.id}`,
         taskId: task.id,
         kind: 'task',
-        title: task.goal,
+        title: activityTitle(task.goal),
         detail: '',
         at: task.heartbeat_at || task.updated_at || task.created_at,
         // Real step counts when the task carries a plan, rather than a spinner that
@@ -198,7 +237,7 @@ async function buildFromTasks(supabase, userId, { since, now }) {
         id: `task-${task.id}`,
         taskId: task.id,
         kind: 'task',
-        title: task.goal,
+        title: activityTitle(task.goal),
         detail: status === 'failed' ? (task.last_error || '') : '',
         at: finishedAt,
         failed: status === 'failed'
@@ -214,8 +253,9 @@ async function buildFromTasks(supabase, userId, { since, now }) {
 // A promise the user made and has not kept is the clearest possible "needs you": there
 // is no machinery waiting, only them. Overdue first, then due today.
 async function buildFromCommitments(supabase, userId, { now }) {
-  const { data: rows } = await supabase.from('commitments').select('*')
+  const { data: rows, error } = await supabase.from('commitments').select('*')
     .eq('user_id', userId).eq('status', 'open').order('due_at', { ascending: true }).limit(50);
+  if (error) throw error;
 
   const out = [];
   for (const commitment of rows || []) {
@@ -246,25 +286,28 @@ function byRecency(a, b) {
 
 // One failing source must never blank the board. Each lane contributor is awaited
 // independently and an error there costs only its own rows.
-async function settled(promise, fallback) {
+async function settled(promise, fallback, onFailure = () => {}) {
   try {
     return await promise;
   } catch (err) {
+    onFailure();
     console.warn('[home-state] source failed:', err.message);
     return fallback;
   }
 }
 
 async function getHomeState(supabase, userId, { now = new Date() } = {}) {
-  const lastSeen = await settled(getLastSeen(supabase, userId), null);
+  const unavailableSources = new Set();
+  const failed = source => () => unavailableSources.add(source);
+  const lastSeen = await settled(getLastSeen(supabase, userId), null, failed('history'));
   const since = lastSeen || new Date(now.getTime() - DEFAULT_CHANGED_WINDOW_MS);
 
   const [fromWorkflows, fromTasks, fromCommitments] = await Promise.all([
     settled(buildFromWorkflows(supabase, userId, { since, now }),
-            { handling: [], needsYou: [], changed: [], completed: [] }),
+            { handling: [], needsYou: [], changed: [], completed: [] }, failed('workflows')),
     settled(buildFromTasks(supabase, userId, { since, now }),
-            { handling: [], changed: [], completed: [] }),
-    settled(buildFromCommitments(supabase, userId, { now }), [])
+            { handling: [], changed: [], completed: [] }, failed('tasks')),
+    settled(buildFromCommitments(supabase, userId, { now }), [], failed('commitments'))
   ]);
 
   // Promises the user owes float above machinery waiting on them: a person can act on a
@@ -284,6 +327,7 @@ async function getHomeState(supabase, userId, { now = new Date() } = {}) {
 
   return {
     generatedAt: now.toISOString(),
+    unavailableSources: [...unavailableSources].sort(),
     lastSeenAt: lastSeen ? lastSeen.toISOString() : null,
     needsYou,
     handling,
@@ -303,6 +347,8 @@ module.exports = {
   COMPLETED_WINDOW_MS,
   DEFAULT_CHANGED_WINDOW_MS,
   MAX_PER_LANE,
+  activityTitle,
+  isConversationalTask,
   getLastSeen,
   markSeen,
   getHomeState

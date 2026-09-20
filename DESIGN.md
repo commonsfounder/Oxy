@@ -1,102 +1,104 @@
-# DESIGN.md — Adam app
+# DESIGN.md — Adam
 
 **Register:** product
-**Last captured:** 2026-08-28 (light-paper palette + Fraunces display axes)
-**Supersedes:** the pure-black "editorial minimalism" direction and the earlier teal
-"warm companion" palette. Both are scrapped. The July 3 on-device QA found the
-editorial language unreadable and unusable (black-on-black surfaces, Didot prose,
-light-weight dim text, invisible navigation); do not reintroduce those specific
-mistakes. July 4 walked back one part of the July 3 rebuild: giving assistant
-replies a filled bubble made chat read like a generic chatbot widget. Assistant
-text is plain on the canvas again, but keeps the July 3 legibility fixes
-(regular-weight SF, `appInk`, no dim text) — the earlier failure was the weight/
-color/contrast, not the absence of a bubble.
 
-## Principles
+**Direction established:** 2026-09-02
 
-1. **Legibility beats mood.** Body text sits at `appMuted` or darker on the paper
-   canvas — never lighter. No default font weight below `.regular`. Any fill that
-   carries text must clear 4.5:1 against it. If a treatment looks "quiet" in a
-   screenshot but can't be read on a phone in daylight, it's wrong.
-2. **Surfaces are real.** Cards visibly lift off the canvas. Information lives in
-   containers the eye can find. Hairlines separate; they do not carry structure alone.
-3. **One warm accent.** The brand gold carries selection, CTAs, times, and the
-   assistant's presence. Semantics (green/amber/red) are reserved for state.
-4. **SF for interface, Fraunces for voice.** SF carries body, labels and readouts.
-   The Fraunces serif carries the display moments — the Home greeting, the Chat
-   greeting — and nothing else. It is a voice, not a body face.
-5. **Light-only.** The root pins `.preferredColorScheme(.light)` and the palette is
-   warm paper. Tokens are declared via `appDynamicColor(dark:light:)`, so the `dark:`
-   branch exists but never renders today; keep it correct rather than deleting it.
+**Supersedes:** the warm-paper, gold and editorial-newspaper direction.
 
-## Palette (`app*` tokens in AppTheme.swift)
+Adam is a household companion and control surface for a general-purpose personal worker. The interface should feel like a small, beautifully made piece of domestic technology: calm at rest, unmistakably alive when doing something, and direct whenever the user must decide.
 
-Values below are the rendered light branch.
+## Identity
 
-- **Canvas:** `appBackground` #F6F3EE — warm paper, not white.
-- **Card surface:** `appSurface` #FCFAF6; **inset:** `appSurface2` #EAE4DB — sand.
-- **Hairline:** `appHairline` ink 10%.
-- **Text:** `appInk` #25221E deep umber; `appMuted` #6B6459 warm secondary.
-- **Accent:** `appAccent` #936825 antique gold. Its foreground is `appOnAccent`,
-  which is **dynamic**: near-white on the light-mode gold (4.96:1), near-black on the
-  dark-mode gold (7.81:1). One fixed foreground cannot serve both — the two accents
-  sit on opposite sides of mid-luminance.
-- **Semantics:** `appSuccess` green, `appWarning`/`appAttention` amber, `appDanger`
-  coral, `appLive` bright green.
-- The legacy `oxy*` and `mg*` (settings-family) tokens are aliases into the tokens
-  above — do not give them independent values again.
+The Adam mark is architectural: a graphite frame with three electric-blue channels. It defines the product language.
 
-## Typography (`Font.app*`)
+- **Graphite is structure.** Navigation, typography and durable controls use deep blue-black ink.
+- **Blue is energy.** Reserve it for activity, selection, live context and the next useful action.
+- **White space is functional.** The mark's negative space becomes the layout's breathing room. Do not fill every gap with a card.
+- Render the mark from deterministic vector geometry (`AdamMark`), not a loosely matched icon or generated bitmap.
 
-- **Editorial** `appEditorial(size, weight:soft:wonk:)` — Fraunces, display only.
-  Fraunces ships as a **variable** font whose default instance is `opsz 9 / wght 900`,
-  so a bare `.custom("Fraunces", size:)` resolves to Fraunces-9ptBlack — a heavy
-  caption cut scaled up, which is why it went unused for months. The helper drives
-  `opsz`/`wght`/`SOFT`/`WONK` and tracks optical size to point size. Never bypass it.
-- **Display** `appDisplay(size)` — SF semibold. Card titles, metric figures, headers.
-- **Body** `appBody(size)` — SF regular (default weight `.regular`; pass heavier
-  weights explicitly, never lighter).
-- **Mono** `appMono(size)` — technical readouts only (battery, latency, IDs).
-- Dynamic Type stays on everywhere, including the Fraunces helper.
+The wordmark uses compact, tracked sans-serif capitals. Fraunces is no longer part of the core interface voice.
 
-## Components
+Use the logo once per screen at most. It is an identity anchor, never a watermark,
+empty-state glyph, card ornament or repeated button icon.
 
-- **TodayCard** — the standard container: `appSurface` fill, 16pt continuous
-  radius, 0.5pt white-6% border. Today board sections, pending action cards.
-- **Card headers** — `AppIcon` in accent + `appDisplay(16)` title. SF Symbols are
-  banned app-wide; `Image(systemName:)` must never appear. Glyphs are bundled
-  template assets under `Assets.xcassets/ic-*`, resolved through `AppIcon`.
-- **Chat messages** — user: compact rounded bubble, accent 18% tint, right-aligned.
-  Assistant: plain text directly on the canvas, no fill, no accent bar, full-width,
-  left-aligned — reads as a reply, not a chat-widget echo. Assistant prose renders
-  markdown (with a plain-text fallback so `*`/`#` never leak on a parse miss);
-  links are underlined and tappable; all message text is selectable.
-- **Tool/action receipts** — one-line hairline row (status glyph + Title Case
-  summary + optional detail + Open), not a boxed card. A pending action awaiting
-  confirmation is the one exception and keeps a bordered `TodayCard` surface,
-  since it's a decision, not a receipt.
-- **Network error banner** — quiet recovery state: muted icon + message in
-  `appMuted` inside a bordered `appSurface` pill, accent-colored Retry, no red text.
-- **Buttons** — primary: accent capsule with `appOnAccent` text. Secondary: plain
-  text in `appMuted`. Destructive: `mgDestructive`.
-- **Toggles** — accent fill when on.
-- **Home masthead** — a 1pt accent rule with the `TODAY` eyebrow and the date sitting
-  directly beneath it, then the Fraunces greeting. The rule sits *above* the row so
-  the block reads as a printed dateline rather than a floating eyebrow.
-- **Navigation** — there is no tab bar. Home is the sole root screen; Chat is reached
-  from the composer or a right-edge swipe, and More from the profile avatar.
+## Product hierarchy
 
-## Today board
+The app is not a task manager and not a SaaS connector catalogue. Its primary hierarchy is:
 
-Cards must surface information, not murmur prose: event rows show accent times,
-Wellbeing shows figures (steps / sleep / resting HR) with captions, Reminders show
-tappable circles and due times, empty states are one readable line plus a real
-button when there's an action to take (e.g. Connect Health). Server-generated
-narrative copy ("Tonight") only renders when written today and less than 6 hours
-old — stale briefings must not survive into the wrong time of day.
+1. **Home state** — what Adam truthfully knows about the household now.
+2. **Needs you** — specific decisions and approvals, with their real context.
+3. **In motion** — active work and watches.
+4. **Around you** — timely deliveries, reservations and other grounded context.
+5. **Adam noticed** — concise changes and outcomes, deduplicated.
 
-## Motion & haptics
+Conversation remains one tap away, but the persistent composer must not dominate Home or cover content. Activity/history, services and controls live behind the account surface.
 
-Ease-out only (`appFast` 0.15 / `appStandard` 0.22 / `appRelax` 0.4 / `appSpring`
-0.28). Entrance staggers run once per screen visit, not on every tab switch.
-Haptics on selection and light impacts on row taps, as today.
+Never invent rooms, occupants, sensors, devices or environmental readings to make a screen feel richer. Unknown and not configured are designed states, not empty spaces to disguise.
+
+## Palette
+
+Light values are the primary rendered values; dark values remain complete and usable.
+
+- **Canvas:** `appBackground` #F6F9FD — cool near-white.
+- **Surface:** `appSurface` #FFFFFF.
+- **Active inset:** `appSurface2` #E8F0FB.
+- **Ink:** `appInk` #101721.
+- **Secondary:** `appMuted` #5C697A.
+- **Energy:** `appAccent` #135EE1.
+- **Hairline:** blue-black at 11%.
+- **Semantics:** green for confirmed/live success, amber for attention, red only for failure or destructive action.
+
+No beige, antique gold, paper grain, sepia vignette or decorative pastel blobs. Gradients are limited to a very faint ambient blue lift on the canvas. Do not put gradients on ordinary controls.
+
+## Typography
+
+- Interface and display type use the system sans-serif.
+- Display: 25–32pt, bold, tight tracking, short statements.
+- Section title: 18pt bold.
+- Row title: 14–16pt semibold.
+- Secondary text: 11–14pt regular.
+- Mono is for timestamps, counts and technical identifiers only.
+- Never use light font weights for essential text. Dynamic Type and multiline layouts are mandatory.
+
+## Shape and depth
+
+- Hero/home state: 22pt continuous radius.
+- Grouped list: 18pt.
+- Individual activity row: 16pt.
+- Compact control: 13–17pt.
+- Use one hairline and a restrained local shadow. Never combine blur, thick border and heavy shadow on the same surface.
+- Prefer grouped rows inside one surface over a stack of identical floating cards.
+- Pills are for status, compact counts and short choices only.
+
+## Interaction
+
+- Home uses a safe-area dock, never an overlay that obscures scroll content.
+- The main dock says **Ask Adam** and supports voice or text. Conversation history is a separate, adjacent action.
+- A whole household-state surface is tappable only when it has a meaningful action: setup or refresh. Static states should not promise navigation.
+- Connected services use **Manage**, followed by explicit confirmation before disconnecting.
+- Protected and irreversible actions are always gated by the deterministic execution policy. UI preferences may add review; they may not remove mandatory review.
+
+## Copy
+
+Copy is terse, factual and situated.
+
+- Prefer “You're away” over “Adam has detected that you may no longer be at home.”
+- Prefer “No action needed” over a motivational empty state.
+- Replace generic approval text with the actual prompt or subject when available.
+- Do not narrate how an assistant works, use fake warmth, or add marketing subtitles to self-evident labels.
+
+## Motion and feedback
+
+- Motion communicates state change, hierarchy and continuity only.
+- Use short spring responses for touch, one entrance sequence per visit, and subtle progress motion for live work.
+- Respect Reduce Motion.
+- Use light haptics on navigation and selection; medium haptics for committing or beginning work.
+
+## Accessibility and QA
+
+- WCAG AA contrast is the floor.
+- Minimum hit target is 44pt even when the visible control is smaller.
+- Check every primary screen at large Dynamic Type.
+- SF Symbols are banned. All icons are bundled assets rendered through `AppIcon`.
+- Simulator review must cover Home, More, Services and Settings, including scroll bottoms and the safe-area dock.

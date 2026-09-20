@@ -3,15 +3,688 @@ import UIKit
 
 struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
+    @State private var selectedTab: AdamAppTab = .adam
 
-    /// Home is the root screen. Chat and account open from here.
     var body: some View {
-        AgenticHomeView()
-            .tint(Color.appAccent)
-            .id(accentColor)
-            .onAppear {
-                HapticManager.shared.prepare()
+        TabView(selection: $selectedTab) {
+            AgenticHomeView()
+                .tabItem { tabLabel(.adam) }
+                .tag(AdamAppTab.adam)
+            PhysicalHomeView()
+                .tabItem { tabLabel(.home) }
+                .tag(AdamAppTab.home)
+            AdamActivityView()
+                .tabItem { tabLabel(.activity) }
+                .tag(AdamAppTab.activity)
+            AdamYouView()
+                .tabItem { tabLabel(.you) }
+                .tag(AdamAppTab.you)
+        }
+        .tint(Color.appAccent)
+        .id(accentColor)
+        .onAppear { HapticManager.shared.prepare() }
+    }
+
+    @ViewBuilder
+    private func tabLabel(_ tab: AdamAppTab) -> some View {
+        Image("ic-\(tab.icon)")
+            .renderingMode(.template)
+        Text(tab.rawValue)
+    }
+}
+
+private enum AdamAppTab: String, CaseIterable, Identifiable {
+    case adam = "Adam"
+    case home = "Home"
+    case activity = "Activity"
+    case you = "You"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .adam: return "waveform"
+        case .home: return "tab-home"
+        case .activity: return "history"
+        case .you: return "person"
+        }
+    }
+}
+
+struct AdamPresence: View {
+    enum PresenceState {
+        case idle, listening, thinking, speaking, complete
+    }
+
+    var state: PresenceState = .idle
+    var size: CGFloat = 96
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SwiftUI.State private var breathing = false
+    @SwiftUI.State private var rotating = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.appSurface)
+                .shadow(color: Color.appAccent.opacity(0.12), radius: 22)
+
+            Circle()
+                .strokeBorder(Color.appHairline, lineWidth: 1)
+                .padding(size * 0.08)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.appAccent.opacity(0.42), Color.appAccent.opacity(0.08), .clear],
+                        center: state == .listening ? .topLeading : .center,
+                        startRadius: 2,
+                        endRadius: size * 0.44
+                    )
+                )
+                .padding(size * 0.13)
+                .rotationEffect(.degrees(rotating ? 360 : 0))
+
+            AdamMark()
+                .frame(width: size * 0.35, height: size * 0.25)
+        }
+        .frame(width: size, height: size)
+        .scaleEffect(reduceMotion ? 1 : (breathing ? activeScale : 1))
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.2) : .easeInOut(duration: state == .idle ? 2.6 : 0.8).repeatForever(autoreverses: true),
+            value: breathing
+        )
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.2) : .linear(duration: 6).repeatForever(autoreverses: false),
+            value: rotating
+        )
+        .onAppear {
+            breathing = true
+            rotating = state == .thinking || state == .speaking
+        }
+        .onChange(of: state) { _, newState in
+            rotating = newState == .thinking || newState == .speaking
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var activeScale: CGFloat {
+        switch state {
+        case .idle: return 1.018
+        case .listening: return 1.05
+        case .thinking, .speaking: return 1.025
+        case .complete: return 0.98
+        }
+    }
+
+    private var accessibilityLabel: String {
+        switch state {
+        case .idle: return "Adam is ready"
+        case .listening: return "Adam is listening"
+        case .thinking: return "Adam is thinking"
+        case .speaking: return "Adam is speaking"
+        case .complete: return "Adam finished"
+        }
+    }
+}
+
+private struct PhysicalHomeView: View {
+    @State private var settings = OxySettings()
+    @State private var displays: [PairedDisplay] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var showsSettings = false
+    @State private var showsDevice = false
+
+    private var deviceConnected: Bool {
+        NativeIntegrationManager.shared.pendant.isConnected
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 32) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Home")
+                                .font(.title.weight(.semibold))
+                                .appHeroTracking(28)
+                                .foregroundStyle(Color.appInk)
+                            Text(homeSummary)
+                                .font(.body)
+                                .foregroundStyle(Color.appMuted)
+                        }
+
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
+                        }
+
+                        if hasHomeContext {
+                            homeCard
+                            devicesSection
+                        } else if !isLoading {
+                            emptyHome
+                        }
+                    }
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.top, 18)
+                    .padding(.bottom, 40)
+                }
+                .refreshable { await load() }
             }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .task { await load() }
+        .fullScreenCover(isPresented: $showsSettings) {
+            SettingsView()
+                .swipeToDismiss()
+                .onDisappear { loadSettings() }
+        }
+        .sheet(isPresented: $showsDevice) {
+            PendantStatusView()
+                .presentationDetents([.large])
+                .presentationCornerRadius(28)
+        }
+    }
+
+    private var hasHomeContext: Bool {
+        settings.homeLatitude != nil || settings.homeLongitude != nil || !settings.homeAddress.isEmpty || deviceConnected || !displays.isEmpty
+    }
+
+    private var homeSummary: String {
+        if hasHomeContext {
+            let deviceCount = displays.count + (deviceConnected ? 1 : 0)
+            return deviceCount == 0 ? "Your home is set up." : "Quiet · \(deviceCount) connected"
+        }
+        return "Your home, when you're ready."
+    }
+
+    private var homeCard: some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            showsSettings = true
+        } label: {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack {
+                    AppIcon("tab-home", size: 23)
+                        .foregroundStyle(Color.appAccent)
+                    Spacer()
+                    Text(settings.homeLatitude == nil ? "Setup incomplete" : "Home")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Color.appMuted)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Home")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text(homeDetail)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, minHeight: 148, alignment: .leading)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.appScale(0.985))
+        .accessibilityHint("Opens home settings")
+    }
+
+    private var homeDetail: String {
+        if settings.homeLatitude != nil { return "Location saved · \(settings.locationReminders ? "arrival reminders on" : "arrival reminders off")" }
+        if !settings.homeAddress.isEmpty { return "Address saved · location needs confirming" }
+        return "Add a location to use home context"
+    }
+
+    @ViewBuilder
+    private var devicesSection: some View {
+        let total = displays.count + (deviceConnected ? 1 : 0)
+        if total > 0 {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Adam")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.appInk)
+
+                VStack(spacing: 0) {
+                    if deviceConnected {
+                        homeDeviceRow(title: NativeIntegrationManager.shared.pendant.peripheralName ?? "Adam device", status: "Connected") {
+                            showsDevice = true
+                        }
+                    }
+                    ForEach(Array(displays.enumerated()), id: \.element.id) { index, display in
+                        if deviceConnected || index > 0 { AppDivider(inset: 52) }
+                        homeDeviceRow(title: display.name, status: displayStatus(display)) {}
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+        }
+    }
+
+    private func homeDeviceRow(title: String, status: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                AdamMark(active: status == "Connected")
+                    .frame(width: 32, height: 24)
+                    .frame(width: 38, height: 38)
+                    .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.appInk)
+                    Text(status).font(.footnote).foregroundStyle(Color.appMuted)
+                }
+                Spacer()
+                if status == "Connected" { AppStatusDot(kind: .live, diameter: 6) }
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
+    }
+
+    private var emptyHome: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            AdamPresence(size: 78)
+            Text("Your home, when you're ready.")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            Text("Connect an Adam device or add your home location when it becomes useful.")
+                .font(.subheadline)
+                .foregroundStyle(Color.appMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Set up home") { showsSettings = true }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.appAccent)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .padding(.top, 28)
+    }
+
+    private func displayStatus(_ display: PairedDisplay) -> String {
+        guard let raw = display.lastSeenAt, let date = DisplayTimestampParser.date(from: raw) else { return "Paired" }
+        return Date().timeIntervalSince(date) < 120 ? "Connected" : "Last seen \(date.formatted(.relative(presentation: .named)))"
+    }
+
+    private func loadSettings() {
+        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+              let saved = try? JSONDecoder().decode(OxySettings.self, from: data) else { return }
+        settings = saved
+    }
+
+    private func load() async {
+        loadSettings()
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            displays = try await PairedDisplaysService.fetchDisplays()
+            errorMessage = nil
+        } catch {
+            displays = []
+            errorMessage = nil
+        }
+    }
+}
+
+private struct AdamActivityView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Watching"; var id: String { rawValue } }
+
+    @State private var filter: Filter = .all
+    @State private var board: HomeBoard = .empty
+    @State private var watches: [AgentWatch] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var expandedID: String?
+    @State private var openWorkflowID: String?
+    @State private var showsWork = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 28) {
+                        activityHeader
+
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
+                        } else if visibleItems.isEmpty && visibleWatches.isEmpty && !isLoading {
+                            activityEmpty
+                        } else {
+                            if !visibleWatches.isEmpty { watchingSection }
+                            if !visibleItems.isEmpty { timelineSection }
+                        }
+                    }
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.top, 18)
+                    .padding(.bottom, 40)
+                }
+                .refreshable { await load() }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .task { await load() }
+        .fullScreenCover(isPresented: $showsWork) { AgentWorkView().swipeToDismiss() }
+        .fullScreenCover(item: Binding(
+            get: { openWorkflowID.map(ActivityWorkflow.init) },
+            set: { openWorkflowID = $0?.id }
+        )) { workflow in
+            WorkflowTimelineView(workflowId: workflow.id, onChanged: { Task { await load() } })
+                .swipeToDismiss()
+        }
+    }
+
+    private var filterBar: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
+        return layout {
+            ForEach(Filter.allCases) { item in
+                Button {
+                    guard filter != item else { return }
+                    HapticManager.shared.select()
+                    withAnimation(.appStandard) { filter = item }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.footnote.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
+                        .padding(.horizontal, 15)
+                        .frame(minHeight: 44)
+                        .background(filter == item ? Color.appSurface : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.appScale)
+                .accessibilityAddTraits(filter == item ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: dynamicTypeSize.isAccessibilitySize ? 24 : 28))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var activityHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Activity")
+                .font(.title.weight(.semibold))
+                .appHeroTracking(28)
+                .foregroundStyle(Color.appInk)
+            filterBar
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Activity filter")
+    }
+
+    private var visibleItems: [BoardItem] {
+        guard filter != .watching else { return [] }
+        let items = filter == .all ? board.handling + board.completed + board.changed : board.completed + board.changed
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.title.lowercased()).inserted }
+    }
+
+    private var visibleWatches: [AgentWatch] { filter == .done ? [] : watches }
+
+    private var watchingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Watching")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            VStack(spacing: 0) {
+                ForEach(Array(visibleWatches.enumerated()), id: \.element.id) { index, watch in
+                    Button { showsWork = true } label: {
+                        HStack(spacing: 13) {
+                            AppStatusDot(kind: .live, diameter: 6).frame(width: 30)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(watch.title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.appInk)
+                                Text(watch.nextCheckLabel ?? watch.cadenceLabel).font(.footnote).foregroundStyle(Color.appMuted)
+                            }
+                            Spacer()
+                            AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted)
+                        }
+                        .padding(.vertical, 15)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.appScale(0.99))
+                    if index < visibleWatches.count - 1 { AppDivider(inset: 44) }
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+    }
+
+    private var timelineSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(filter == .done ? "Completed" : "Recent")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            VStack(spacing: 0) {
+                ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                    activityRow(item)
+                    if index < visibleItems.count - 1 { AppDivider(inset: 54) }
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+    }
+
+    private func activityRow(_ item: BoardItem) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            if item.workflowId != nil {
+                openWorkflowID = item.workflowId
+            } else {
+                withAnimation(.appExpand) { expandedID = expandedID == item.id ? nil : item.id }
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 13) {
+                Text(item.date?.formatted(date: .omitted, time: .shortened) ?? "Now")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.appMuted)
+                    .frame(width: 40, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(2)
+                    if let detail = item.detail, !detail.isEmpty, detail.caseInsensitiveCompare(item.title) != .orderedSame {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(Color.appMuted)
+                            .lineLimit(expandedID == item.id ? nil : 2)
+                    }
+                    if expandedID == item.id {
+                        Text(item.failed == true ? "Adam couldn't complete this." : "Open the related work for more detail.")
+                            .font(.footnote)
+                            .foregroundStyle(Color.appMuted)
+                            .padding(.top, 4)
+                    }
+                }
+                Spacer(minLength: 4)
+                AppIcon(item.failed == true ? "alert-circle" : "check-circle", size: 16)
+                    .foregroundStyle(item.failed == true ? Color.appWarning : Color.appSuccess)
+            }
+            .padding(.vertical, 15)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.995))
+    }
+
+    private var activityEmpty: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            AppIcon("history", size: 24)
+                .foregroundStyle(Color.appMuted)
+                .frame(width: 56, height: 56)
+                .background(Color.appSurface2, in: Circle())
+            Text("Nothing yet")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            Text("Things Adam does for you will appear here.")
+                .font(.subheadline)
+                .foregroundStyle(Color.appMuted)
+        }
+        .padding(.top, 30)
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            async let boardTask = HomeBoardService.fetchBoard()
+            async let watchTask = AgentTasksService.fetchWatches()
+            (board, watches) = try await (boardTask, watchTask)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Activity isn't available right now."
+        }
+    }
+}
+
+private struct ActivityWorkflow: Identifiable { let id: String }
+
+private struct AdamYouView: View {
+    @Environment(AppState.self) private var appState
+    @State private var destination: Destination?
+
+    private enum Destination: String, Identifiable {
+        case profile, memory, connections, agents, privacy, settings
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 30) {
+                        Text("You")
+                            .font(.title.weight(.semibold))
+                            .appHeroTracking(28)
+                            .foregroundStyle(Color.appInk)
+
+                        identityHeader
+
+                        youSection("Adam knows") {
+                            youRow(title: "What Adam knows", subtitle: "Review and edit memory", icon: "person") { destination = .memory }
+                        }
+
+                        youSection("Connections") {
+                            youRow(title: "Connected services", subtitle: "Mail, calendar, messages and more", icon: "cube") { destination = .connections }
+                        }
+
+                        youSection("Agents") {
+                            youRow(title: "Adam", subtitle: "Default", icon: "waveform") { destination = .agents }
+                        }
+
+                        youSection("Privacy") {
+                            youRow(title: "Privacy and trust", subtitle: "Permissions, reviews and activity", icon: "shield-check") { destination = .privacy }
+                            AppDivider(inset: 50)
+                            youRow(title: "Settings", subtitle: "Preferences and account", icon: "list") { destination = .settings }
+                        }
+                    }
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.top, 18)
+                    .padding(.bottom, 40)
+                }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .fullScreenCover(item: $destination) { item in
+            destinationView(item).swipeToDismiss()
+        }
+    }
+
+    private var identityHeader: some View {
+        HStack(spacing: 16) {
+            Text(initials)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+                .frame(width: 62, height: 62)
+                .background(Color.appSurface2, in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color.appInk)
+                Text("Adam knows you across your devices.")
+                    .font(.footnote)
+                    .foregroundStyle(Color.appMuted)
+            }
+            Spacer()
+            Button { destination = .profile } label: {
+                AppIcon("chevron-right", size: 13)
+                    .foregroundStyle(Color.appMuted)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.appScale)
+            .accessibilityLabel("Open profile")
+        }
+        .padding(18)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func youSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            VStack(spacing: 0) { content() }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+    }
+
+    private func youRow(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                AppIcon(icon, size: 17)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 36, height: 36)
+                    .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.appInk)
+                    Text(subtitle).font(.footnote).foregroundStyle(Color.appMuted)
+                }
+                Spacer()
+                AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted)
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
+    }
+
+    @ViewBuilder
+    private func destinationView(_ item: Destination) -> some View {
+        switch item {
+        case .profile: ProfileView()
+        case .memory: MemoryView()
+        case .connections: ConnectorsView()
+        case .agents: ModelRoutingView()
+        case .privacy: TrustCenterView()
+        case .settings: SettingsView()
+        }
+    }
+
+    private var displayName: String {
+        let saved = savedSettings.userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !saved.isEmpty, !["user", "demo", "test"].contains(saved.lowercased()) { return saved }
+        let local = appState.userId.split(separator: "@").first.map(String.init) ?? ""
+        return local.isEmpty ? "You" : local.prefix(1).uppercased() + local.dropFirst()
+    }
+
+    private var initials: String {
+        let parts = displayName.split(separator: " ").prefix(2)
+        let value = parts.compactMap(\.first).map(String.init).joined()
+        return value.isEmpty ? "Y" : value.uppercased()
+    }
+
+    private var savedSettings: OxySettings {
+        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else { return OxySettings() }
+        return settings
     }
 }
 
@@ -34,19 +707,18 @@ struct MoreView: View {
         NavigationStack {
             ZStack {
                 GlebChrome.pastelBlob.ignoresSafeArea()
-                GeometryReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            identityHeader
-                                .appEntrance(appeared, riseOffset: 16, delay: 0.04)
-                            menuSection
-                                .appEntrance(appeared, riseOffset: 12, delay: 0.14)
-                        }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 32)
-                        .padding(.bottom, 48)
-                        .frame(minHeight: proxy.size.height, alignment: .center)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 30) {
+                        BrandWordmark(height: 22)
+                            .appEntrance(appeared, riseOffset: 10, delay: 0.02)
+                        identityHeader
+                            .appEntrance(appeared, riseOffset: 16, delay: 0.06)
+                        menuSection
+                            .appEntrance(appeared, riseOffset: 12, delay: 0.14)
                     }
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.top, 18)
+                    .padding(.bottom, 48)
                 }
                 .onAppear {
                     guard !appeared else { return }
@@ -73,40 +745,41 @@ struct MoreView: View {
     // MARK: - Identity
 
     private var identityHeader: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
-                .padding(.bottom, 28)
+        HStack(spacing: 16) {
+            AppIcon("person", size: 22)
+                .foregroundStyle(Color.appAccent)
+                .frame(width: 70, height: 70)
+                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            Text(displayName)
-                .font(.heroDisplay(28))
-                .appHeroTracking(28)
-                .foregroundStyle(Color.appInk)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
+                    .font(.title2.weight(.bold))
+                    .appHeroTracking(25)
+                    .foregroundStyle(Color.appInk)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
 
-            if !accountEmail.isEmpty {
-                Text(accountEmail)
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.top, 6)
+                if !accountEmail.isEmpty {
+                    Text(accountEmail)
+                        .font(.footnote)
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                if appState.isDemoSession {
+                    Text("TEST SESSION")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.1)
+                        .foregroundStyle(Color.appAccent)
+                }
             }
-
-            if appState.isDemoSession {
-                Text("Demo/Test session")
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(Color.appAccent)
-                    .padding(.top, 10)
-            }
-
-            Rectangle()
-                .fill(Color.appHairline)
-                .frame(height: 0.5)
-                .padding(.top, 28)
         }
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .strokeBorder(Color.appHairline, lineWidth: 0.7))
     }
 
     private var displayName: String {
@@ -136,18 +809,74 @@ struct MoreView: View {
     // MARK: - Menu
 
     private var menuSection: some View {
-        VStack(spacing: 0) {
-            AppRow(title: "Account") { destination = .profile }
-            rowDivider
-            AppRow(title: "History") { destination = .history }
-            rowDivider
-            AppRow(title: "Connections") { destination = .connectors }
-            rowDivider
-            AppRow(title: "Settings") { destination = .settings }
+        VStack(alignment: .leading, spacing: 24) {
+            moreGroup(title: "Adam") {
+                moreRow(title: "Activity", subtitle: "Conversations and completed work", icon: "history") {
+                    destination = .history
+                }
+                rowDivider
+                moreRow(title: "Services", subtitle: "Accounts Adam can work with", icon: "cube") {
+                    destination = .connectors
+                }
+            }
+
+            moreGroup(title: "You") {
+                moreRow(title: "Account", subtitle: "Profile and personal details", icon: "person") {
+                    destination = .profile
+                }
+                rowDivider
+                moreRow(title: "Settings", subtitle: "Home, behaviour, privacy and trust", icon: "shield-check") {
+                    destination = .settings
+                }
+            }
         }
-        .padding(.horizontal, 16)
-        .background { MissionGlassPlate() }
-        .padding(.top, 24)
+    }
+
+    private func moreGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(Color.appMuted)
+            VStack(spacing: 0) { content() }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
+        }
+    }
+
+    private func moreRow(
+        title: String,
+        subtitle: String,
+        icon: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 13) {
+                AppIcon(icon, size: 16)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 36, height: 36)
+                    .background(Color.appAccent.opacity(0.09), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                AppIcon("chevron-right", size: 12)
+                    .foregroundStyle(Color.appMuted)
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
     }
 
     private var rowDivider: some View {
@@ -162,3 +891,4 @@ struct MoreView: View {
     MainTabView()
         .environment(AppState())
 }
+   

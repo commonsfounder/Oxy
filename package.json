@@ -1,7 +1,7 @@
 {
   "name": "oxy",
   "version": "1.0.0",
-  "description": "Oxy \u2014 AI-powered personal assistant",
+  "description": "Oxy — AI-powered personal assistant",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -20,6 +20,7 @@
   "dependencies": {
     "@google/genai": "^2.2.0",
     "@google/generative-ai": "^0.12.0",
+    "@ideal-postcodes/core-axios": "^4.1.9",
     "@sentry/node": "^8.55.2",
     "@supabase/supabase-js": "^2.49.0",
     "archiver": "^7.0.1",

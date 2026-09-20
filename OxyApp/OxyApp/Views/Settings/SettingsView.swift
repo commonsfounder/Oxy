@@ -8,11 +8,14 @@ struct SettingsView: View {
     @State private var settings = OxySettings()
     @State private var showBackendURLEditor = false
     @State private var homeAddressDraft = ""
+    @State private var homeAddressSuggestions: [HomeAddressSuggestion] = []
+    @State private var isFindingHomeAddress = false
     @State private var isSavingHomeAddress = false
     @State private var homeAddressError: String?
     @State private var versionTapCount = 0
     @State private var moreDestination: MoreSettingsDestination?
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
+    @AppStorage(HouseholdSoundMonitor.preferenceKey) private var soundAwarenessEnabled = false
 
     enum MoreSettingsDestination: Identifiable {
         case payments, savedLogins, continuity, trust, displays
@@ -31,15 +34,59 @@ struct SettingsView: View {
                     ScrollView {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 28) {
+                        settingsIntro
+
+                        settingsSection(title: "Home") {
+                            homeAddressEditor
+
+                            SettingsDivider()
+
+                            settingRow(label: "Arrival and departure reminders", description: "Only for reminders you choose") {
+                                SettingsToggle(isOn: $settings.locationReminders)
+                                    .onChange(of: settings.locationReminders) { _, _ in saveSettings() }
+                            }
+
+                            SettingsDivider()
+
+                            settingRow(label: "Important sounds", description: "While Adam is open. Audio stays on this iPhone") {
+                                SettingsToggle(isOn: $soundAwarenessEnabled)
+                                    .accessibilityLabel("Important sounds")
+                                    .accessibilityValue(soundAwarenessEnabled ? "On" : "Off")
+                                    .onChange(of: soundAwarenessEnabled) { _, enabled in
+                                        Task {
+                                            await HouseholdSoundMonitor.shared.setEnabled(enabled, userId: appState.userId)
+                                        }
+                                    }
+                            }
+                        }
+
                         settingsSection(title: "Adam") {
                             FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
 
                             SettingsDivider()
 
-                            settingRow(label: "Briefings", description: "Daily check-ins") {
+                            settingRow(label: "Daily briefing", description: "A concise check-in when there is something useful") {
                                 SettingsToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
+                        }
+
+                        settingsSection(title: "Privacy and trust") {
+                            settingRow(label: "Review routine actions too", description: "Protected actions always require approval") {
+                                SettingsToggle(isOn: $settings.guardMode)
+                                    .onChange(of: settings.guardMode) { _, _ in saveSettings() }
+                            }
+
+                            SettingsDivider()
+
+                            settingRow(label: "Private app opens", description: "Ask before banking, health and similar apps") {
+                                SettingsToggle(isOn: $settings.confirmSensitiveAppOpens)
+                                    .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
+                            }
+
+                            SettingsDivider()
+
+                            navRow(label: "Trust center") { moreDestination = .trust }
                         }
 
                         settingsSection(title: "Preferences") {
@@ -63,45 +110,6 @@ struct SettingsView: View {
                                 ],
                                 selection: $settings.preferredTransportMode
                             )
-
-                            SettingsDivider()
-
-                            settingRow(label: "Ask before opening private apps", description: "Banking, health, and similar") {
-                                SettingsToggle(isOn: $settings.confirmSensitiveAppOpens)
-                                    .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
-                            }
-
-                            SettingsDivider()
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Home address")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.appInk)
-                                if !settings.homeAddress.isEmpty {
-                                    Text(settings.homeAddress)
-                                        .font(.system(size: 12, weight: .regular))
-                                        .foregroundStyle(Color.appMuted)
-                                }
-                                HStack(spacing: 10) {
-                                    AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
-                                    Button {
-                                        Task { await saveHomeAddress() }
-                                    } label: {
-                                        if isSavingHomeAddress {
-                                            ProgressView().scaleEffect(0.7)
-                                        } else {
-                                            Text("Save").font(.system(size: 13, weight: .semibold))
-                                        }
-                                    }
-                                    .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
-                                }
-                                if let homeAddressError {
-                                    Text(homeAddressError)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color.appDestructive)
-                                }
-                            }
-                            .padding(.vertical, 14)
                         }
 
                         settingsSection(title: "Conversation") {
@@ -115,15 +123,9 @@ struct SettingsView: View {
                                 selection: $settings.chatEffort
                             )
 
-                            SettingsDivider()
-
-                            settingRow(label: "Ask before actions", description: nil) {
-                                SettingsToggle(isOn: $settings.guardMode)
-                                    .onChange(of: settings.guardMode) { _, _ in saveSettings() }
-                            }
                         }
 
-                        settingsSection(title: "More") {
+                        settingsSection(title: "Account and data") {
                             navRow(label: "Displays") { moreDestination = .displays }
                             SettingsDivider()
                             navRow(label: "Payments") { moreDestination = .payments }
@@ -131,8 +133,6 @@ struct SettingsView: View {
                             navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
                             SettingsDivider()
                             navRow(label: "Import history") { moreDestination = .continuity }
-                            SettingsDivider()
-                            navRow(label: "Trust") { moreDestination = .trust }
                         }
 
                         settingsSection(title: "About") {
@@ -195,12 +195,101 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
+    private var settingsIntro: some View {
+        HStack(alignment: .top, spacing: 15) {
+            AdamMark()
+                .frame(width: 48, height: 34)
+                .frame(width: 58, height: 58)
+                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Adam, on your terms.")
+                    .font(.appBody(18, weight: .bold))
+                    .foregroundStyle(Color.appInk)
+                Text("Set home context, initiative and review preferences in one place.")
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .strokeBorder(Color.appHairline, lineWidth: 0.7))
+    }
+
+    private var homeAddressEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Home address")
+                .font(.appBody(14, weight: .semibold))
+                .foregroundStyle(Color.appInk)
+            if !settings.homeAddress.isEmpty {
+                Text(settings.homeAddress)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+            }
+            HStack(spacing: 10) {
+                AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
+                Button {
+                    Task { await findHomeAddress() }
+                } label: {
+                    if isFindingHomeAddress {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Text("Find")
+                            .font(.appBody(13, weight: .semibold))
+                            .foregroundStyle(Color.appAccent)
+                    }
+                }
+                .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isFindingHomeAddress)
+                Button {
+                    Task { await saveHomeAddress() }
+                } label: {
+                    if isSavingHomeAddress {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Text("Save")
+                            .font(.appBody(13, weight: .semibold))
+                            .foregroundStyle(Color.appAccent)
+                    }
+                }
+                .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
+            }
+            if !homeAddressSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(homeAddressSuggestions) { suggestion in
+                        Button {
+                            homeAddressDraft = suggestion.address
+                            homeAddressSuggestions = []
+                            homeAddressError = nil
+                        } label: {
+                            Text(suggestion.address)
+                                .font(.appBody(13))
+                                .foregroundStyle(Color.appInk)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if let homeAddressError {
+                Text(homeAddressError)
+                    .font(.appBody(12, weight: .medium))
+                    .foregroundStyle(Color.appDestructive)
+            }
+        }
+        .padding(.vertical, 14)
+    }
+
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             AppSectionTitle(title, size: 20)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 16)
-                .background { MissionGlassPlate() }
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
         }
     }
 
@@ -343,6 +432,25 @@ struct SettingsView: View {
             homeAddressError = "Couldn't find that address. Try being more specific."
         }
         isSavingHomeAddress = false
+    }
+
+    private func findHomeAddress() async {
+        let query = homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        isFindingHomeAddress = true
+        homeAddressError = nil
+        homeAddressSuggestions = []
+        defer { isFindingHomeAddress = false }
+        do {
+            let data = try await APIClient.shared.request(path: "/home-addresses", method: "POST", body: ["query": query])
+            let response = try JSONDecoder().decode(HomeAddressSearchResponse.self, from: data)
+            homeAddressSuggestions = response.addresses
+            if response.addresses.isEmpty {
+                homeAddressError = "No UK addresses found. Try a postcode or more of the address."
+            }
+        } catch {
+            homeAddressError = "Couldn't look up that address. You can still enter it manually."
+        }
     }
 
     private func refreshChatSettingsFromServer() async {

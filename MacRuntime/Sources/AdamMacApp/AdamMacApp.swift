@@ -1,3 +1,4 @@
+import AdamMacRuntime
 import SwiftUI
 
 @main
@@ -11,6 +12,50 @@ struct AdamMacApp: App {
                 .frame(minWidth: 760, minHeight: 560)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+private enum AdamMacSection: String, CaseIterable, Identifiable {
+    case work = "Work"
+    case agents = "Ask an agent"
+    case games = "Game companion"
+
+    var id: String { rawValue }
+}
+
+struct AdamMacRootView: View {
+    @State private var section = AdamMacSection.work
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("ADAM")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .tracking(1.5)
+                Spacer()
+                Picker("Mode", selection: $section) {
+                    ForEach(AdamMacSection.allCases) { section in
+                        Text(section.rawValue).tag(section)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 440)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 20)
+
+            Divider()
+
+            switch section {
+            case .work:
+                SharedWorkView()
+            case .agents:
+                AgentConversationView()
+            case .games:
+                MacGameCompanionView()
+            }
+        }
     }
 }
 
@@ -169,13 +214,11 @@ final class MacGameCompanionModel: ObservableObject {
     }
 }
 
-struct AdamMacRootView: View {
+struct MacGameCompanionView: View {
     @EnvironmentObject private var model: MacGameCompanionModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     permissions
@@ -193,28 +236,6 @@ struct AdamMacRootView: View {
             model.refreshPermissions()
             await model.refreshWindows()
         }
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("ADAM")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .tracking(1.5)
-                Text("Game companion")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if model.isConnected {
-                Button("Stop") {
-                    Task { await model.stop() }
-                }
-                .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 22)
     }
 
     private var permissions: some View {
@@ -315,6 +336,10 @@ struct AdamMacRootView: View {
                 if model.isConnected {
                     Button("Pause") {
                         Task { await model.pause() }
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Stop") {
+                        Task { await model.stop() }
                     }
                     .buttonStyle(.bordered)
                 }

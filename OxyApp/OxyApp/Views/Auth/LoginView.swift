@@ -116,7 +116,7 @@ struct LoginView: View {
         appState.token = "debug-local"
         appState.isDemoSession = true
         appState.isAuthenticated = true
-        isLoading = false
+        isLoading = false 
         #else
         HapticManager.shared.warning()
         withAnimation { errorMessage = message }
@@ -146,8 +146,11 @@ private struct LoginFormPage: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer().frame(height: 96)
 
+                BrandWordmark(height: 24)
+                    .padding(.bottom, 44)
+
                 Text(isRegistering ? "Create your account." : "Welcome back.")
-                    .font(.appDisplay(30, weight: .light))
+                    .font(.appDisplay(30, weight: .bold))
                     .foregroundStyle(Color.appInk)
                     .padding(.bottom, 44)
 

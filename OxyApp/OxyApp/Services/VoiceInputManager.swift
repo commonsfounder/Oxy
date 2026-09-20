@@ -30,6 +30,7 @@ final class VoiceInputManager {
 
     func startRecording(userId: String) {
         guard !isRecording, !isTranscribing, recordingStartToken == nil else { return }
+        HouseholdSoundMonitor.shared.suspendForVoiceInput()
         currentUserId = userId
         transcript = ""
         errorMessage = nil
@@ -52,11 +53,15 @@ final class VoiceInputManager {
 
         guard await requestMicrophoneIfNeeded() == .granted else {
             errorMessage = "Enable microphone access to use voice."
+            HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
             return
         }
         // A pendant release can arrive while iOS is prompting for or acquiring
         // the microphone. Do not begin listening after that release.
-        guard !Task.isCancelled, recordingStartToken == startToken else { return }
+        guard !Task.isCancelled, recordingStartToken == startToken else {
+            HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
+            return
+        }
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("oxy_voice_\(UUID().uuidString).wav")
@@ -91,6 +96,7 @@ final class VoiceInputManager {
             // never actually started; leaving it active blocks other audio
             // (e.g. music ducking) until the app backgrounds.
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
         }
     }
 
@@ -114,6 +120,7 @@ final class VoiceInputManager {
                 try? FileManager.default.removeItem(at: url)
                 try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
                 if !Task.isCancelled { isTranscribing = false }
+                HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
             }
             guard !Task.isCancelled else { return }
             do {
@@ -167,6 +174,7 @@ final class VoiceInputManager {
         transcript = ""
         errorMessage = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
     }
 
     private func requestMicrophoneIfNeeded() async -> AVAudioSession.RecordPermission {

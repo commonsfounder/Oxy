@@ -4,53 +4,56 @@
 
 product
 
-## Users
-Busy individuals who want to talk (text or voice) to a capable assistant that actually does things across the services they already use (email, calendar, messaging, rides, trains, music, home, etc.). They value natural conversation, personal memory across sessions, and reliable real-world action execution without opening multiple apps or dealing with fragmented interfaces.
+## Purpose
 
-Primary contexts: on the go (mobile/PWA), multitasking, or when voice input is preferable. Users expect the assistant to remember personal facts ("Works at KPMG", preferences) and use them intelligently.
+Adam is a general-purpose personal-AI worker for the household. Give it an intended outcome and appropriate access; it composes browser use, connected services, memory, communication, files, long-running work and verification inside deterministic safety boundaries.
 
-## Product Purpose
-Oxy is the conversational and action-taking layer over the user's digital life. It listens (text/voice), remembers context, reasons about intent, and executes real actions via a pluggable connector system (Google, Telegram, Uber, Trainline, Spotify, etc.). 
+The iPhone app is Adam's companion and control surface. It should answer four questions immediately:
 
-It also includes proactive capabilities (briefings, scheduled jobs) and bridges to native platforms (Apple Shortcuts, iOS app integrations for location, contacts, HealthKit, Reminders, etc.).
+1. What does Adam know about home right now?
+2. Does anything need me?
+3. What is Adam doing?
+4. What changed?
 
-Success looks like: users can issue high-level natural requests and have them reliably fulfilled, with clear feedback, history, and improving personalization over time. The product reduces context switching and cognitive load for routine + cross-app tasks.
+Chat and voice are universal inputs, not the whole product. Shopping, booking, forms, account administration and reminders are applications of the same runtime, never separate domain agents.
 
-## Brand Personality
-Friendly, capable, natural — like talking to a trusted, proactive friend who is efficient and discreet.
+## Users and contexts
 
-- Tone: warm but not cutesy or overly casual; confident without arrogance; helpful and anticipatory without being creepy or salesy.
-- Voice: natural spoken language via Gemini TTS; the interface should feel like an extension of a real conversation.
-- Overall: trustworthy, competent, low-friction, privacy-respecting.
+Busy individuals and households who want routine digital legwork handled without learning a workflow tool. They may be on the move, at home, multitasking, or speaking instead of typing. They expect continuity, precise feedback and control over consequential actions.
+
+## Product character
+
+Calm, capable, discreet and concrete. Adam should feel closer to dependable household technology than a chatbot or enterprise dashboard.
+
+- Warm through judgment and timing, not chatty copy.
+- Proactive when the signal is useful; quiet when it is not.
+- Confident about observed facts and candid about unknown state.
+- Personal without pretending to know people, rooms or devices it cannot observe.
+
+## Core surfaces
+
+- **Home:** household state, contextual approvals, live work, active watches and recent outcomes.
+- **Ask Adam:** voice and text conversation for new outcomes and follow-up.
+- **Activity:** conversations, work history, receipts and verification.
+- **Services:** explicit connected-account access and management.
+- **Settings:** home context, initiative, privacy, trust and account data.
+
+## Safety and truth
+
+Reasoning may be probabilistic; authority is deterministic. Payments, destructive operations, identity changes, sensitive information and irreversible external actions remain gated at the execution boundary regardless of interface preferences.
+
+“Tool invoked” is not an outcome. Show success only after resulting state is verified. Unknown, unavailable and not configured are first-class product states. Do not use illustrative household data in a live surface without marking it as a preview.
 
 ## Anti-references
-- Stiff, corporate, or robotic assistant language ("How may I assist you today?")
-- Generic SaaS aesthetics (glassmorphism, heavy gradients, hero metrics, identical card grids, tiny uppercase eyebrows on every section)
-- Overly playful or toy-like designs that undermine the seriousness of real actions (booking rides, sending messages, managing life)
-- Excessive proactivity that feels intrusive rather than helpful
-- Cold terminal-like or purely utilitarian UIs that ignore the "talk to it like a friend" promise
-- Dark patterns around data use or actions
 
-## Design Principles
-- **Conversation first**: The core experience is chat (text + voice). Traditional UI (connectors, memory, history, settings) supports and augments the conversation rather than replacing it.
-- **Action transparency and control**: Every time an action will be taken on behalf of the user, make the intent, data involved, and outcome crystal clear. Provide easy review, confirmation, cancellation, and history.
-- **Memory as a graceful superpower**: Surface relevant remembered facts at the right time. Make memory visible and editable without feeling like surveillance.
-- **Cross-surface consistency**: The web PWA and native iOS app must feel like the same assistant. Shared patterns for chat, actions, connectors, proactive content.
-- **Trust through feedback**: Excellent real-time status (streaming, action progress), clear error states, and undo/revise paths.
-- **Voice parity**: Voice and text are first-class and equivalent citizens. Visual UI must not assume a keyboard.
-- **Respect the user's time and attention**: Fast, minimal chrome when in flow. Intentional motion only for state communication.
+- Task-manager dashboards and generic activity ledgers on Home.
+- Chatbot shells where every capability is hidden behind a large composer.
+- SaaS integration catalogues with repeated Connect buttons and no account context.
+- Fake smart-home rooms, presence or sensors.
+- Newspaper/editorial styling, beige paper, gold accent and decorative grain.
+- Glassmorphism, heavy gradients, excessive card grids or tiny uppercase labels everywhere.
+- Dark patterns around permissions, account access or action approval.
 
-## Accessibility & Inclusion
-- High-quality voice pipeline (STT accuracy, natural TTS, low latency).
-- Full keyboard navigation and screen reader support for all text-based UI (chat, forms, lists).
-- Strong visual contrast (currently dark theme with #0C0C0C base).
-- Support for reduced motion / prefers-reduced-motion.
-- Clear focus states, error messaging, and loading states.
-- Privacy-first defaults for memory and connector data; explicit controls.
-- WCAG AA as baseline (target higher for key flows).
-- Consider diverse users: different accents for voice, varying tech comfort, accessibility needs for motor/visual/cognitive.
+## Success
 
-## Notes
-- Primary surfaces: Chat (main), Connectors management, Memory view, Action/briefing history, Settings, Proactive briefings.
-- Tech notes for designers: React (CDN + Babel standalone, no build step for the PWA shell), SSE for streaming, service worker for PWA, Express backend. iOS app is SwiftUI with similar flows.
-- The design must feel premium yet approachable and reliable for daily use.
+Adam is successful when the user can glance at Home, understand the household and work state, act on the one thing that matters, or ask for a new outcome—without sorting a queue, decoding agent machinery or wondering whether a claimed action really happened.

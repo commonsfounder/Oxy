@@ -1,9 +1,4 @@
 import SwiftUI
-
-/// The pendant's vitals as a single flat, full-width status ribbon — no pills,
-/// no battery icons, no card. Purely typographic monospace metrics with a micro
-/// green dot for the live BLE link, closed by a 0.5px titanium rule beneath.
-/// Backed by `PendantTelemetryMonitor`, currently fed by mock telemetry.
 struct DeviceStatusCard: View {
     var telemetry: PendantTelemetryMonitor
 

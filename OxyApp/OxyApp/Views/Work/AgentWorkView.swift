@@ -3,6 +3,9 @@ import SwiftUI
 /// Ongoing and completed requests.
 struct AgentWorkView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Watching"; var id: String { rawValue } }
+
     @State private var tasks: [AgentTask] = []
     @State private var watches: [AgentWatch] = []
     @State private var isLoading = true
@@ -11,6 +14,7 @@ struct AgentWorkView: View {
     @State private var cancellingWatchIDs = Set<String>()
     @State private var selectedTask: AgentTask?
     @State private var isShowingComposer = false
+    @State private var filter: Filter = .all
 
     private var activeTasks: [AgentTask] {
         tasks.filter { $0.isActive && $0.status.lowercased() != "recipe" }
@@ -20,6 +24,14 @@ struct AgentWorkView: View {
         tasks.filter { !$0.isActive && $0.status.lowercased() != "recipe" }
     }
 
+    private var visibleTasks: [AgentTask] {
+        switch filter {
+        case .all: return activeTasks + historyTasks
+        case .done: return historyTasks
+        case .watching: return []
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -27,7 +39,9 @@ struct AgentWorkView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "Work", onBack: { dismiss() })
+                        ScreenHeaderView(title: "Activity", onBack: { dismiss() })
+
+                        filterBar
 
                         Button(action: { isShowingComposer = true }) {
                             HStack(spacing: 8) {
@@ -55,16 +69,13 @@ struct AgentWorkView: View {
                                 OxySkeletonCard(height: 112, cornerRadius: 20)
                             }
                         } else {
-                            if !watches.isEmpty {
+                            if filter != .done, !watches.isEmpty {
                                 backgroundWatchesSection
                             }
-                            if tasks.isEmpty {
+                            if visibleTasks.isEmpty && (filter == .done || watches.isEmpty) {
                                 emptyState
-                            } else {
-                                taskSection(title: "Ongoing", tasks: activeTasks)
-                                if !historyTasks.isEmpty {
-                                    taskSection(title: "Updates", tasks: Array(historyTasks.prefix(12)))
-                                }
+                            } else if !visibleTasks.isEmpty {
+                                taskSection(title: filter == .done ? "Completed" : "Recent", tasks: Array(visibleTasks.prefix(12)))
                             }
                         }
                     }
@@ -95,7 +106,7 @@ struct AgentWorkView: View {
                 await load()
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(8))
-                    guard !Task.isCancelled, activeTasks.contains(where: { $0.status.lowercased() == "running" }) else { continue }
+                    guard !Task.isCancelled else { break }
                     await load()
                 }
             }
@@ -104,13 +115,41 @@ struct AgentWorkView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppIcon("dotted", size: 18)
-                .foregroundStyle(Color.appAccent)
-            Text("Nothing in progress")
+            AppIcon("history", size: 18)
+                .foregroundStyle(Color.appMuted)
+            Text(filter == .done ? "Nothing completed yet" : "Nothing here")
                 .font(.appBody(18, weight: .semibold))
                 .foregroundStyle(Color.appInk)
         }
         .padding(.top, 24)
+    }
+
+    private var filterBar: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
+        return layout {
+            ForEach(Filter.allCases) { item in
+                Button {
+                    guard filter != item else { return }
+                    HapticManager.shared.select()
+                    withAnimation(.appStandard) { filter = item }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
+                        .padding(.horizontal, 15)
+                        .frame(minHeight: 44)
+                        .background(filter == item ? Color.appSurface : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.appScale)
+                .accessibilityAddTraits(filter == item ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: dynamicTypeSize.isAccessibilitySize ? 24 : 28, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Activity filter")
     }
 
     @ViewBuilder
@@ -120,14 +159,19 @@ struct AgentWorkView: View {
                 Text(title)
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
-                ForEach(tasks) { task in
+                VStack(spacing: 0) {
+                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
                     AgentTaskRow(
                         task: task,
                         isRunning: runningIDs.contains(task.id),
                         onRun: { Task { await run(task) } },
                         onOpen: { selectedTask = task }
                     )
+                        if index < tasks.count - 1 { AppDivider(inset: 36) }
+                    }
                 }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
         }
     }
@@ -396,48 +440,43 @@ private struct AgentTaskRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                AppIcon("dotted", size: 16)
-                    .foregroundStyle(statusColor)
-                    .frame(width: 36, height: 36)
-                    .background(statusColor.opacity(0.12), in: Circle())
+        HStack(alignment: .center, spacing: 12) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+                .frame(width: 16, height: 44)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Circle().fill(statusColor).frame(width: 6, height: 6)
-                        Text(task.statusLabel)
-                            .font(.appBody(13, weight: .semibold))
-                            .foregroundStyle(statusColor)
-                    }
-                    Text(task.displayGoal)
-                        .font(.appBody(16, weight: .semibold))
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.activityTitle)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.appInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let interruptionMessage = task.interruptionMessage, task.status.lowercased() != "completed" {
-                        Text(interruptionMessage)
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appDestructive)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(task.statusLabel)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(statusColor)
+                        if let detail = task.activityDetail {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(task.status.lowercased() == "failed" ? Color.appDestructive : Color.appMuted)
+                                .lineLimit(1)
+                        }
                     }
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.appScale(0.99))
 
             if task.status.lowercased() != "completed" {
-                HStack {
-                    Button("Details", action: onOpen)
-                        .font(.appBody(12, weight: .semibold))
-                        .foregroundStyle(Color.appMuted)
-                        .buttonStyle(.appScale)
-                    Spacer(minLength: 0)
-                    taskAction
-                }
+                taskAction
+            } else {
+                AppIcon("chevron-right", size: 12)
+                    .foregroundStyle(Color.appMuted)
             }
         }
-        .padding(16)
-        .background { MissionGlassPlate() }
+        .padding(.vertical, 13)
     }
 
     @ViewBuilder
@@ -456,7 +495,7 @@ private struct AgentTaskRow: View {
             Button(action: onRun) {
                 HStack(spacing: 7) {
                     if isRunning { ProgressView().scaleEffect(0.65).tint(Color.appInk) }
-                    Text(isRunning ? "Starting" : task.resumable ? "Continue" : "Try again")
+                    Text(isRunning ? "Starting" : task.resumable ? "Continue" : task.status.lowercased() == "failed" ? "Try again" : "Start")
                         .font(.appBody(12, weight: .semibold))
                 }
             }
@@ -479,7 +518,7 @@ private struct TaskActionButtonStyle: ButtonStyle {
 
 private struct AgentTaskDetailView: View {
     @Environment(\.dismiss) private var dismiss
-    let task: AgentTask
+    @State var task: AgentTask
     let onUpdated: (AgentTask) -> Void
     @State private var autonomy: String
     @State private var guardMode: Bool
@@ -487,11 +526,13 @@ private struct AgentTaskDetailView: View {
     @State private var isLoadingRuntime = true
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var reviews: [AgentTaskReview] = []
+    @State private var decidingReview = false
 
     private let autonomyLevels = ["Reactive", "Reserved", "Balanced", "Proactive", "Autonomous"]
 
     init(task: AgentTask, onUpdated: @escaping (AgentTask) -> Void) {
-        self.task = task
+        _task = State(initialValue: task)
         self.onUpdated = onUpdated
         _autonomy = State(initialValue: OxySettings.normalizedAutonomy(task.autonomy))
         _guardMode = State(initialValue: task.guardMode)
@@ -518,6 +559,23 @@ private struct AgentTaskDetailView: View {
                         }
 
                         runtimeSection
+
+                        ForEach(reviews) { review in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(review.title).font(.headline)
+                                Text(review.detail).textSelection(.enabled)
+                                HStack {
+                                    Button("Cancel request") { decide(review, approved: false) }
+                                    Spacer()
+                                    if review.canApprove {
+                                        Button("Confirm") { decide(review, approved: true) }
+                                    }
+                                }
+                                .disabled(decidingReview)
+                            }
+                            .padding(16)
+                            .background { MissionGlassPlate() }
+                        }
 
                         VStack(alignment: .leading, spacing: 15) {
                             Text("Your OK")
@@ -573,7 +631,12 @@ private struct AgentTaskDetailView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .task { await loadRuntime() }
+            .task {
+                while !Task.isCancelled {
+                    await refreshTask()
+                    do { try await Task.sleep(for: .seconds(5)) } catch { break }
+                }
+            }
         }
     }
 
@@ -625,6 +688,35 @@ private struct AgentTaskDetailView: View {
             }
         } catch {
             await MainActor.run { isLoadingRuntime = false }
+        }
+    }
+
+    private func refreshTask() async {
+        do {
+            let refreshed = try await AgentTasksService.fetchTask(id: task.id)
+            task = refreshed
+            onUpdated(refreshed)
+            await loadRuntime()
+            reviews = try await AgentTasksService.fetchReviews(taskID: task.id)
+            errorMessage = nil
+        } catch {
+            reviews = []
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func decide(_ review: AgentTaskReview, approved: Bool) {
+        decidingReview = true
+        Task {
+            defer { decidingReview = false }
+            do {
+                try await AgentTasksService.decide(review: review, approved: approved)
+                errorMessage = nil
+                await refreshTask()
+            } catch {
+                reviews = []
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

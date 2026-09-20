@@ -18,5 +18,9 @@
 	<string>Adam</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Adam needs screen access to watch the game window you choose.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Adam uses the microphone when you choose to speak an agent request.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Adam turns your spoken agent request into text on this Mac.</string>
 </dict>
 </plist>

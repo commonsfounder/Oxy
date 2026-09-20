@@ -7,3 +7,12 @@ struct GeocodeResponse: Codable {
     let lng: Double
     let formattedAddress: String
 }
+
+struct HomeAddressSuggestion: Codable, Identifiable {
+    let id: String
+    let address: String
+}
+
+struct HomeAddressSearchResponse: Codable {
+    let addresses: [HomeAddressSuggestion]
+}

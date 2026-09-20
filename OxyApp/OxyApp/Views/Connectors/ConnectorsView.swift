@@ -12,6 +12,7 @@ struct ConnectorsView: View {
     
     @State private var oauthStatus: [String: OAuthStatus] = [:]
     @State private var errorMessage: String?
+    @State private var disconnectCandidate: Connector?
 
     private let oauthProviders: Set<String> = ["google", "microsoft"]
 
@@ -25,7 +26,7 @@ struct ConnectorsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Connections", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Services", onBack: { dismiss() })
 
                     if isLoading {
                         VStack(spacing: 12) {
@@ -38,6 +39,8 @@ struct ConnectorsView: View {
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
+                                serviceIntro
+
                                 if let errorMessage {
                                     ErrorBanner(message: errorMessage)
                                 }
@@ -52,7 +55,7 @@ struct ConnectorsView: View {
                                     section(title: "Connected", connectors: connectedRows)
                                 }
                                 if !availableRows.isEmpty {
-                                    section(title: "Available", connectors: availableRows)
+                                    section(title: "Add a service", connectors: availableRows)
                                 }
                             }
                             .padding(.horizontal, AppSpacing.margin)
@@ -73,7 +76,48 @@ struct ConnectorsView: View {
                     Task { await loadConnectors() }
                 }
             }
+            .confirmationDialog(
+                disconnectCandidate.map { "Disconnect \($0.name)?" } ?? "Disconnect service?",
+                isPresented: Binding(
+                    get: { disconnectCandidate != nil },
+                    set: { if !$0 { disconnectCandidate = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let connector = disconnectCandidate {
+                    Button("Disconnect", role: .destructive) {
+                        updateConnector(connector, enabled: false)
+                        disconnectCandidate = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { disconnectCandidate = nil }
+            } message: {
+                Text("Adam will stop using this account until you reconnect it.")
+            }
         }
+    }
+
+    private var serviceIntro: some View {
+        HStack(alignment: .top, spacing: 15) {
+            AdamMark()
+                .frame(width: 48, height: 34)
+                .frame(width: 58, height: 58)
+                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Adam works with the services you choose.")
+                    .font(.appBody(17, weight: .bold))
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("You can disconnect an account at any time.")
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .strokeBorder(Color.appHairline, lineWidth: 0.7))
     }
 
     // MARK: - Sections
@@ -91,6 +135,10 @@ struct ConnectorsView: View {
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.7))
         }
     }
 
@@ -98,7 +146,7 @@ struct ConnectorsView: View {
 
     private func connectorRow(_ connector: Connector) -> some View {
         HStack(spacing: 14) {
-            AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol(connector.id))
+            AppIconView(candidates: [connector.icon, connector.id])
                 .frame(width: 40, height: 40)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
 
@@ -135,13 +183,13 @@ struct ConnectorsView: View {
                 .tint(Color.appMuted)
         } else if connector.enabled {
             Button {
-                handleConnectorAction(connector)
+                disconnectCandidate = connector
             } label: {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(Color.appSuccess)
                         .frame(width: 6, height: 6)
-                    Text("Connected")
+                    Text("Manage")
                         .font(.rowSecondary)
                         .foregroundStyle(Color.appSuccess)
                 }
@@ -175,27 +223,6 @@ struct ConnectorsView: View {
             }
             .disabled(!connector.implemented)
             .buttonStyle(.appScale(0.97))
-        }
-    }
-
-    private func sfSymbol(_ id: String) -> String {
-        switch id {
-        case "google":    return "envelope.fill"
-        case "microsoft": return "envelope.fill"
-        case "imessage":  return "message.fill"
-        case "whatsapp":  return "phone.fill"
-        case "spotify":   return "music.note"
-        case "reminders": return "checklist"
-        case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
-        case "uber":      return "car.fill"
-        case "telegram":  return "paperplane.fill"
-        case "homekit":   return "house.fill"
-        case "trainline": return "tram.fill"
-        case "maps":      return "map.fill"
-        case "notion":    return "doc.text.fill"
-        case "betfair":   return "chart.line.uptrend.xyaxis"
-        case "netflix":   return "play.tv.fill"
-        default:          return "puzzlepiece.fill"
         }
     }
 
@@ -312,7 +339,6 @@ struct ConnectorsView: View {
 
 private struct AppIconView: View {
     let candidates: [String]
-    let fallbackSystemName: String
 
     var body: some View {
         Group {
@@ -352,7 +378,7 @@ private struct AppIconView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 4)
             } else {
-                AppIcon(sf: fallbackSystemName, size: 18)
+                AppIcon("cube", size: 18)
                     .foregroundStyle(brand.foreground)
             }
         }

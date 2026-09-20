@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 // MARK: - Home
 
@@ -13,6 +14,8 @@ struct AgenticHomeView: View {
 
     /// Home board state.
     @State private var board: HomeBoard = .empty
+    @State private var hasLoadedBoard = false
+    @State private var boardErrorMessage: String?
     @State private var openWorkflowID: String?
     /// Prevents duplicate changed-state acknowledgement.
     @State private var hasMarkedSeen = false
@@ -28,6 +31,7 @@ struct AgenticHomeView: View {
     /// Sessions that continue after their sheet is dismissed.
     @State private var backgroundSessions: [AgentTaskSession] = []
     @State private var isChatHomePresented = false
+    @State private var chatHomeShowsHistory = false
     @State private var isMorePresented = false
     @State private var chatDragOffset: CGFloat = 0
     @State private var chatDragActive = false
@@ -45,121 +49,47 @@ struct AgenticHomeView: View {
     @State private var hasEmailConnection = false
     /// Recent task entities.
     @State private var recentEntities: [RecentEntity] = []
+    @State private var homeSettings = OxySettings()
+    @State private var locationManager = LocationManager.shared
+    @State private var isSettingsPresented = false
+    @State private var isDevicePresented = false
 
     var body: some View {
         ZStack {
-            GlebChrome.pastelBlob
+            Color.appBackground
                 .ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 30) {
+                    homeTopBar
+                    householdHero
 
-            VStack(spacing: 0) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        GlebTopChrome(
-                            weather: weather,
-                            onProfile: {
-                                HapticManager.shared.impact(.light)
-                                isMorePresented = true
+                    if let homeErrorMessage {
+                        ErrorBanner(message: homeErrorMessage, onRetry: {
+                            Task {
+                                await load(forceCheck: false)
+                                await loadBoard()
                             }
-                        )
-                        .padding(.top, 8)
-
-                        greetingBlock
-                            .padding(.top, 2)
-
-                        if let errorMessage {
-                            ErrorBanner(message: errorMessage, onRetry: {
-                                Task { await load(forceCheck: false) }
-                            })
-                        }
-
-                        if board.isWorking {
-                            LiveWorkHeader(
-                                count: board.handling.count,
-                                waitingCount: board.handling.filter { $0.waitingExternal == true }.count
-                            )
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-
-                        if let lifeBriefing = visibleLifeBriefing {
-                            LifeBriefingCard(briefing: lifeBriefing) { item in
-                                handleLifeBriefingItem(item)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-
-                        if isLoading && board.isEmpty && missions.isEmpty && visibleLifeBriefing == nil {
-                            ProgressView()
-                                .tint(GlebChrome.ink.opacity(0.4))
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
-                        } else {
-                            if !board.isEmpty {
-                                boardLanes
-                            }
-
-                            if !missions.isEmpty {
-                                LazyVStack(spacing: 12) {
-                                    ForEach(missions) { mission in
-                                        MissionCardView(
-                                            mission: mission,
-                                            ink: GlebChrome.ink,
-                                            onCTA: { handleMissionCTA(mission) },
-                                            onMailCTA: { email in handleMailCTA(email) },
-                                            onDismiss: mission.kind == .mailGroup || mission.watchID != nil ? nil : {
-                                                mission.id.hasPrefix("session-") ? abandonSession(mission.id) : dismissMission(mission.id)
-                                            }
-                                        )
-                                        .transition(.asymmetric(
-                                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
-                                            removal: .opacity
-                                        ))
-                                    }
-                                }
-                                .padding(.top, 4)
-                            }
-
-                            // Shown even when the error banner is up: a failed refresh
-                            // still leaves the composer usable, so the page must not
-                            // go blank between the banner and the bottom bar.
-                            if !isLoading,
-                               board.isEmpty,
-                               missions.isEmpty,
-                               visibleLifeBriefing == nil {
-                                homeEmptyState
-                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                            }
-                        }
-
-                        if !recentEntities.isEmpty {
-                            recentEntitiesRail
-                                .padding(.top, 2)
-                        }
+                        })
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 120)
+
+                    if isLoading && board.isEmpty && missions.isEmpty {
+                        homeLoadingState
+                    } else {
+                        attentionSection
+                        activeSection
+                        contextSection
+                        noticedSection
+                    }
                 }
-                .refreshable { await load(forceCheck: true) }
+                .padding(.horizontal, AppSpacing.margin)
+                .padding(.top, 10)
+                .padding(.bottom, 22)
             }
-
-            VStack {
-                Spacer()
-                composerBar
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-            }
-
-            // Chat edge gesture.
-            Color.clear
-                .frame(width: 20)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(chatEdgeGesture)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-            chatPeekIndicator
+            .scrollDismissesKeyboard(.interactively)
+            .refreshable { await load(forceCheck: true) }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { homeDock }
         .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
         .task {
             await load(forceCheck: false)
             await loadBoard()
@@ -180,6 +110,7 @@ struct AgenticHomeView: View {
         }
         .onChange(of: isChatHomePresented) { old, new in
             if old && !new {
+                chatHomeShowsHistory = false
                 Task { await load(forceCheck: false) }
             }
         }
@@ -194,6 +125,10 @@ struct AgenticHomeView: View {
             }
         }
         .onAppear {
+            loadHomeSettings()
+            if homeSettings.homeLatitude != nil && homeSettings.homeLongitude != nil {
+                locationManager.requestLocation()
+            }
             loadDismissedMailIDs()
             loadDismissedMissionIDs()
             #if DEBUG
@@ -204,7 +139,7 @@ struct AgenticHomeView: View {
             }
             if ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" { return }
             #endif
-            if appState.isDemoSession || SiriRequestBus.shared.pendingQuery != nil {
+            if SiriRequestBus.shared.pendingQuery != nil {
                 isChatHomePresented = true
             }
         }
@@ -215,19 +150,19 @@ struct AgenticHomeView: View {
             isMorePresented = true
         }
         .fullScreenCover(isPresented: $isChatHomePresented) {
-            ChatHomeView()
+            ChatHomeView(showHistoryOnAppear: chatHomeShowsHistory)
                 .overlay(alignment: .topTrailing) {
                     Button {
                         HapticManager.shared.impact(.light)
                         isChatHomePresented = false
                     } label: {
-                        AppIcon("tab-home", size: 16)
+                        AppIcon("xmark", size: 16)
                             .foregroundStyle(Color.appInk)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     .buttonStyle(.appScale)
-                    .accessibilityLabel("Home")
+                    .accessibilityLabel("Close")
                     .padding(.top, 8)
                     .padding(.trailing, 12)
                 }
@@ -240,16 +175,26 @@ struct AgenticHomeView: View {
                         HapticManager.shared.impact(.light)
                         isMorePresented = false
                     } label: {
-                        AppIcon("tab-home", size: 16)
+                        AppIcon("xmark", size: 16)
                             .foregroundStyle(Color.appInk)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     .buttonStyle(.appScale)
-                    .accessibilityLabel("Home")
+                    .accessibilityLabel("Close")
                     .padding(.top, 8)
                     .padding(.trailing, 12)
                 }
+        }
+        .fullScreenCover(isPresented: $isSettingsPresented) {
+            SettingsView()
+                .swipeToDismiss()
+                .onDisappear { loadHomeSettings() }
+        }
+        .sheet(isPresented: $isDevicePresented) {
+            PendantStatusView()
+                .presentationDetents([.large])
+                .presentationCornerRadius(28)
         }
         .fullScreenCover(item: $chatLaunch) { launch in
             NavigationStack {
@@ -264,8 +209,9 @@ struct AgenticHomeView: View {
                             chatLaunch = nil
                         } label: {
                             AppIcon("xmark", size: 14)
+                                .accessibilityLabel("Close")
                                 .foregroundStyle(GlebChrome.ink)
-                                .frame(width: 36, height: 36)
+                                .frame(width: 44, height: 44)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
                     }
@@ -316,6 +262,524 @@ struct AgenticHomeView: View {
                 .onDisappear { Task { await loadBoard() } }
         }
 }
+
+// MARK: - Household surface
+
+    private enum PresenceSnapshot {
+        case home, away, unknown, setup
+    }
+
+    private var presenceSnapshot: PresenceSnapshot {
+        guard let latitude = homeSettings.homeLatitude,
+              let longitude = homeSettings.homeLongitude else { return .setup }
+        guard let current = locationManager.lastLocation else { return .unknown }
+        let home = CLLocation(latitude: latitude, longitude: longitude)
+        return current.distance(from: home) <= 180 ? .home : .away
+    }
+
+    private var homeTopBar: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Adam")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.appInk)
+                Text(deviceStatusLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.appMuted)
+            }
+            Spacer(minLength: 8)
+            Button {
+                HapticManager.shared.impact(.light)
+                isDevicePresented = true
+            } label: {
+                Circle()
+                    .fill(NativeIntegrationManager.shared.pendant.isConnected ? Color.appLive : Color.appMuted.opacity(0.45))
+                    .frame(width: 10, height: 10)
+                    .frame(width: 44, height: 44)
+                    .background(Color.appSurface, in: Circle())
+            }
+            .buttonStyle(.appScale)
+            .accessibilityLabel("Adam device")
+            .accessibilityValue(deviceStatusLabel)
+        }
+        .padding(.top, 4)
+    }
+
+    private var householdHero: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(greetingLine)
+                    .font(.largeTitle.weight(.semibold))
+                    .appHeroTracking(34)
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(homeSummary)
+                    .font(.body)
+                    .foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        }
+    }
+
+    private var greetingLine: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let greeting: String
+        switch hour {
+        case 5..<12: greeting = "Good morning"
+        case 12..<17: greeting = "Good afternoon"
+        case 17..<22: greeting = "Good evening"
+        default: greeting = "Hello"
+        }
+        return firstName.isEmpty ? "\(greeting)." : "\(greeting), \(firstName)."
+    }
+
+    private var deviceStatusLabel: String {
+        NativeIntegrationManager.shared.pendant.isConnected ? "Device connected" : "No device connected"
+    }
+
+    private var householdHeroContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(presenceTint)
+                    .frame(width: 7, height: 7)
+                Text(presenceEyebrow)
+                    .font(.caption.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(presenceTint)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(presenceTitle)
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(Color.appInk)
+                    .appHeroTracking(31)
+                    .multilineTextAlignment(.leading)
+                Text(presenceDetail)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.appMuted)
+                    .lineSpacing(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                AppIcon(presenceSnapshot == .unknown ? "refresh" : "location", size: 13)
+                    .foregroundStyle(Color.appAccent)
+                Text(presenceActionLabel)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.appInk)
+                Spacer()
+                if presenceSnapshot == .setup || presenceSnapshot == .unknown {
+                    AppIcon("arrow-up-right", size: 11)
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(22)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .strokeBorder(Color.appHairline, lineWidth: 0.7))
+        .shadow(color: Color.appInk.opacity(0.03), radius: 14, y: 6)
+    }
+
+    private var presenceEyebrow: String {
+        switch presenceSnapshot {
+        case .home: return "AT HOME"
+        case .away: return "AWAY"
+        case .unknown: return "HOME AWARENESS"
+        case .setup: return "SET UP HOME"
+        }
+    }
+
+    private var presenceTitle: String {
+        switch presenceSnapshot {
+        case .home: return "You're home."
+        case .away: return "You're away."
+        case .unknown: return locationManager.isAuthorized ? "Checking where you are." : "Home is saved."
+        case .setup: return "Give Adam a sense of home."
+        }
+    }
+
+    private var presenceDetail: String {
+        switch presenceSnapshot {
+        case .home:
+            return homeSettings.locationReminders
+                ? "Arrival and departure context is available for reminders you choose."
+                : "Your home location is saved. Arrival reminders are off."
+        case .away:
+            return homeSettings.locationReminders
+                ? "Adam can use this change for reminders you have already asked for."
+                : "Your home location is saved. Arrival reminders are off."
+        case .unknown:
+            return locationManager.isAuthorized
+                ? "Tap to refresh your location."
+                : "Allow location access to use arrival and departure reminders."
+        case .setup:
+            return "Add your address to make arrival and departure reminders possible."
+        }
+    }
+
+    private var presenceTint: Color {
+        switch presenceSnapshot {
+        case .home: return .appSuccess
+        case .away: return .appAccent
+        case .unknown, .setup: return .appMuted
+        }
+    }
+
+    private var presenceActionLabel: String {
+        switch presenceSnapshot {
+        case .setup: return "Set up home"
+        case .unknown: return "Refresh location"
+        case .home, .away: return homeSettings.locationReminders ? "Arrival reminders on" : "Arrival reminders off"
+        }
+    }
+
+    private var attentionCount: Int {
+        board.needsYou.count + lifeApprovalItems.count + actionMissions.count
+    }
+
+    private var activeWorkCount: Int {
+        board.handling.count + agentWatches.count + backgroundSessions.count
+    }
+
+    @ViewBuilder
+    private var attentionSection: some View {
+        if attentionCount > 0 {
+            homeSection(title: "Needs you", count: attentionCount) {
+                VStack(spacing: 0) {
+                    ForEach(Array(board.needsYou.prefix(3).enumerated()), id: \.element.id) { index, item in
+                        homeActionRow(
+                            title: contextualTitle(for: item),
+                            detail: item.detail,
+                            icon: "shield-check",
+                            tint: .appWarning
+                        ) { openBoardItem(item) }
+                        if index < min(board.needsYou.count, 3) - 1 { AppDivider(inset: 46) }
+                    }
+                    ForEach(lifeApprovalItems.prefix(max(0, 3 - board.needsYou.count))) { item in
+                        if !board.needsYou.isEmpty { AppDivider(inset: 46) }
+                        homeActionRow(
+                            title: item.displayTitle,
+                            detail: item.displayDetail,
+                            icon: item.iconName,
+                            tint: .appWarning
+                        ) { handleLifeBriefingItem(item) }
+                    }
+                    ForEach(actionMissions.prefix(max(0, 3 - min(3, board.needsYou.count + lifeApprovalItems.count)))) { mission in
+                        if !board.needsYou.isEmpty || !lifeApprovalItems.isEmpty { AppDivider(inset: 46) }
+                        homeActionRow(
+                            title: mission.displayTitle,
+                            detail: mission.detail,
+                            icon: AppGlyph.mission(mission.symbol),
+                            tint: .appWarning
+                        ) { handleMissionCTA(mission) }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeSection: some View {
+        if activeWorkCount > 0 {
+            homeSection(title: "In motion", count: activeWorkCount) {
+                VStack(spacing: 0) {
+                    ForEach(Array(board.handling.prefix(3).enumerated()), id: \.element.id) { index, item in
+                        homeStateRow(
+                            title: item.title,
+                            detail: item.waitingExternal == true ? "Waiting for someone else" : (item.detail ?? "Adam is working on this"),
+                            icon: item.waitingExternal == true ? "clock" : "dotted",
+                            tint: item.waitingExternal == true ? .appMuted : .appAccent
+                        ) { openBoardItem(item) }
+                        if index < min(board.handling.count, 3) - 1 || !agentWatches.isEmpty {
+                            AppDivider(inset: 49)
+                        }
+                    }
+                    ForEach(Array(agentWatches.prefix(3).enumerated()), id: \.element.id) { index, watch in
+                        homeStateRow(
+                            title: watch.title,
+                            detail: watch.nextCheckLabel ?? watch.cadenceLabel,
+                            icon: "clock",
+                            tint: .appAccent
+                        ) { isAgentWorkPresented = true }
+                        if index < min(agentWatches.count, 3) - 1 {
+                            AppDivider(inset: 49)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contextSection: some View {
+        if !contextMissions.isEmpty {
+            homeSection(title: "Around you", count: contextMissions.count) {
+                VStack(spacing: 0) {
+                    ForEach(Array(contextMissions.prefix(3).enumerated()), id: \.element.id) { index, mission in
+                        homeStateRow(
+                            title: mission.displayTitle,
+                            detail: mission.detail ?? mission.eyebrow,
+                            icon: AppGlyph.mission(mission.symbol),
+                            tint: mission.isPrimary ? .appAccent : .appMuted
+                        ) { handleMissionCTA(mission) }
+                        if index < min(contextMissions.count, 3) - 1 {
+                            AppDivider(inset: 49)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var noticedSection: some View {
+        if !observationItems.isEmpty {
+            homeSection(title: "Adam noticed", count: observationItems.count) {
+                VStack(spacing: 0) {
+                    ForEach(Array(observationItems.prefix(4).enumerated()), id: \.element.id) { index, item in
+                        homeActionRow(
+                            title: item.title,
+                            detail: item.detail,
+                            icon: item.failed == true ? "alert-circle" : "check-circle",
+                            tint: item.failed == true ? .appDanger : .appSuccess
+                        ) { openBoardItem(item) }
+                        if index < min(observationItems.count, 4) - 1 { AppDivider(inset: 46) }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.7))
+            }
+        } else if attentionCount == 0 && activeWorkCount == 0 && contextMissions.isEmpty && homeDataIsCurrent {
+            HStack(spacing: 14) {
+                AppIcon("check-circle", size: 19)
+                    .foregroundStyle(Color.appSuccess)
+                    .frame(width: 42, height: 30)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No action needed")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text("Changes and results will appear here.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func homeSection<Content: View>(
+        title: String,
+        count: Int,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Color.appInk)
+                Text("\(count)")
+                    .font(.appMono(11, weight: .semibold))
+                    .foregroundStyle(Color.appAccent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.appAccent.opacity(0.10), in: Capsule())
+                Spacer()
+            }
+            content()
+        }
+    }
+
+    private func homeActionRow(
+        title: String,
+        detail: String?,
+        icon: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                AppIcon(icon, size: 16)
+                    .foregroundStyle(tint)
+                    .frame(width: 34, height: 34)
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(2)
+                    if let detail, !detail.isEmpty, detail.caseInsensitiveCompare(title) != .orderedSame {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(Color.appMuted)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 6)
+                AppIcon("chevron-right", size: 12)
+                    .foregroundStyle(Color.appMuted.opacity(0.7))
+            }
+            .padding(.vertical, 13)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
+    }
+
+    private func homeStateRow(
+        title: String,
+        detail: String,
+        icon: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 13) {
+                AppIcon(icon, size: 16)
+                    .foregroundStyle(tint)
+                    .frame(width: 44, height: 44)
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(2)
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 6)
+                AppIcon("arrow-up-right", size: 12)
+                    .foregroundStyle(Color.appMuted.opacity(0.7))
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.985))
+    }
+
+    private var homeDock: some View {
+        HStack(spacing: 10) {
+            TextField("Ask Adam anything", text: $composerDraft, axis: .vertical)
+                .font(.body)
+                .foregroundStyle(Color.appInk)
+                .lineLimit(1...5)
+                .focused($composerFocused)
+                .submitLabel(.send)
+                .onSubmit { sendComposer() }
+
+            Button {
+                if composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HapticManager.shared.impact(.light)
+                    openChat(autoSend: nil, startFresh: false)
+                } else {
+                    sendComposer()
+                }
+            } label: {
+                let hasText = !composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                AppIcon(hasText ? "arrow-up" : "mic", size: 16)
+                    .foregroundStyle(hasText ? Color.appOnAccent : Color.appAccent)
+                    .frame(width: 44, height: 44)
+                    .background(hasText ? Color.appAccent : Color.appSurface2, in: Circle())
+                    .animation(.appFast, value: hasText)
+            }
+            .buttonStyle(.appScale(0.94))
+            .accessibilityLabel(composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to Adam" : "Send")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .frame(minHeight: 54)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 20, y: 4)
+        .padding(.horizontal, AppSpacing.margin)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+    }
+
+    private var homeLoadingState: some View {
+        HStack(spacing: 12) {
+            ProgressView().tint(Color.appAccent)
+            Text("Updating")
+                .font(.appBody(13, weight: .medium))
+                .foregroundStyle(Color.appMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+
+    private var lifeApprovalItems: [LifeBriefingItem] {
+        (visibleLifeBriefing?.items ?? []).filter { $0.kind.caseInsensitiveCompare("approval") == .orderedSame }
+    }
+
+    private var actionMissions: [HomeMission] {
+        deduplicatedMissions.filter { $0.kind == .action }
+    }
+
+    private var contextMissions: [HomeMission] {
+        deduplicatedMissions.filter { mission in
+            mission.kind == .incoming || (mission.kind == .status && !mission.id.hasPrefix("local-"))
+        }
+    }
+
+    private var deduplicatedMissions: [HomeMission] {
+        var seen = Set<String>()
+        return missions.filter { mission in
+            let key = mission.displayTitle.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return false }
+            return seen.insert(key).inserted
+        }
+    }
+
+    private var observationItems: [BoardItem] {
+        var seen = Set<String>()
+        return (board.completed + board.changed).filter { item in
+            let key = item.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return false }
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func contextualTitle(for item: BoardItem) -> String {
+        let generic = item.title.lowercased().contains("task needs your approval")
+        if generic {
+            if let prompt = item.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty { return prompt }
+            if let detail = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty { return detail }
+        }
+        return item.title
+    }
+
+    private func loadHomeSettings() {
+        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+           let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
+            homeSettings = saved
+        }
+    }
 
 // MARK: - Greeting
 
@@ -368,13 +832,21 @@ struct AgenticHomeView: View {
     }
 
     private var homeSummary: String {
+        if homeErrorMessage != nil { return "Updates unavailable." }
+        if !homeDataIsCurrent { return "Checking for updates." }
+        if attentionCount > 0 {
+            return attentionCount == 1 ? "One item needs your attention." : "\(attentionCount) items need your attention."
+        }
         if board.isWorking {
             return board.handling.count == 1 ? "One thing is moving." : "\(board.handling.count) things are moving."
         }
-        if !missions.isEmpty {
-            return missions.count == 1 ? "One item needs your attention." : "\(missions.count) items need your attention."
-        }
         return "Nothing needs your attention right now."
+    }
+
+    private var homeErrorMessage: String? { errorMessage ?? boardErrorMessage }
+
+    private var homeDataIsCurrent: Bool {
+        hasLoadedBoard && homeErrorMessage == nil && !isLoading && !isRefreshing
     }
 
     private var homeEmptyState: some View {
@@ -486,7 +958,10 @@ struct AgenticHomeView: View {
         do {
             let fetched = try await HomeBoardService.fetchBoard()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { board = fetched }
+            hasLoadedBoard = true
+            boardErrorMessage = fetched.unavailableSources?.isEmpty == false ? "Some updates are unavailable." : nil
         } catch {
+            boardErrorMessage = error.localizedDescription
         }
     }
 
@@ -888,12 +1363,16 @@ struct AgenticHomeView: View {
             errorMessage = error.localizedDescription
         }
 
-        if let fetchedLifeBriefing = try? await service.loadLifeBriefing() {
-            lifeBriefing = fetchedLifeBriefing
+        do {
+            lifeBriefing = try await service.loadLifeBriefing()
+        } catch {
+            errorMessage = error.localizedDescription
         }
 
-        if let fetchedWatches = try? await AgentTasksService.fetchWatches() {
-            agentWatches = fetchedWatches
+        do {
+            agentWatches = try await AgentTasksService.fetchWatches()
+        } catch {
+            errorMessage = error.localizedDescription
         }
 
         weather = await weatherTask
@@ -1637,19 +2116,10 @@ struct MissionCardView: View {
 struct MissionGlassPlate: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-        ZStack {
-            Color.appSurface.opacity(0.92)
-            AppGrain(intensity: 0.028)
-        }
+        Color.appSurface
             .clipShape(shape)
-            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.white.opacity(0.20))
-                    .frame(height: 0.7)
-                    .clipShape(shape)
-            }
-            .shadow(color: Color(red: 0.19, green: 0.14, blue: 0.08).opacity(0.07), radius: 12, y: 5)
+            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.7))
+            .shadow(color: Color.appInk.opacity(0.035), radius: 10, y: 4)
     }
 }
 

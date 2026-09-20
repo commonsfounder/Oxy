@@ -118,33 +118,7 @@ enum GlebChrome {
     static let muted = Color.appMuted
 
     static var pastelBlob: some View {
-        ZStack {
-            Color.appBackground
-            Circle()
-                .fill(Color.appAccent.opacity(0.10))
-                .frame(width: 310, height: 310)
-                .blur(radius: 58)
-                .offset(x: 138, y: -250)
-                .allowsHitTesting(false)
-            Circle()
-                .fill(Color(red: 0.72, green: 0.66, blue: 0.86).opacity(0.08))
-                .frame(width: 270, height: 270)
-                .blur(radius: 72)
-                .offset(x: -150, y: 110)
-                .allowsHitTesting(false)
-
-            // Warm vignette — stops the canvas reading as flat #FFF and gives the
-            // page edges the falloff of a sheet of stock.
-            RadialGradient(
-                colors: [.clear, Color(red: 0.29, green: 0.22, blue: 0.13).opacity(0.13)],
-                center: .center,
-                startRadius: 190,
-                endRadius: 560
-            )
-            .allowsHitTesting(false)
-
-            AppGrain(intensity: 0.055)
-        }
+        Color.appBackground
     }
 }
 

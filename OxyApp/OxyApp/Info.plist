@@ -51,7 +51,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Adam uses your location to help with ride booking, directions, and local recommendations.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Adam uses the microphone for voice input so you can talk instead of typing.</string>
+	<string>Adam uses the microphone for voice input and, when enabled, recognizes important household sounds on this device.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Adam lets you attach photos and images for multimodal chat when you choose them.</string>
 	<key>NSRemindersUsageDescription</key>
