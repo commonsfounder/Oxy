@@ -3,12 +3,16 @@ import UIKit
 
 struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
+    @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
     @State private var isMenuPresented = false
+
+    private var background: ThreadBackground { ThreadBackground(rawValue: backgroundRaw) ?? .automatic }
 
     var body: some View {
         ChatView(onMenu: { isMenuPresented = true })
             .tint(Color.appAccent)
-            .id(accentColor)
+            .preferredColorScheme(background.scheme)
+            .id(accentColor + backgroundRaw)
             .sheet(isPresented: $isMenuPresented) { AdamMenuSheet() }
             .onAppear { HapticManager.shared.prepare() }
     }
@@ -542,6 +546,7 @@ private struct ActivityWorkflow: Identifiable { let id: String }
 private struct AdamYouView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: Destination?
+    @State private var showsBackgroundPicker = false
 
     private enum Destination: String, Identifiable {
         case profile, memory, connections, agents, privacy, settings
@@ -575,6 +580,10 @@ private struct AdamYouView: View {
                             youRow(title: "Settings", subtitle: "Your details and preferences", icon: "list") { destination = .settings }
                         }
 
+                        youSection("Look") {
+                            youRow(title: "Background", subtitle: ThreadBackground.current.title, icon: "sun") { showsBackgroundPicker = true }
+                        }
+
                         youSection("Advanced") {
                             youRow(title: "Which AI Adam uses", subtitle: "For people who like to choose", icon: "waveform") { destination = .agents }
                         }
@@ -589,6 +598,7 @@ private struct AdamYouView: View {
         .fullScreenCover(item: $destination) { item in
             destinationView(item).swipeToDismiss()
         }
+        .sheet(isPresented: $showsBackgroundPicker) { BackgroundPicker() }
     }
 
     private var identityHeader: some View {
@@ -676,6 +686,47 @@ private struct AdamYouView: View {
         guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
               let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else { return OxySettings() }
         return settings
+    }
+}
+
+private struct BackgroundPicker: View {
+    @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Background")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            HStack(spacing: 16) {
+                ForEach(ThreadBackground.allCases) { option in
+                    Button {
+                        HapticManager.shared.select()
+                        backgroundRaw = option.rawValue
+                        dismiss()
+                    } label: {
+                        VStack(spacing: 8) {
+                            Circle()
+                                .fill(option.swatch)
+                                .frame(width: 58, height: 58)
+                                .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
+                                .overlay(Circle().strokeBorder(Color.appInk, lineWidth: backgroundRaw == option.rawValue ? 2.5 : 0).padding(-4))
+                            Text(option.title)
+                                .font(.footnote)
+                                .foregroundStyle(Color.appInk)
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.appScale)
+                    .accessibilityAddTraits(backgroundRaw == option.rawValue ? .isSelected : [])
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appBackground.ignoresSafeArea())
+        .presentationDetents([.height(220)])
     }
 }
 

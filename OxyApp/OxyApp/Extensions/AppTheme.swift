@@ -8,10 +8,12 @@ private func appDynamicColor(dark: Color, light: Color) -> Color {
 }
 
 extension Color {
-    static let appBackground = appDynamicColor(
-        dark: Color(red: 0.035, green: 0.035, blue: 0.035),   // #090909
-        light: Color(red: 0.965, green: 0.976, blue: 0.992)   // #F6F9FD
-    )
+    static let appBackground = Color(UIColor { trait in
+        if let chosen = ThreadBackground.current.uiColor { return chosen }
+        return trait.userInterfaceStyle == .dark
+            ? UIColor(red: 0.035, green: 0.035, blue: 0.035, alpha: 1)   // #090909
+            : UIColor(red: 0.965, green: 0.976, blue: 0.992, alpha: 1)   // #F6F9FD
+    })
 
     static let appSurface = appDynamicColor(
         dark: Color(red: 0.082, green: 0.082, blue: 0.082),   // #151515
@@ -1074,5 +1076,55 @@ struct AppRow<Trailing: View>: View {
 extension AppRow where Trailing == EmptyView {
     init(title: String, subtitle: String? = nil, onTap: (() -> Void)? = nil) {
         self.init(title: title, subtitle: subtitle, onTap: onTap) { EmptyView() }
+    }
+}
+
+
+// MARK: - Chosen background
+
+/// The background the user picks for the whole app. Each tone forces the light or dark
+/// palette that reads best on it, so text and buttons stay legible without extra work.
+enum ThreadBackground: String, CaseIterable, Identifiable {
+    case automatic, warm, sea, night
+
+    static let storageKey = "adam_thread_background"
+
+    static var current: ThreadBackground {
+        ThreadBackground(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .automatic
+    }
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .warm: return "Warm"
+        case .sea: return "Sea"
+        case .night: return "Night"
+        }
+    }
+
+    /// nil follows the phone's light or dark setting.
+    var scheme: ColorScheme? {
+        switch self {
+        case .automatic: return nil
+        case .warm, .sea: return .light
+        case .night: return .dark
+        }
+    }
+
+    var uiColor: UIColor? {
+        switch self {
+        case .automatic: return nil
+        case .warm: return UIColor(red: 0.973, green: 0.945, blue: 0.898, alpha: 1)   // #F8F1E5
+        case .sea: return UIColor(red: 0.914, green: 0.953, blue: 0.937, alpha: 1)    // #E9F3EF
+        case .night: return UIColor(red: 0.059, green: 0.090, blue: 0.188, alpha: 1)  // #0F1730
+        }
+    }
+
+    /// A preview colour for the picker (automatic shows the current system look).
+    var swatch: Color {
+        if let uiColor { return Color(uiColor) }
+        return Color.appBackground
     }
 }
