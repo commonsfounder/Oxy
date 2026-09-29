@@ -15,6 +15,8 @@ struct ChatView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
+    @State private var boardModel = ThreadBoardModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
     @State private var pendingReviewAction: ActionResult?
@@ -165,6 +167,10 @@ struct ChatView: View {
                                     }
                                 }
 
+                                ThreadBoardCards(model: boardModel)
+                                    .padding(.horizontal, AppSpacing.chatMargin)
+                                    .padding(.top, boardModel.isEmpty ? 0 : 14)
+
                                 Color.clear
                                     .frame(height: 1)
                                     .id("bottom")
@@ -194,7 +200,7 @@ struct ChatView: View {
                             isScrollPinnedToBottom = bottomY <= scrollViewportHeight + 96
                         }
                         .overlay {
-                            if viewModel.messages.isEmpty && !viewModel.isSending {
+                            if viewModel.messages.isEmpty && !viewModel.isSending && boardModel.isEmpty {
                                 WelcomeCard { prompt in
                                     viewModel.inputText = prompt
                                     sendCurrentDraft()
@@ -294,6 +300,15 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
+            .task {
+                while !Task.isCancelled {
+                    await boardModel.refresh()
+                    try? await Task.sleep(for: boardModel.working.isEmpty ? .seconds(60) : .seconds(10))
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await boardModel.refresh() } }
+            }
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .onChange(of: assistantReplySettled) { _, settled in
                 guard settled else { return }

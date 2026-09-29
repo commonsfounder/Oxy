@@ -50,6 +50,7 @@
 		6431A7CE0C10F0DE65B2F9E2 /* ReauthLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */; };
 		F10C0A110000000000000001 /* CheckoutInformationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10C0A120000000000000001 /* CheckoutInformationSheet.swift */; };
 		A10000010000000000000047 /* TurnReceiptRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000047 /* TurnReceiptRow.swift */; };
+		A10000010000000000000F10 /* ThreadBoardCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F10 /* ThreadBoardCards.swift */; };
 		A10000010000000000000012 /* Color+Oxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000012 /* Color+Oxy.swift */; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* LoadingIndicator.swift */; };
 		A10000010000000000000014 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000014 /* ErrorBanner.swift */; };
@@ -138,6 +139,7 @@
 		75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReauthLoginSheet.swift; sourceTree = "<group>"; };
 		F10C0A120000000000000001 /* CheckoutInformationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutInformationSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000047 /* TurnReceiptRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnReceiptRow.swift; sourceTree = "<group>"; };
+		A20000010000000000000F10 /* ThreadBoardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadBoardCards.swift; sourceTree = "<group>"; };
 		A20000010000000000000012 /* Color+Oxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Oxy.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		A20000010000000000000014 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
@@ -322,6 +324,7 @@
 				75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */,
 				F10C0A120000000000000001 /* CheckoutInformationSheet.swift */,
 				A20000010000000000000047 /* TurnReceiptRow.swift */,
+				A20000010000000000000F10 /* ThreadBoardCards.swift */,
 				A20000010000000000000031 /* ChatHomeView.swift */,
 				A20000010000000000000034 /* DeviceStatusCard.swift */,
 			);
@@ -630,6 +633,7 @@
 				6431A7CE0C10F0DE65B2F9E2 /* ReauthLoginSheet.swift in Sources */,
 				F10C0A110000000000000001 /* CheckoutInformationSheet.swift in Sources */,
 				A10000010000000000000047 /* TurnReceiptRow.swift in Sources */,
+				A10000010000000000000F10 /* ThreadBoardCards.swift in Sources */,
 				A10000010000000000000012 /* Color+Oxy.swift in Sources */,
 				A10000010000000000000032 /* AppTheme.swift in Sources */,
 				A10000010000000000000013 /* LoadingIndicator.swift in Sources */,
