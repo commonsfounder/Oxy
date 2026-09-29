@@ -3,51 +3,45 @@ import UIKit
 
 struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
-    @State private var selectedTab: AdamAppTab = .adam
+    @State private var isMenuPresented = false
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            AgenticHomeView()
-                .tabItem { tabLabel(.adam) }
-                .tag(AdamAppTab.adam)
-            PhysicalHomeView()
-                .tabItem { tabLabel(.home) }
-                .tag(AdamAppTab.home)
-            AdamActivityView()
-                .tabItem { tabLabel(.activity) }
-                .tag(AdamAppTab.activity)
-            AdamYouView()
-                .tabItem { tabLabel(.you) }
-                .tag(AdamAppTab.you)
-        }
-        .tint(Color.appAccent)
-        .id(accentColor)
-        .onAppear { HapticManager.shared.prepare() }
-    }
-
-    @ViewBuilder
-    private func tabLabel(_ tab: AdamAppTab) -> some View {
-        Image("ic-\(tab.icon)")
-            .renderingMode(.template)
-        Text(tab.rawValue)
+        ChatView(onMenu: { isMenuPresented = true })
+            .tint(Color.appAccent)
+            .id(accentColor)
+            .sheet(isPresented: $isMenuPresented) { AdamMenuSheet() }
+            .onAppear { HapticManager.shared.prepare() }
     }
 }
 
-private enum AdamAppTab: String, CaseIterable, Identifiable {
-    case adam = "Adam"
-    case home = "Home"
-    case activity = "Activity"
-    case you = "You"
+private struct AdamMenuSheet: View {
+    @Environment(\.dismiss) private var dismiss
 
-    var id: String { rawValue }
-
-    var icon: String {
-        switch self {
-        case .adam: return "waveform"
-        case .home: return "tab-home"
-        case .activity: return "history"
-        case .you: return "person"
+    var body: some View {
+        NavigationStack {
+            List {
+                NavigationLink { AdamActivityView() } label: { menuRow("history", "Everything Adam did") }
+                NavigationLink { PhysicalHomeView() } label: { menuRow("tab-home", "Home") }
+                NavigationLink { AdamYouView() } label: { menuRow("person", "You") }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Adam")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func menuRow(_ icon: String, _ title: String) -> some View {
+        HStack(spacing: 14) {
+            AppIcon(icon, size: 20)
+            Text(title).font(.system(size: 17))
+        }
+        .padding(.vertical, 6)
     }
 }
 
