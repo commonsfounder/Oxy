@@ -24,9 +24,9 @@ private struct AdamMenuSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink { AdamActivityView() } label: { menuRow("history", "Everything Adam did") }
-                NavigationLink { PhysicalHomeView() } label: { menuRow("tab-home", "Home") }
-                NavigationLink { AdamYouView() } label: { menuRow("person", "You") }
+                NavigationLink { AdamActivityView() } label: { menuRow("history", "History") }
+                NavigationLink { PhysicalHomeView() } label: { menuRow("tab-home", "Your home") }
+                NavigationLink { AdamYouView() } label: { menuRow("person", "Settings") }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Adam")
@@ -146,7 +146,7 @@ private struct PhysicalHomeView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 32) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Home")
+                            Text("Your home")
                                 .font(.title.weight(.semibold))
                                 .appHeroTracking(28)
                                 .foregroundStyle(Color.appInk)
@@ -405,7 +405,7 @@ private struct AdamActivityView: View {
 
     private var activityHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Everything Adam did")
+            Text("History")
                 .font(.title.weight(.semibold))
                 .appHeroTracking(28)
                 .foregroundStyle(Color.appInk)
@@ -559,7 +559,7 @@ private struct AdamYouView: View {
                 Color.appBackground.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 30) {
-                        Text("You")
+                        Text("Settings")
                             .font(.title.weight(.semibold))
                             .appHeroTracking(28)
                             .foregroundStyle(Color.appInk)
@@ -853,7 +853,7 @@ struct MoreView: View {
     private var menuSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             moreGroup(title: "Adam") {
-                moreRow(title: "Everything Adam did", subtitle: "Conversations and finished work", icon: "history") {
+                moreRow(title: "History", subtitle: "Conversations and finished work", icon: "history") {
                     destination = .history
                 }
                 rowDivider
