@@ -1,6 +1,6 @@
 # Adam single-thread UI — design
 
-Date: 2026-09-29. Status: draft for review. Supersedes the four-tab iOS layout (Adam / Home / Activity / You) and the dark, blue-heavy card look.
+Date: 2026-09-29. Status: build in progress (see "Build status" at the end). Supersedes the four-tab iOS layout (Adam / Home / Activity / You) and the dark, blue-heavy card look.
 
 ## Problem
 
@@ -84,3 +84,18 @@ Every card has a plain version: a message plus buttons (Approve / Not now, numbe
 - Exact list and field schema of floor shapes, taken from existing approval/task/watch objects.
 - Where history lives and how far back the thread loads.
 - Whether iMessage becomes a real channel (out of scope here; the plain card versions just keep it possible).
+
+## Build status (2026-09-29)
+
+Built, committed on `main`, simulator-checked in light and dark; not pushed or deployed:
+- Single thread, tab bar removed, avatar-less menu button opens "Everything Adam did", "Home", "You" (`MainTabView.swift`).
+- Colour roles and calmer thread look (`AppTheme.swift`); user-chosen background (Automatic, Warm, Sea, Night) under You > Look, forcing the matching light/dark palette.
+- Thread cards from the real home board (`ThreadBoardCards.swift`): finished, working, needs-a-yes; approval acknowledgement with a drawn tick; finish moment shown once per completed item.
+- Plain-words pass on menu, Activity, You, apps, settings, timeline; Telegram approval buttons now say "Yes, do it" / "Not yet".
+
+Not built yet:
+- Peaks beyond payment/finish: train or booking ticket reveal, message-sent flight.
+- Plain-text card versions for iMessage (Telegram already gets buttons); iMessage as a real channel.
+- Full plain-words sweep of screens not reachable from the menu, and backend-generated copy.
+- Not tested against a live approval or a live completion; card show-once logic and persistence need a run on a device.
+- The old "new conversation" button is hidden in the thread header; conversation history still exists behind "Everything Adam did".
