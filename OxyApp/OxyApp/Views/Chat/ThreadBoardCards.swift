@@ -8,22 +8,65 @@ final class ThreadBoardModel {
     private(set) var resolvedIDs = Set<String>()
     /// Cards answered a moment ago, kept on screen briefly so the answer registers. Value is whether it was approved.
     private(set) var acknowledged: [String: Bool] = [:]
+    /// Work that finished since the user last saw it. Stays for the session so a result never vanishes unread.
+    private(set) var finished: [BoardItem] = []
+    private var seenFinishedIDs = Set<String>()
     var errorMessage: String?
+
+    private static let seenKey = "adam_thread_seen_finished"
+
+    private var isSample: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1"
+        #else
+        false
+        #endif
+    }
 
     var needsYou: [BoardItem] { board.needsYou.filter { !resolvedIDs.contains($0.id) } }
     var working: [BoardItem] { board.handling }
-    var isEmpty: Bool { needsYou.isEmpty && working.isEmpty }
+    var isEmpty: Bool { needsYou.isEmpty && working.isEmpty && finished.isEmpty }
+
+    init() {
+        let stored = UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? []
+        seenFinishedIDs = Set(stored)
+    }
 
     func refresh() async {
         #if DEBUG
         if ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
             board = Self.sampleBoard
+            absorbFinished()
             return
         }
         #endif
         if let fetched = try? await HomeBoardService.fetchBoard() {
             board = fetched
+            absorbFinished()
         }
+    }
+
+    /// The first ever load only records what already exists, so old history never appears as news.
+    private func absorbFinished() {
+        if !isSample, UserDefaults.standard.object(forKey: Self.seenKey) == nil {
+            seenFinishedIDs = Set(board.completed.map(\.id))
+            persistSeen()
+            return
+        }
+        for item in board.completed
+        where !seenFinishedIDs.contains(item.id) && !finished.contains(where: { $0.id == item.id }) {
+            finished.append(item)
+        }
+    }
+
+    func markFinishedSeen(_ item: BoardItem) {
+        seenFinishedIDs.insert(item.id)
+        persistSeen()
+    }
+
+    private func persistSeen() {
+        guard !isSample else { return }
+        UserDefaults.standard.set(Array(seenFinishedIDs.suffix(200)), forKey: Self.seenKey)
     }
 
     #if DEBUG
@@ -31,7 +74,7 @@ final class ThreadBoardModel {
         let json = """
         {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242","workflowId":"w1","checkpointId":"c1"}],
          "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","progress":{"done":2,"total":3}}],
-         "changed":[],"completed":[],"counts":{"needsYou":1,"handling":2,"changed":0,"completed":0}}
+         "changed":[],"completed":[{"id":"workflow-x","workflowId":"w9","kind":"purchase","title":"Ordered the headphones","detail":"£54.20 · arrives Thursday","at":"2026-09-29T17:00:00Z"}],"counts":{"needsYou":1,"handling":2,"changed":0,"completed":1}}
         """
         return (try? JSONDecoder().decode(HomeBoard.self, from: Data(json.utf8))) ?? .empty
     }()
@@ -73,13 +116,17 @@ struct ThreadBoardCards: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(model.needsYou.prefix(3)) { item in
-                needsYouCard(item)
+            ForEach(model.finished.suffix(3)) { item in
+                FinishedCard(item: item, onOpen: { id in openWorkflow = OpenWorkflow(id: id) }, onSeen: { model.markFinishedSeen(item) })
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             ForEach(model.working.prefix(3)) { item in
                 workingChip(item)
                     .transition(.opacity)
+            }
+            ForEach(model.needsYou.prefix(3)) { item in
+                needsYouCard(item)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             if let message = model.errorMessage {
                 Text(message)
@@ -210,6 +257,72 @@ struct ThreadBoardCards: View {
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.appWorking.opacity(0.10)))
         .onTapGesture {
             if let workflowId = item.workflowId { openWorkflow = OpenWorkflow(id: workflowId) }
+        }
+    }
+}
+
+/// A finished piece of work: the tick draws, then the detail settles in under the title.
+private struct FinishedCard: View {
+    let item: BoardItem
+    var onOpen: (String) -> Void
+    var onSeen: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var detailShown = false
+
+    private var failed: Bool { item.failed == true }
+    private var detail: String? {
+        guard let text = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
+
+    var body: some View {
+        Button {
+            if let id = item.workflowId { onOpen(id) }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                if failed {
+                    Circle().fill(Color.appDanger.opacity(0.14))
+                        .frame(width: 32, height: 32)
+                        .overlay(Text("!").font(.appBody(16, weight: .semibold)).foregroundStyle(Color.appDanger))
+                } else {
+                    CheckBadge()
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(failed ? "Couldn't finish" : item.title)
+                        .font(.appBody(16, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if failed {
+                        Text(item.title)
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    if let detail {
+                        Text(detail)
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .opacity(detailShown ? 1 : 0)
+                            .offset(y: detailShown || reduceMotion ? 0 : 6)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.appCardOutline, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
+        .disabled(item.workflowId == nil)
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            onSeen()
+            if failed { HapticManager.shared.warning() } else { HapticManager.shared.success() }
+            if reduceMotion { detailShown = true; return }
+            withAnimation(.appSpring.delay(0.4)) { detailShown = true }
         }
     }
 }
