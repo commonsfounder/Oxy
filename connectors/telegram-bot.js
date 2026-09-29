@@ -148,7 +148,8 @@ function needsConfirmationButtons(actionResults = []) {
 // tool with no prose. iOS renders the per-action cardText instead; with no card UI here,
 // Telegram has to read those same per-action fields rather than the aggregate text.
 function describePendingAction(pendingEntry) {
-  const prompt = pendingEntry?.result?.text || 'Ready for review.';
+  const prompt = (pendingEntry?.result?.text || 'Ready for review.')
+    .replace('tap Confirm or Cancel.', 'tap a button below.');
   const detail = pendingEntry?.result?.cardText;
   return detail ? `${detail}\n\n${prompt}` : prompt;
 }

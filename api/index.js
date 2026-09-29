@@ -666,8 +666,8 @@ async function sendChatResultToTelegram(chatId, result) {
     await telegramBot.sendMessage(chatId, replyText, {
       replyMarkup: {
         inline_keyboard: [[
-          { text: 'Confirm ✅', callback_data: 'confirm' },
-          { text: 'Cancel ✖️', callback_data: 'cancel' }
+          { text: 'Yes, do it ✅', callback_data: 'confirm' },
+          { text: 'Not yet', callback_data: 'cancel' }
         ]]
       }
     });
@@ -686,7 +686,7 @@ async function handleTelegramBotMessage(message, req) {
   if (startCommand) {
     const userId = startCommand.token ? await telegramBot.redeemLinkToken(startCommand.token) : null;
     if (!userId) {
-      await telegramBot.sendMessage(chatId, 'That connection link has expired. Open the Oxy app and tap Connect Telegram again.');
+      await telegramBot.sendMessage(chatId, 'That connection link has expired. Open the Adam app and tap Connect Telegram again.');
       return;
     }
     try {
@@ -695,7 +695,7 @@ async function handleTelegramBotMessage(message, req) {
       });
       await telegramBot.sendMessage(chatId, "You're connected — message me anytime. Same conversation as the app.");
     } catch (err) {
-      await telegramBot.sendMessage(chatId, "Couldn't complete that connection — this Telegram account may already be linked to a different Oxy account.");
+      await telegramBot.sendMessage(chatId, "Couldn't complete that connection — this Telegram account may already be linked to a different Adam account.");
       log('warn', 'telegram_bot.link.failed', { error: err.message });
     }
     return;

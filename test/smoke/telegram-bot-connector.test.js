@@ -52,7 +52,7 @@ test('no actions at all needs no buttons', () => {
 // has no separate card UI, so it must read those same clean fields directly. ──────────────────
 test('a pending action with card detail shows both the detail and the prompt', () => {
   const entry = { action: 'send_telegram', result: { pending: true, text: 'Check the details, then tap Confirm or Cancel.', cardText: 'Arina · Hey' } };
-  assert.equal(describePendingAction(entry), 'Arina · Hey\n\nCheck the details, then tap Confirm or Cancel.');
+  assert.equal(describePendingAction(entry), 'Arina · Hey\n\nCheck the details, then tap a button below.');
 });
 
 test('a pending action with no card detail falls back to the prompt alone', () => {
