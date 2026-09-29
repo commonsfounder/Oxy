@@ -10,7 +10,7 @@ private func appDynamicColor(dark: Color, light: Color) -> Color {
 extension Color {
     static let appBackground = appDynamicColor(
         dark: Color(red: 0.035, green: 0.035, blue: 0.035),   // #090909
-        light: Color(red: 0.969, green: 0.969, blue: 0.961)   // #F7F7F5
+        light: Color(red: 0.965, green: 0.976, blue: 0.992)   // #F6F9FD
     )
 
     static let appSurface = appDynamicColor(
@@ -72,7 +72,27 @@ extension Color {
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
-    static let appUserBubble = appSurface2
+    static let appUserBubble = appDynamicColor(
+        dark: Color(red: 0.137, green: 0.149, blue: 0.172),   // #23262C
+        light: Color(red: 0.914, green: 0.925, blue: 0.945)   // #E9ECF1
+    )
+
+    // MARK: - Roles (thread and cards)
+    /// The strongest surface against the current background: the button to press.
+    static let appAction = appInk
+    /// Text on `appAction`.
+    static let appOnAction = appBackground
+    /// Adam is doing something (progress, live watches).
+    static let appWorking = appAccent
+    /// Something is waiting on the user.
+    static let appNeedsYou = appWarning
+    /// Finished.
+    static let appDone = appSuccess
+    /// Thin outline for thread cards.
+    static let appCardOutline = appDynamicColor(
+        dark: Color.white.opacity(0.14),
+        light: Color(red: 0.063, green: 0.090, blue: 0.129).opacity(0.13)
+    )
 }
 
 // MARK: - Spacing

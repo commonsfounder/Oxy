@@ -212,10 +212,7 @@ struct ChatView: View {
                                     HapticManager.shared.impact(.light)
                                     if let onMenu { onMenu() } else { dismiss() }
                                 },
-                                onNewChat: {
-                                    HapticManager.shared.impact(.light)
-                                    viewModel.startNewChat(userId: appState.userId)
-                                }
+                                onNewChat: nil
                             )
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
@@ -1045,50 +1042,28 @@ private struct WelcomeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                BrandWordmark(height: 15, color: Color.appMuted)
-                    .padding(.bottom, 26)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.appSpring.delay(0.06), value: appeared)
+            Text(greeting)
+                .font(.system(size: 32, weight: .semibold))
+                .tracking(-0.6)
+                .foregroundStyle(Color.appInk)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 24)
+                .padding(.top, 58)
+                .appEntrance(appeared, riseOffset: 18, delay: 0.1)
 
-                Text(greeting)
-                    .font(.appEditorial(31))
-                    .appHeroTracking(31)
-                    .foregroundStyle(Color.appInk)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .appEntrance(appeared, riseOffset: 18, delay: 0.1)
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 58)
+            Color.clear.frame(height: 56)
 
-            Color.clear.frame(height: 72)
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Suggestions")
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(Color.appInk.opacity(0.72))
-                    .padding(.horizontal, 24)
-
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
                     Button { onAction(label) } label: {
-                        HStack(spacing: 14) {
-                            AppIcon(sf: icon(for: label), size: 15)
-                                .foregroundStyle(Color.appMuted)
-                                .frame(width: 18, alignment: .center)
-                            Text(label)
-                                .font(.appBody(15.5, weight: .medium))
-                                .foregroundStyle(Color.appInk)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            AppIcon(sf: "arrow.up.right", size: 11)
-                                .foregroundStyle(Color.appMuted.opacity(0.5))
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 15)
-                        .contentShape(Rectangle())
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-                        }
+                        Text(label)
+                            .font(.appBody(16, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 12)
+                            .overlay(Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1))
+                            .contentShape(Capsule())
                     }
                     .buttonStyle(.appScale(0.97))
                     .appEntrance(appeared, riseOffset: 10, delay: 0.22 + Double(index) * 0.07)
@@ -1101,6 +1076,7 @@ private struct WelcomeCard: View {
                     }
                 }
             }
+            .padding(.horizontal, 24)
             .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1254,7 +1230,7 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(incognito ? "Private — not saved" : "Message", text: $text, axis: .vertical)
+        TextField(incognito ? "Private — not saved" : "Ask Adam", text: $text, axis: .vertical)
             .font(.system(size: 14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
