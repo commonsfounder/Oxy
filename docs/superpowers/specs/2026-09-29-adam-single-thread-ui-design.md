@@ -6,6 +6,20 @@ Date: 2026-09-29. Status: draft for review. Supersedes the four-tab iOS layout (
 
 The current app looks the same everywhere (near-black, boxes, blue), Activity is a wall of "Done" rows titled with raw messages, Home is mostly empty, and nothing tells you what matters most. The goal: polished, intuitive, calm, and a continuous loop of delight (ask → Adam works → approve or see result → next step).
 
+## Who it is for
+
+One person: someone who keeps a household running (bookings, deliveries, messages, reminders, often for other people) and who finds technology stressful. They want it done, and want to know it was done. They are not developers, small-business owners, or people who want a "chief of staff".
+
+Consequences for every screen:
+- No jargon anywhere. Test for each label: would someone who has never heard of AI agents understand it instantly?
+- Never-allowed words on screen: task, workflow, routine, agent, connector, capability, run, execute, integration, runtime, prompt. Use ordinary ones: "waiting", "needs a yes", "stopped for now", "your apps".
+- Titles are short summaries of what happened ("Messaged Arina"), never the user's raw message.
+- Approvals read "Yes, do it" / "Not yet". Anything that spends money or messages a person always asks first, and that is presented as reassurance, not friction.
+- Errors and dead ends are said in human words with a next step ("Couldn't reach the salon. Try another?"). Nothing ever just says "failed".
+- Text is comfortably large by default, tap targets are generous, voice is as easy as typing.
+- Every action says clearly what happened afterwards, and where possible offers undo.
+- Copy stays terse and factual (DESIGN.md): plain does not mean chatty or cute.
+
 ## Shape of the app
 
 - One screen: a single conversation thread. No tab bar, no thread list, no sidebar.
