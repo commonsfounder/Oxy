@@ -33,6 +33,7 @@ test/dev/remaining8-run-*/
 
 # Scratchpad — local prod drivers / throwaway harnesses (may read prod secrets)
 scratchpad/
+data/*.sqlite*
 
 # Brainstorming visual companion mockups
 .superpowers/

@@ -66,6 +66,8 @@ The primary client is a native SwiftUI app at `OxyApp/OxyApp.xcodeproj` (scheme 
 
 An Express 5 server (`server.js` → `api/index.js`) deployed as a standard Node.js process on Fly.io.
 
+The separate local [physical context runtime](api/physical/README.md) is under development for device observations, evidence-linked room state, persistent watches, and the ESP32-S3-BOX-3 protocol. It uses Node 26 and SQLite locally; it is not part of the Fly API or iOS app yet.
+
 **Core flow for a chat message (`POST /chat`):**
 1. User sends text or audio (`POST /process-audio` transcribes via Gemini first).
 2. Conversation history, memories, preferences, connected-app context, task/entity recall, and routine state are loaded from Supabase.

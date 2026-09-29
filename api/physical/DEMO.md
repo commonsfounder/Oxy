@@ -1,0 +1,5 @@
+# Scripted development scenario
+
+Run `node api/physical/demo.js`. It creates a temporary SQLite database and a Hall, registers a simulator device, uses a clearly scripted development agent to create a 17:30 deadline watch from the example user message, emits motion at 17:25, advances time to 17:30, and prints the observation, occupancy inference, trigger, and action. The action has `status=simulated`; it does not speak or notify a real person. On macOS, `node api/physical/demo.js --speak-preview` explicitly speaks the simulated text as a development preview; the stored action remains simulated. The printed database path can be opened for inspection until the operating system clears temporary files.
+
+For an actual model turn, start the server with a configured Oxy brain provider and `POST /v1/chat` with `{"message":"Tell me if someone enters this room","roomId":"..."}`. The agent can answer, remain silent, create a watch, or query room state. Model output is validated before the runtime changes a watch; unsupported action kinds are rejected. This model path has not been verified without provider credentials.
