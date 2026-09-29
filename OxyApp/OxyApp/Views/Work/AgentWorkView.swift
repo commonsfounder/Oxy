@@ -4,7 +4,7 @@ import SwiftUI
 struct AgentWorkView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Watching"; var id: String { rawValue } }
+    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Coming up"; var id: String { rawValue } }
 
     @State private var tasks: [AgentTask] = []
     @State private var watches: [AgentWatch] = []
@@ -179,7 +179,7 @@ struct AgentWorkView: View {
     private var backgroundWatchesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Watching")
+                Text("Coming up")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer(minLength: 0)
@@ -304,7 +304,7 @@ private struct AgentWatchRow: View {
             .background(Color.appInk.opacity(0.06), in: Circle())
             .buttonStyle(.appScale)
             .disabled(isCancelling)
-            .accessibilityLabel("Stop watching \(watch.title)")
+            .accessibilityLabel("Cancel \(watch.title)")
         }
         .padding(16)
         .background { MissionGlassPlate() }

@@ -324,7 +324,7 @@ private struct PhysicalHomeView: View {
 
 private struct AdamActivityView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Watching"; var id: String { rawValue } }
+    private enum Filter: String, CaseIterable, Identifiable { case all = "All", done = "Done", watching = "Coming up"; var id: String { rawValue } }
 
     @State private var filter: Filter = .all
     @State private var board: HomeBoard = .empty
@@ -401,14 +401,14 @@ private struct AdamActivityView: View {
 
     private var activityHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Activity")
+            Text("Everything Adam did")
                 .font(.title.weight(.semibold))
                 .appHeroTracking(28)
                 .foregroundStyle(Color.appInk)
             filterBar
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Activity filter")
+        .accessibilityLabel("Filter")
     }
 
     private var visibleItems: [BoardItem] {
@@ -422,7 +422,7 @@ private struct AdamActivityView: View {
 
     private var watchingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Watching")
+            Text("Coming up")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.appInk)
             VStack(spacing: 0) {
@@ -451,7 +451,7 @@ private struct AdamActivityView: View {
 
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(filter == .done ? "Completed" : "Recent")
+            Text(filter == .done ? "Done" : "Recently")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.appInk)
             VStack(spacing: 0) {
@@ -561,22 +561,22 @@ private struct AdamYouView: View {
 
                         identityHeader
 
-                        youSection("Adam knows") {
-                            youRow(title: "What Adam knows", subtitle: "Review and edit memory", icon: "person") { destination = .memory }
+                        youSection("Memory") {
+                            youRow(title: "What Adam remembers", subtitle: "See it and change it", icon: "person") { destination = .memory }
                         }
 
-                        youSection("Connections") {
-                            youRow(title: "Connected services", subtitle: "Mail, calendar, messages and more", icon: "cube") { destination = .connections }
-                        }
-
-                        youSection("Agents") {
-                            youRow(title: "Adam", subtitle: "Default", icon: "waveform") { destination = .agents }
+                        youSection("Apps") {
+                            youRow(title: "Connected apps", subtitle: "Mail, calendar, messages and more", icon: "cube") { destination = .connections }
                         }
 
                         youSection("Privacy") {
-                            youRow(title: "Privacy and trust", subtitle: "Permissions, reviews and activity", icon: "shield-check") { destination = .privacy }
+                            youRow(title: "Privacy and safety", subtitle: "What Adam can do and what it asks first", icon: "shield-check") { destination = .privacy }
                             AppDivider(inset: 50)
-                            youRow(title: "Settings", subtitle: "Preferences and account", icon: "list") { destination = .settings }
+                            youRow(title: "Settings", subtitle: "Your details and preferences", icon: "list") { destination = .settings }
+                        }
+
+                        youSection("Advanced") {
+                            youRow(title: "Which AI Adam uses", subtitle: "For people who like to choose", icon: "waveform") { destination = .agents }
                         }
                     }
                     .padding(.horizontal, AppSpacing.margin)
@@ -602,9 +602,6 @@ private struct AdamYouView: View {
                 Text(displayName)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Color.appInk)
-                Text("Adam knows you across your devices.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.appMuted)
             }
             Spacer()
             Button { destination = .profile } label: {
@@ -805,11 +802,11 @@ struct MoreView: View {
     private var menuSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             moreGroup(title: "Adam") {
-                moreRow(title: "Activity", subtitle: "Conversations and completed work", icon: "history") {
+                moreRow(title: "Everything Adam did", subtitle: "Conversations and finished work", icon: "history") {
                     destination = .history
                 }
                 rowDivider
-                moreRow(title: "Services", subtitle: "Accounts Adam can work with", icon: "cube") {
+                moreRow(title: "Your apps", subtitle: "Accounts Adam can use", icon: "cube") {
                     destination = .connectors
                 }
             }

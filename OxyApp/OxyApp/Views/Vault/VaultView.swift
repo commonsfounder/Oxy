@@ -545,7 +545,7 @@ struct VaultGrantSummary: Codable, Equatable, Identifiable {
         if isRevoked { return "Revoked" }
         if isExpired { return "Expired" }
 
-        var parts: [String] = [scope == "task" ? "This task only" : "Until \(Self.expiryText(expiresAt))"]
+        var parts: [String] = [scope == "task" ? "Just this once" : "Until \(Self.expiryText(expiresAt))"]
         if let maxUses {
             parts.append("\(useCount ?? 0) of \(maxUses) used")
         } else if let useCount, useCount > 0 {

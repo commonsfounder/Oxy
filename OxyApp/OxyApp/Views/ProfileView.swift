@@ -153,7 +153,7 @@ struct ProfileView: View {
                 Button("Delete", role: .destructive) { deleteAccount() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This permanently deletes your account data, including conversations, memories, connectors, preferences, and action history.")
+                Text("This permanently deletes your account data, including chats, memories, connected apps, preferences and history.")
             }
             .sheet(item: $sharePayload) { payload in
                 ShareSheet(activityItems: [payload.url])

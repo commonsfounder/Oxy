@@ -26,7 +26,7 @@ struct ConnectorsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Services", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Your apps", onBack: { dismiss() })
 
                     if isLoading {
                         VStack(spacing: 12) {
@@ -104,7 +104,7 @@ struct ConnectorsView: View {
                 .frame(width: 58, height: 58)
                 .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
             VStack(alignment: .leading, spacing: 5) {
-                Text("Adam works with the services you choose.")
+                Text("Apps Adam can use")
                     .font(.appBody(17, weight: .bold))
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)

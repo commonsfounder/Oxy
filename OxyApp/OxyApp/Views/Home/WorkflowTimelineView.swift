@@ -164,7 +164,7 @@ struct WorkflowTimelineView: View {
             } else {
                 HStack(spacing: 8) {
                     Button { resolve(checkpoint, approved: true, choice: nil) } label: {
-                        Text("Approve")
+                        Text("Yes, do it")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(GlebChrome.ink)
                             .frame(maxWidth: .infinity)
@@ -194,7 +194,7 @@ struct WorkflowTimelineView: View {
 
     private func documentsSection(_ documents: [WorkflowDocument]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("FILES")
+            Text("Files")
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(1.3)
                 .foregroundStyle(GlebChrome.ink.opacity(0.42))
@@ -226,7 +226,7 @@ struct WorkflowTimelineView: View {
 
     private func timelineSection(_ events: [WorkflowEvent]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("TIMELINE")
+            Text("What happened")
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(1.3)
                 .foregroundStyle(GlebChrome.ink.opacity(0.42))

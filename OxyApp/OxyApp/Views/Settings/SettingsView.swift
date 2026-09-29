@@ -71,8 +71,8 @@ struct SettingsView: View {
                             }
                         }
 
-                        settingsSection(title: "Privacy and trust") {
-                            settingRow(label: "Review routine actions too", description: "Protected actions always require approval") {
+                        settingsSection(title: "Privacy and safety") {
+                            settingRow(label: "Ask before small things too", description: "Payments and messages always ask first") {
                                 SettingsToggle(isOn: $settings.guardMode)
                                     .onChange(of: settings.guardMode) { _, _ in saveSettings() }
                             }

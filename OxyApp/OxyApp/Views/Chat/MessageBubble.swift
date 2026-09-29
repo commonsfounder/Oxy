@@ -123,7 +123,7 @@ struct MessageBubble: View {
                                 .background(bubbleShape.fill(Color.appUserBubble))
                         }
                         if message.queuedForActiveTask {
-                            Text("Queued for this task")
+                            Text("Waiting its turn")
                                 .font(.appBody(11.5, weight: .medium))
                                 .foregroundStyle(Color.appMuted)
                                 .padding(.trailing, 2)
