@@ -6,6 +6,8 @@ import SwiftUI
 final class ThreadBoardModel {
     private(set) var board: HomeBoard = .empty
     private(set) var resolvedIDs = Set<String>()
+    /// Cards answered a moment ago, kept on screen briefly so the answer registers. Value is whether it was approved.
+    private(set) var acknowledged: [String: Bool] = [:]
     var errorMessage: String?
 
     var needsYou: [BoardItem] { board.needsYou.filter { !resolvedIDs.contains($0.id) } }
@@ -36,19 +38,29 @@ final class ThreadBoardModel {
     #endif
 
     func decide(_ item: BoardItem, approved: Bool, choice: String? = nil) async {
-        guard let workflowId = item.workflowId, let checkpointId = item.checkpointId else { return }
-        resolvedIDs.insert(item.id)
+        guard let workflowId = item.workflowId, let checkpointId = item.checkpointId,
+              acknowledged[item.id] == nil else { return }
+        acknowledged[item.id] = approved
+        if approved { HapticManager.shared.success() } else { HapticManager.shared.impact(.light) }
         do {
-            try await HomeBoardService.resolveCheckpoint(
+            #if DEBUG
+            let isSample = ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1"
+            #else
+            let isSample = false
+            #endif
+            if !isSample { try await HomeBoardService.resolveCheckpoint(
                 workflowId: workflowId,
                 checkpointId: checkpointId,
                 approved: approved,
                 choice: choice
-            )
-            HapticManager.shared.impact(.medium)
+            ) }
+            try? await Task.sleep(for: .milliseconds(isSample ? 8000 : 1500))
+            resolvedIDs.insert(item.id)
+            acknowledged[item.id] = nil
             await refresh()
         } catch {
-            resolvedIDs.remove(item.id)
+            acknowledged[item.id] = nil
+            HapticManager.shared.error()
             errorMessage = "That didn't go through. Try again."
         }
     }
@@ -77,6 +89,7 @@ struct ThreadBoardCards: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.appSpring, value: model.needsYou.map(\.id))
+        .animation(.appSpring, value: model.acknowledged)
         .sheet(item: $openWorkflow) { open in
             WorkflowTimelineView(workflowId: open.id, onChanged: { Task { await model.refresh() } })
         }
@@ -91,7 +104,39 @@ struct ThreadBoardCards: View {
         return item.title
     }
 
+    @ViewBuilder
     private func needsYouCard(_ item: BoardItem) -> some View {
+        if let approved = model.acknowledged[item.id] {
+            acknowledgedCard(item, approved: approved)
+        } else {
+            openCard(item)
+        }
+    }
+
+    private func acknowledgedCard(_ item: BoardItem, approved: Bool) -> some View {
+        HStack(spacing: 12) {
+            if approved {
+                CheckBadge()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(approved ? "Approved" : "Not now")
+                    .font(.appBody(16, weight: .medium))
+                    .foregroundStyle(Color.appInk)
+                Text(title(for: item))
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.appMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .strokeBorder(Color.appCardOutline, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func openCard(_ item: BoardItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Needs a yes")
                 .font(.appBody(12, weight: .semibold))
@@ -166,6 +211,39 @@ struct ThreadBoardCards: View {
         .onTapGesture {
             if let workflowId = item.workflowId { openWorkflow = OpenWorkflow(id: workflowId) }
         }
+    }
+}
+
+/// A green circle whose tick draws itself.
+private struct CheckBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drawn = false
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.appDone)
+            CheckShape()
+                .trim(from: 0, to: drawn ? 1 : 0)
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                .padding(9)
+        }
+        .frame(width: 32, height: 32)
+        .scaleEffect(drawn || reduceMotion ? 1 : 0.6)
+        .onAppear {
+            if reduceMotion { drawn = true; return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.7)) { drawn = true }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct CheckShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY + rect.height * 0.05))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY - rect.height * 0.12))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.12))
+        return path
     }
 }
 
