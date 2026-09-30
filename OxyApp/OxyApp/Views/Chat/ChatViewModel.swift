@@ -108,8 +108,20 @@ final class ChatViewModel {
         Self.runSessionRuleCheck()
         Self.runChatUXRuleCheck()
         #endif
-        activeChatStartedAt = chatStartedAt(for: userId)
         await loadHistory(userId: userId)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OXY_DEBUG_MESSAGES"] == "1" {
+            let now = Date()
+            messages = [
+                Message(dbId: "d1", role: .user, content: "Can you book me a haircut on Saturday?", timestamp: now.addingTimeInterval(-90_000), actions: [], sources: []),
+                Message(dbId: "d2", role: .assistant, content: "Booked for Saturday at 10:30 at Nash & Co.", timestamp: now.addingTimeInterval(-89_900), actions: [], sources: []),
+                Message(dbId: "d3", role: .user, content: "Take the basket to checkout. Limit £60.", timestamp: now.addingTimeInterval(-600), actions: [], sources: []),
+                Message(dbId: "d4", role: .assistant, content: "Basket is ready. I need your yes before I pay.", timestamp: now.addingTimeInterval(-590), actions: [], sources: []),
+                Message(dbId: "d5", role: .user, content: "↩︎ Adam: Basket is ready. I need your yes before I pay.\n\nMake it the cheaper delivery", timestamp: now.addingTimeInterval(-300), actions: [], sources: [])
+            ]
+            hasOlderHistory = false
+        }
+        #endif
     }
 
     func loadHistory(userId: String) async {
@@ -172,7 +184,6 @@ final class ChatViewModel {
     }
 
     func returnToCurrentChat(userId: String) async {
-        activeChatStartedAt = chatStartedAt(for: userId)
         await loadHistory(userId: userId)
     }
 
@@ -208,9 +219,6 @@ final class ChatViewModel {
         }
         if isViewingHistorySnapshot {
             startNewChat(userId: userId)
-        }
-        if activeChatStartedAt == nil {
-            activeChatStartedAt = chatStartedAt(for: userId)
         }
         markChatActivity(for: userId)
         let pendingDecision = localActionDecision(for: text)
@@ -486,10 +494,6 @@ final class ChatViewModel {
         guard !rawText.isEmpty, !isSending else { return }
         print("[ChatVM] Silent exec (raw): \(rawText)")
 
-        if activeChatStartedAt == nil {
-            activeChatStartedAt = chatStartedAt(for: userId)
-        }
-
         isSending = true
         let settings = currentSettings
 
@@ -669,9 +673,6 @@ final class ChatViewModel {
         guard !isSending else { return }
         if isViewingHistorySnapshot {
             startNewChat(userId: userId)
-        }
-        if activeChatStartedAt == nil {
-            activeChatStartedAt = chatStartedAt(for: userId)
         }
 
         inputText = ""

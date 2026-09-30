@@ -18,6 +18,9 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
     @State private var wheelOpen = false
+    @State private var replyingTo: Message?
+    @State private var displayText: String?
+    @State private var heldMessage: (message: Message, frame: CGRect)?
     @State private var hubCenter: CGPoint = .zero
     @Environment(\.scenePhase) private var scenePhase
     @State private var voiceInput = VoiceInputManager()
@@ -44,6 +47,102 @@ struct ChatView: View {
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
+
+    @ViewBuilder
+    private func messageRow(idx: Int, message: Message) -> some View {
+        let msgs = viewModel.messages
+        let prevRole = idx > 0 ? msgs[idx - 1].role : nil
+        let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
+        let isGroupStart = prevRole != message.role
+        let isGroupEnd = nextRole != message.role
+        let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
+        let previousMessage = idx > 0 ? msgs[idx - 1] : nil
+        if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) {
+            Text(Self.dayLabel(for: message.timestamp))
+                .font(.appBody(12))
+                .foregroundStyle(Color.appMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.top, idx == 0 ? 4 : 16)
+                .padding(.bottom, 8)
+        }
+        ThreadMessageRow(
+            message: message,
+            reaction: ReactionStore.shared.reaction(for: message),
+            onReply: { startReply(to: message) },
+            onHold: { frame in heldMessage = (message, frame) }
+        ) {
+            MessageBubble(
+                message: message,
+                showsTypingIndicator: false,
+                isGroupStart: isGroupStart,
+                isGroupEnd: isGroupEnd,
+                showsTimestamp: shouldShowTimestamp(
+                    for: message,
+                    previous: previousMessage,
+                    next: nextMessage,
+                    isGroupEnd: isGroupEnd
+                ),
+                onActionCommand: { command in
+                    viewModel.sendCommand(command, userId: appState.userId)
+                },
+                onOpenAction: { action in
+                    handleActionOpen(action)
+                },
+                onRetryFailedTurn: {
+                    viewModel.retryLastFailedMessage(userId: appState.userId)
+                }
+            )
+        }
+        .id(message.id)
+        .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+        if message.id == viewModel.activeTurnUserMessageID,
+           !viewModel.activitySteps.isEmpty {
+            ActivityCard(steps: viewModel.activitySteps)
+                .id("activity-\(message.id)")
+                .padding(.horizontal, AppSpacing.chatMargin)
+                .padding(.top, 6)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
+    @ViewBuilder
+    private var reactionOverlay: some View {
+        if let held = heldMessage {
+            ReactionPicker(
+                message: held.message,
+                anchor: held.frame,
+                current: ReactionStore.shared.reaction(for: held.message),
+                onReact: { emoji in
+                    ReactionStore.shared.toggle(emoji, on: held.message)
+                    HapticManager.shared.select()
+                    heldMessage = nil
+                },
+                onReply: { startReply(to: held.message) },
+                onCopy: { copyMessage(held.message) },
+                onShowOnDisplay: {
+                    displayText = held.message.content
+                    heldMessage = nil
+                },
+                onClose: { heldMessage = nil }
+            )
+            .transition(.opacity)
+        }
+    }
+
+    private var wheelOverlay: some View {
+        GeometryReader { proxy in
+            let origin = proxy.frame(in: .global).origin
+            ThreadWheelMenu(
+                hub: CGPoint(x: hubCenter.x - origin.x, y: hubCenter.y - origin.y),
+                isOpen: $wheelOpen,
+                incognito: isIncognito,
+                onChoose: handleMenuChoice
+            )
+        }
+        .ignoresSafeArea()
+    }
 
     private func loadOlderMessages(_ proxy: ScrollViewProxy) {
         Task {
@@ -158,54 +257,7 @@ struct ChatView: View {
                                         .onAppear { loadOlderMessages(proxy) }
                                 }
                                 ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
-                                    let msgs = viewModel.messages
-                                    let prevRole = idx > 0 ? msgs[idx - 1].role : nil
-                                    let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
-                                    let isGroupStart = prevRole != message.role
-                                    let isGroupEnd = nextRole != message.role
-                                    let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
-                                    let previousMessage = idx > 0 ? msgs[idx - 1] : nil
-                                    if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) {
-                                        Text(Self.dayLabel(for: message.timestamp))
-                                            .font(.appBody(12))
-                                            .foregroundStyle(Color.appMuted)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.top, idx == 0 ? 4 : 16)
-                                            .padding(.bottom, 8)
-                                    }
-                                    MessageBubble(
-                                        message: message,
-                                        showsTypingIndicator: false,
-                                        isGroupStart: isGroupStart,
-                                        isGroupEnd: isGroupEnd,
-                                        showsTimestamp: shouldShowTimestamp(
-                                            for: message,
-                                            previous: previousMessage,
-                                            next: nextMessage,
-                                            isGroupEnd: isGroupEnd
-                                        ),
-                                        onActionCommand: { command in
-                                            viewModel.sendCommand(command, userId: appState.userId)
-                                        },
-                                        onOpenAction: { action in
-                                            handleActionOpen(action)
-                                        },
-                                        onRetryFailedTurn: {
-                                            viewModel.retryLastFailedMessage(userId: appState.userId)
-                                        }
-                                    )
-                                    .id(message.id)
-                                    .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
-                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                                    if message.id == viewModel.activeTurnUserMessageID,
-                                       !viewModel.activitySteps.isEmpty {
-                                        ActivityCard(steps: viewModel.activitySteps)
-                                            .id("activity-\(message.id)")
-                                            .padding(.horizontal, AppSpacing.chatMargin)
-                                            .padding(.top, 6)
-                                            .transition(.opacity.combined(with: .move(edge: .top)))
-                                    }
+                                    messageRow(idx: idx, message: message)
                                 }
 
                                 ThreadBoardCards(model: boardModel)
@@ -254,6 +306,7 @@ struct ChatView: View {
                         }
                         .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
+                            ReactionStore.shared.migrate(with: viewModel.messages)
                             guard viewModel.scrollTargetMessageID == nil else { return }
                             guard isScrollPinnedToBottom else { return }
                             withAnimation(.appSpring) {
@@ -282,6 +335,10 @@ struct ChatView: View {
                             presentPendingReviewIfNeeded()
                             presentMessageComposerIfNeeded()
                         }
+                    }
+
+                    if let replyingTo {
+                        ReplyPreviewBar(message: replyingTo) { withAnimation(.appSpring) { self.replyingTo = nil } }
                     }
 
                     // Input bar
@@ -328,18 +385,7 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
-            .overlay {
-                GeometryReader { proxy in
-                    let origin = proxy.frame(in: .global).origin
-                    ThreadWheelMenu(
-                        hub: CGPoint(x: hubCenter.x - origin.x, y: hubCenter.y - origin.y),
-                        isOpen: $wheelOpen,
-                        incognito: isIncognito,
-                        onChoose: handleMenuChoice
-                    )
-                }
-                .ignoresSafeArea()
-            }
+            .modifier(ThreadLayers(reaction: reactionOverlay, wheel: wheelOverlay, heldID: heldMessage?.message.id, displayText: $displayText))
             .task {
                 while !Task.isCancelled {
                     await boardModel.refresh()
@@ -595,8 +641,24 @@ struct ChatView: View {
             pendingIsImage = true
             selectedPhotoItem = nil
         } else {
+            if let replyingTo, !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                viewModel.inputText = ReplyQuote.compose(quoting: replyingTo, body: viewModel.inputText)
+            }
+            withAnimation(.appSpring) { replyingTo = nil }
             viewModel.sendMessage(userId: appState.userId)
         }
+    }
+
+    private func startReply(to message: Message) {
+        heldMessage = nil
+        withAnimation(.appSpring) { replyingTo = message }
+        isInputFocused = true
+    }
+
+    private func copyMessage(_ message: Message) {
+        UIPasteboard.general.string = ReplyQuote.split(message.content)?.body ?? message.content
+        HapticManager.shared.success()
+        heldMessage = nil
     }
 
     /// The pendant only controls the same local interaction paths a person can
@@ -1489,4 +1551,26 @@ struct PendantWaveform: View {
     ChatView()
         .environment(AppState())
         .environment(TabBarVisibility())
+}
+
+
+/// The reaction picker and the menu wheel sit above the thread; grouped so the screen's body stays simple.
+private struct ThreadLayers<Reaction: View, Wheel: View>: ViewModifier {
+    let reaction: Reaction
+    let wheel: Wheel
+    let heldID: UUID?
+    @Binding var displayText: String?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay { reaction }
+            .animation(.appStandard, value: heldID)
+            .overlay { wheel }
+            .sheet(isPresented: Binding(
+                get: { displayText != nil },
+                set: { if !$0 { displayText = nil } }
+            )) {
+                DisplayRenderSheet(content: displayText ?? "")
+            }
+    }
 }

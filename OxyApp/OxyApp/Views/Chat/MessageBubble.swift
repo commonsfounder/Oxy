@@ -16,7 +16,6 @@ struct MessageBubble: View {
 
     @State private var showReauthSheet = false
     @State private var showMissingInformationSheet = false
-    @State private var showDisplaySheet = false
 
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
@@ -111,13 +110,21 @@ struct MessageBubble: View {
             if !message.content.isEmpty && uberAction == nil {
                 if isUser {
                     VStack(alignment: .trailing, spacing: 4) {
+                        if let quote = ReplyQuote.split(message.content) {
+                            (Text("\(quote.who == "You" ? "Replying to yourself" : "Replying to \(quote.who)") · ").fontWeight(.medium) + Text(quote.snippet))
+                                .font(.appBody(12))
+                                .foregroundStyle(Color.appMuted)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                                .padding(.leading, 48)
+                                .padding(.trailing, 2)
+                        }
                         HStack(alignment: .bottom, spacing: 0) {
                             Spacer(minLength: 48)
-                            Text(AttributedString(message.content))
+                            Text(AttributedString(ReplyQuote.split(message.content)?.body ?? message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
                                 .foregroundStyle(Color.appOnAction)
                                 .lineSpacing(isCompact ? 4 : 5)
-                                .textSelection(.enabled)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 10)
                                 .background(bubbleShape.fill(Color.appUserBubble))
@@ -139,19 +146,6 @@ struct MessageBubble: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if !message.isStreaming,
-                       message.turnError == nil,
-                       !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Button("Show on display") {
-                            showDisplaySheet = true
-                        }
-                        .font(.appBody(12, weight: .semibold))
-                        .foregroundStyle(Color.appAccent)
-                        .padding(.top, 3)
-                        .sheet(isPresented: $showDisplaySheet) {
-                            DisplayRenderSheet(content: message.content)
-                        }
-                    }
                 }
             }
 
@@ -321,7 +315,7 @@ struct MessageBubble: View {
     }
 }
 
-private struct DisplayRenderSheet: View {
+struct DisplayRenderSheet: View {
     let content: String
 
     @Environment(\.dismiss) private var dismiss
@@ -541,7 +535,6 @@ private struct AssistantAnswerView: View {
                         .foregroundStyle(Color.appInk.opacity(isStreaming ? 0.9 : 0.96))
                         .lineSpacing(compact ? 4 : 5.5)
                         .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
 
                 case .heading(let text):
                     Text(text.strippingMarkdown)
@@ -549,7 +542,6 @@ private struct AssistantAnswerView: View {
                         .foregroundStyle(Color.appInk)
                         .padding(.top, compact ? 5 : 8)
                         .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
 
                 case .bullet(let text):
                     AssistantListRow(marker: "•", text: text, compact: compact)
@@ -591,7 +583,6 @@ private struct AssistantListRow: View {
                 .foregroundStyle(Color.appInk.opacity(0.94))
                 .lineSpacing(compact ? 4 : 5)
                 .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
         }
     }
 }
@@ -726,7 +717,6 @@ private struct AssistantTableView: View {
                                 .font(.appBody(compact ? 13.5 : 14.5))
                                 .foregroundStyle(Color.appInk.opacity(0.95))
                                 .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
                         }
                     }
                 }
@@ -758,7 +748,6 @@ private struct AssistantCodeBlock: View {
             Text(code)
                 .font(.appMono(compact ? 12 : 12.5))
                 .foregroundStyle(Color.appInk)
-                .textSelection(.enabled)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
