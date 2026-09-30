@@ -4,48 +4,26 @@ import UIKit
 struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
-    @State private var isMenuPresented = false
+    @State private var opened: ThreadMenuChoice?
 
     private var background: ThreadBackground { ThreadBackground(rawValue: backgroundRaw) ?? .automatic }
 
     var body: some View {
-        ChatView(onMenu: { isMenuPresented = true })
+        ChatView(onMenuChoice: { opened = $0 })
             .tint(Color.appAccent)
             .preferredColorScheme(background.scheme)
             .id(accentColor + backgroundRaw)
-            .sheet(isPresented: $isMenuPresented) { AdamMenuSheet() }
-            .onAppear { HapticManager.shared.prepare() }
-    }
-}
-
-private struct AdamMenuSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                NavigationLink { AdamActivityView() } label: { menuRow("history", "History") }
-                NavigationLink { PhysicalHomeView() } label: { menuRow("tab-home", "Your home") }
-                NavigationLink { AdamYouView() } label: { menuRow("person", "Settings") }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Adam")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+            .sheet(item: $opened) { choice in
+                Group {
+                    switch choice {
+                    case .history: AdamActivityView()
+                    case .home: PhysicalHomeView()
+                    default: AdamYouView()
+                    }
                 }
+                .presentationDragIndicator(.visible)
             }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func menuRow(_ icon: String, _ title: String) -> some View {
-        HStack(spacing: 14) {
-            AppIcon(icon, size: 20)
-            Text(title).font(.system(size: 17))
-        }
-        .padding(.vertical, 6)
+            .onAppear { HapticManager.shared.prepare() }
     }
 }
 

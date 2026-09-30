@@ -11,11 +11,14 @@ struct ChatView: View {
     var initialReviewAction: ActionResult? = nil
     var startFresh: Bool = false
     var onMenu: (() -> Void)? = nil
+    var onMenuChoice: ((ThreadMenuChoice) -> Void)? = nil
 
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
+    @State private var wheelOpen = false
+    @State private var hubCenter: CGPoint = .zero
     @Environment(\.scenePhase) private var scenePhase
     @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
@@ -41,6 +44,14 @@ struct ChatView: View {
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
+
+    private func handleMenuChoice(_ choice: ThreadMenuChoice) {
+        if choice == .privateChat {
+            withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
+        } else {
+            onMenuChoice?(choice)
+        }
+    }
 
     private var assistantReplySettled: Bool {
         guard let last = viewModel.messages.last else { return false }
@@ -202,13 +213,10 @@ struct ChatView: View {
                         .scrollDismissesKeyboard(.interactively)
                         .safeAreaInset(edge: .top, spacing: 0) {
                             ThreadHeader(
-                                isIncognito: $isIncognito,
-                                isEmptyChat: viewModel.messages.isEmpty,
+                                isIncognito: isIncognito,
                                 isWorking: !boardModel.working.isEmpty,
-                                onMenu: {
-                                    HapticManager.shared.impact(.light)
-                                    if let onMenu { onMenu() } else { dismiss() }
-                                }
+                                wheelOpen: $wheelOpen,
+                                hubCenter: $hubCenter
                             )
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
@@ -290,6 +298,18 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
+            .overlay {
+                GeometryReader { proxy in
+                    let origin = proxy.frame(in: .global).origin
+                    ThreadWheelMenu(
+                        hub: CGPoint(x: hubCenter.x - origin.x, y: hubCenter.y - origin.y),
+                        isOpen: $wheelOpen,
+                        incognito: isIncognito,
+                        onChoose: handleMenuChoice
+                    )
+                }
+                .ignoresSafeArea()
+            }
             .task {
                 while !Task.isCancelled {
                     await boardModel.refresh()

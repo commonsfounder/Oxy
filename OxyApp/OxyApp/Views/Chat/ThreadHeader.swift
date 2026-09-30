@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// The top of the thread: a contact header like Messages, with the menu on the left.
+/// The top of the thread: a contact header like Messages. On the right, one button holds the whole menu.
 struct ThreadHeader: View {
-    @Binding var isIncognito: Bool
-    var isEmptyChat: Bool
+    var isIncognito: Bool
     var isWorking: Bool
-    var onMenu: () -> Void
+    @Binding var wheelOpen: Bool
+    @Binding var hubCenter: CGPoint
 
     var body: some View {
         ZStack {
@@ -17,40 +17,35 @@ struct ThreadHeader: View {
                 Text("Adam")
                     .font(.appBody(12, weight: .medium))
                     .foregroundStyle(Color.appInk)
-                if isWorking {
+                if isIncognito {
+                    Text("Private")
+                        .font(.appBody(11))
+                        .foregroundStyle(Color.appMuted)
+                } else if isWorking {
                     Text("Working")
                         .font(.appBody(11))
                         .foregroundStyle(Color.appWorking)
-                        .transition(.opacity)
                 }
             }
             .animation(.appStandard, value: isWorking)
+            .animation(.appStandard, value: isIncognito)
             .accessibilityElement(children: .combine)
 
             HStack {
-                Button(action: onMenu) {
-                    AppIcon("menu", size: 18)
-                        .foregroundColor(Color.appInk.opacity(0.85))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                Spacer()
+                Button {
+                    HapticManager.shared.impact(.light)
+                    wheelOpen = true
+                } label: {
+                    WheelHub(progress: 0, incognito: isIncognito)
                 }
                 .buttonStyle(.appScale)
+                .opacity(wheelOpen ? 0 : 1)
+                .onGeometryChange(for: CGPoint.self) { proxy in
+                    let frame = proxy.frame(in: .global)
+                    return CGPoint(x: frame.midX, y: frame.midY)
+                } action: { hubCenter = $0 }
                 .accessibilityLabel("Menu")
-                Spacer()
-                if isEmptyChat || isIncognito {
-                    Button {
-                        withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
-                    } label: {
-                        GhostIcon(active: isIncognito)
-                            .frame(width: 18, height: 18)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.appScale)
-                    .accessibilityLabel(isIncognito ? "Private chat on" : "Private chat off")
-                } else {
-                    Color.clear.frame(width: 44, height: 44)
-                }
             }
         }
         .padding(.horizontal, 8)
