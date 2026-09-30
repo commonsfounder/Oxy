@@ -97,7 +97,7 @@ struct ChatView: View {
         .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-        if message.id == viewModel.activeTurnUserMessageID, viewModel.isSending, !replyStarted {
+        if message.id == viewModel.activeTurnUserMessageID, viewModel.isSending || viewModel.isWaitingForSavedReply, !replyStarted {
             WorkingBubble(label: currentStepLabel)
                 .id("working-\(message.id)")
                 .padding(.top, 10)
@@ -164,6 +164,11 @@ struct ChatView: View {
         } else {
             onMenuChoice?(choice)
         }
+    }
+
+    /// What the user has asked here, so work that already answered in the thread isn't repeated as a card.
+    private var askedInThread: [String] {
+        viewModel.messages.suffix(60).filter { $0.role == .user }.map { ThreadBoardModel.normalized($0.content) }
     }
 
     /// The step in progress, only when it is something real to report.
@@ -270,7 +275,7 @@ struct ChatView: View {
                                     messageRow(idx: idx, message: message)
                                 }
 
-                                ThreadBoardCards(model: boardModel)
+                                ThreadBoardCards(model: boardModel, askedInThread: askedInThread)
                                     .padding(.horizontal, AppSpacing.chatMargin)
                                     .padding(.top, boardModel.isEmpty ? 0 : 14)
 

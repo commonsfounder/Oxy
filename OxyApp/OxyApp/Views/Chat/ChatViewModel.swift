@@ -50,6 +50,8 @@ final class ChatViewModel {
     var networkError: String?
     /// The thread shows everything ever said; older messages load as the user scrolls up.
     var isLoadingOlder = false
+    /// The connection went quiet but Adam is still working; the saved reply is being fetched.
+    var isWaitingForSavedReply = false
     var hasOlderHistory = true
     /// When true, this turn is not persisted server-side (shadow / incognito chat).
     var incognito = false
@@ -59,6 +61,8 @@ final class ChatViewModel {
 
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var stoppedByUser = false
+    @ObservationIgnored private var lastUserId: String?
+    @ObservationIgnored private var recoveryTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
     @ObservationIgnored private var pendingLocalAction: ActionResult?
@@ -222,6 +226,8 @@ final class ChatViewModel {
     }
 
     private func sendMessage(userId: String, retryingUserMessageID: UUID?) {
+        lastUserId = userId
+        recoveryTask?.cancel()
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if isSending, retryingUserMessageID == nil {
@@ -1045,24 +1051,54 @@ final class ChatViewModel {
     private func startSendWatchdog(assistantID: UUID) {
         sendWatchdogTask?.cancel()
         sendWatchdogTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(45))
+            try? await Task.sleep(for: .seconds(75))
             guard !Task.isCancelled, isSending else { return }
+            // The server keeps working and saves the reply even if this connection goes quiet,
+            // so hand over to waiting for the saved reply instead of calling it a failure.
             currentSendTask?.cancel()
             currentSendTask = nil
-            _ = updateAssistantMessage(id: assistantID) { message in
-                if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    message.turnError = "That took too long. Try again."
-                } else {
-                    message.turnError = "The response stopped before it finished. Try again."
-                }
-                message.isStreaming = false
-            }
             statusLabel = nil
-            failActiveActivity()
-            networkError = nil
-            lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
             drainQueuedTurns()
+            waitForSavedReply(assistantID: assistantID)
+        }
+    }
+
+    /// Checks history until the reply Adam saved shows up, then puts it in place.
+    private func waitForSavedReply(assistantID: UUID) {
+        guard let userId = lastUserId,
+              let userIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+        let askedAt = messages[userIndex].timestamp.addingTimeInterval(-5)
+        recoveryTask?.cancel()
+        isWaitingForSavedReply = true
+        recoveryTask = Task { @MainActor in
+            defer { isWaitingForSavedReply = false }
+            for attempt in 0..<30 {
+                if attempt > 0 { try? await Task.sleep(for: .seconds(10)) }
+                guard !Task.isCancelled else { return }
+                guard let entries = try? await chatService.loadHistory(userId: userId, limit: 10) else { continue }
+                let replies = messages(from: entries).filter { $0.role == .assistant && $0.timestamp >= askedAt }
+                guard let reply = replies.last,
+                      !reply.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                _ = updateAssistantMessage(id: assistantID) { message in
+                    message.content = reply.content
+                    message.actions = reply.actions
+                    message.sources = reply.sources
+                    message.turnError = nil
+                    message.isStreaming = false
+                }
+                finishActivity()
+                HapticManager.shared.impact(.soft)
+                return
+            }
+            _ = updateAssistantMessage(id: assistantID) { message in
+                message.isStreaming = false
+                if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    message.turnError = "Adam didn't get back to you. Try again."
+                }
+            }
+            lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
+            failActiveActivity()
         }
     }
 

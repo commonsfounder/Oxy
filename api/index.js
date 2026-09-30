@@ -7864,6 +7864,12 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.write(`data: ${JSON.stringify(obj)}\n\n`);
       };
       const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
+      // A searched answer can be silent for longer than the phone waits; keep the line alive.
+      const classicHeartbeat = setInterval(() => {
+        if (!res.writableEnded) sendStatus('agent_thinking', 'Working on it');
+      }, 15000);
+      res.once('close', () => clearInterval(classicHeartbeat));
+      res.once('finish', () => clearInterval(classicHeartbeat));
 
       try {
         sendStatus('thinking_start', 'Thinking');

@@ -71,6 +71,21 @@ final class ThreadBoardModel {
         }
     }
 
+    static func normalized(_ text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: "…", with: "")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    /// A finished item whose title is just something the user typed here is the same turn the thread
+    /// already shows; a card for it would be a duplicate with the user's own words as its title.
+    static func isEchoOfThread(_ item: BoardItem, asked: [String]) -> Bool {
+        let title = normalized(item.title)
+        guard title.count >= 4 else { return false }
+        return asked.contains { $0.contains(title) || title.contains($0) && $0.count >= 4 }
+    }
+
     func markFinishedSeen(_ item: BoardItem) {
         seenFinishedIDs.insert(item.id)
         persistSeen()
@@ -140,11 +155,12 @@ final class ThreadBoardModel {
 /// Approval and progress cards that sit at the end of the thread.
 struct ThreadBoardCards: View {
     var model: ThreadBoardModel
+    var askedInThread: [String] = []
     @State private var openWorkflow: OpenWorkflow?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(model.finished.suffix(3)) { item in
+            ForEach(model.finished.filter { !ThreadBoardModel.isEchoOfThread($0, asked: askedInThread) }.suffix(3)) { item in
                 FinishedCard(item: item, onOpen: { id in openWorkflow = OpenWorkflow(id: id) }, onSeen: { model.markFinishedSeen(item) })
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
