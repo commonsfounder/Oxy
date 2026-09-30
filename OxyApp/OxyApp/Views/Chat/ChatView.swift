@@ -346,6 +346,8 @@ struct ChatView: View {
                     ChatInputBar(
                         text: $viewModel.inputText,
                         isSending: isOffline,
+                        isBusy: viewModel.isSending,
+                        onStop: { viewModel.stopCurrentTurn() },
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isTranscribing,
                         voiceTranscript: voiceInput.transcript,
@@ -1141,6 +1143,8 @@ private struct ChatBottomDistanceKey: PreferenceKey {
 private struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
+    var isBusy: Bool = false
+    var onStop: () -> Void = {}
     let isRecording: Bool
     let isPreparingVoice: Bool
     let voiceTranscript: String
@@ -1223,9 +1227,13 @@ private struct ChatInputBar: View {
                 }
                 .frame(minHeight: 38)
 
-                Button(action: canSend ? onSend : onVoice) {
+                Button(action: showsStop ? onStop : (canSend ? onSend : onVoice)) {
                     ZStack {
-                        if isPreparingVoice && !canSend {
+                        if showsStop {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(Color.appOnAction)
+                                .frame(width: 12, height: 12)
+                        } else if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
                                 .tint(Color.appMuted)
@@ -1243,7 +1251,8 @@ private struct ChatInputBar: View {
                         }
                     }
                 }
-                .disabled(!canAct)
+                .disabled(!canAct && !showsStop)
+                .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : "Talk to Adam"))
                 .buttonStyle(ScaleButtonStyle())
                 .animation(.appFast, value: canAct)
                 .animation(.appFast, value: canSend)
@@ -1326,6 +1335,9 @@ private struct ChatInputBar: View {
         )
     }
 
+    /// While Adam is writing a reply and nothing is typed, the button becomes Stop.
+    private var showsStop: Bool { isBusy && !canSend }
+
     private var canSend: Bool {
         Self.canSendDraft(text: text, attachmentLabel: attachmentLabel, isOffline: isSending)
     }
@@ -1335,7 +1347,7 @@ private struct ChatInputBar: View {
     }
 
     private var buttonFill: Color {
-        if canSend { return Color.appAction }
+        if canSend || showsStop { return Color.appAction }
         if isRecording { return Color.appDanger }
         return Color.appSurface
     }

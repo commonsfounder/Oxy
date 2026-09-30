@@ -58,6 +58,7 @@ final class ChatViewModel {
     var onSilentExecComplete: (() -> Void)?
 
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
+    @ObservationIgnored private var stoppedByUser = false
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
     @ObservationIgnored private var pendingLocalAction: ActionResult?
@@ -114,7 +115,7 @@ final class ChatViewModel {
             let now = Date()
             messages = [
                 Message(dbId: "d1", role: .user, content: "Can you book me a haircut on Saturday?", timestamp: now.addingTimeInterval(-90_000), actions: [], sources: []),
-                Message(dbId: "d2", role: .assistant, content: "Booked for Saturday at 10:30 at Nash & Co.", timestamp: now.addingTimeInterval(-89_900), actions: [], sources: []),
+                Message(dbId: "d2", role: .assistant, content: "Booked for Saturday at 10:30 at Nash & Co.", timestamp: now.addingTimeInterval(-89_900), actions: Self.sampleMemoryActions, sources: []),
                 Message(dbId: "d3", role: .user, content: "Take the basket to checkout. Limit £60.", timestamp: now.addingTimeInterval(-600), actions: [], sources: []),
                 Message(dbId: "d4", role: .assistant, content: "Basket is ready. I need your yes before I pay.", timestamp: now.addingTimeInterval(-590), actions: [], sources: []),
                 Message(dbId: "d5", role: .user, content: "↩︎ Adam: Basket is ready. I need your yes before I pay.\n\nMake it the cheaper delivery", timestamp: now.addingTimeInterval(-300), actions: [], sources: [])
@@ -123,6 +124,11 @@ final class ChatViewModel {
         }
         #endif
     }
+
+    private static let sampleMemoryActions: [ActionResult] = {
+        let json = #"[{"action":"remember_person","success":true,"pending":false,"outcome":"completed","text":"Arina prefers oat milk"}]"#
+        return (try? JSONDecoder().decode([ActionResult].self, from: Data(json.utf8))) ?? []
+    }()
 
     func loadHistory(userId: String) async {
         do {
@@ -259,6 +265,7 @@ final class ChatViewModel {
         let needsFreshLocation = shouldFetchLocation(for: text)
         startSendWatchdog(assistantID: assistantID)
 
+        stoppedByUser = false
         currentSendTask = Task {
             defer {
                 Task { @MainActor in
@@ -448,6 +455,7 @@ final class ChatViewModel {
                     }
 
                 case .error(let error):
+                    if stoppedByUser { continue }
                     await MainActor.run {
                         lastFailedText = text
                         lastFailedUserMessageID = userMessageID
@@ -480,6 +488,24 @@ final class ChatViewModel {
                 drainQueuedTurns()
             }
         }
+    }
+
+    /// Halts the reply being written right now. Anything already sent to another service is not undone.
+    func stopCurrentTurn() {
+        guard isSending else { return }
+        stoppedByUser = true
+        currentSendTask?.cancel()
+        HapticManager.shared.impact(.medium)
+        if let index = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+            messages[index].isStreaming = false
+            if messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                messages[index].content = "Stopped."
+            }
+        }
+        statusLabel = nil
+        isSending = false
+        currentSendTask = nil
+        finishActivity()
     }
 
     func sendCommand(_ command: String, userId: String) {
@@ -695,6 +721,7 @@ final class ChatViewModel {
         let settings = currentSettings
         startSendWatchdog(assistantID: assistantID)
 
+        stoppedByUser = false
         currentSendTask = Task {
             defer {
                 Task { @MainActor in

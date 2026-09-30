@@ -8,6 +8,9 @@ final class ThreadBoardModel {
     private(set) var resolvedIDs = Set<String>()
     /// Cards answered a moment ago, kept on screen briefly so the answer registers. Value is whether it was approved.
     private(set) var acknowledged: [String: Bool] = [:]
+    /// Work the user asked to stop: "stopping" until the server confirms, then "stopped".
+    private(set) var stopping = Set<String>()
+    private(set) var stopped = Set<String>()
     /// Work that finished since the user last saw it. Stays for the session so a result never vanishes unread.
     private(set) var finished: [BoardItem] = []
     private var seenFinishedIDs = Set<String>()
@@ -26,7 +29,7 @@ final class ThreadBoardModel {
     }
 
     var needsYou: [BoardItem] { board.needsYou.filter { !resolvedIDs.contains($0.id) } }
-    var working: [BoardItem] { board.handling }
+    var working: [BoardItem] { board.handling.filter { !stopped.contains($0.id) } }
     var isEmpty: Bool { needsYou.isEmpty && working.isEmpty && finished.isEmpty }
 
     init() {
@@ -82,12 +85,28 @@ final class ThreadBoardModel {
     private static let sampleBoard: HomeBoard = {
         let json = """
         {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242","workflowId":"w1","checkpointId":"c1"}],
-         "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","progress":{"done":2,"total":3}}],
+         "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","taskId":"t3","progress":{"done":2,"total":3}}],
          "changed":[],"completed":[{"id":"workflow-x","workflowId":"w9","kind":"purchase","title":"Ordered the headphones","detail":"£54.20 · arrives Thursday","at":"2026-09-29T17:00:00Z"}],"counts":{"needsYou":1,"handling":2,"changed":0,"completed":1}}
         """
         return (try? JSONDecoder().decode(HomeBoard.self, from: Data(json.utf8))) ?? .empty
     }()
     #endif
+
+    func stop(_ item: BoardItem) async {
+        guard let taskId = item.taskId, !stopping.contains(item.id) else { return }
+        stopping.insert(item.id)
+        HapticManager.shared.impact(.medium)
+        do {
+            if !isSample { try await AgentTasksService.stopTask(id: taskId) }
+            stopping.remove(item.id)
+            stopped.insert(item.id)
+            await refresh()
+        } catch {
+            stopping.remove(item.id)
+            HapticManager.shared.error()
+            errorMessage = "Couldn't stop that. Try again."
+        }
+    }
 
     func decide(_ item: BoardItem, approved: Bool, choice: String? = nil) async {
         guard let workflowId = item.workflowId, let checkpointId = item.checkpointId,
@@ -251,17 +270,37 @@ struct ThreadBoardCards: View {
     }
 
     private func workingChip(_ item: BoardItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title(for: item))
-                .font(.appBody(14, weight: .medium))
-                .foregroundStyle(Color.appWorking)
+        let isStopping = model.stopping.contains(item.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(title(for: item))
+                    .font(.appBody(14, weight: .medium))
+                    .foregroundStyle(Color.appWorking)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if item.taskId != nil {
+                    Button {
+                        Task { await model.stop(item) }
+                    } label: {
+                        Text(isStopping ? "Stopping…" : "Stop")
+                            .font(.appBody(13, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(Capsule().fill(Color.appBackground))
+                    }
+                    .buttonStyle(.appScale(0.95))
+                    .disabled(isStopping)
+                    .accessibilityLabel("Stop \(title(for: item))")
+                }
+            }
             if let progress = item.progress {
                 ProgressView(value: progress.fraction)
                     .tint(Color.appWorking)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.leading, 14)
+        .padding(.trailing, item.taskId != nil ? 4 : 14)
+        .padding(.vertical, item.taskId != nil ? 2 : 10)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.appWorking.opacity(0.10)))
         .onTapGesture {
             if let workflowId = item.workflowId { openWorkflow = OpenWorkflow(id: workflowId) }

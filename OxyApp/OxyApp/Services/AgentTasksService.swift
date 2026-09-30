@@ -48,6 +48,11 @@ enum AgentTasksService {
         _ = try await APIClient.shared.request(path: "/agent/scheduled-tasks/\(id)", method: "DELETE")
     }
 
+    /// Stops a run for good. It halts at its next step; anything already done stays done.
+    static func stopTask(id: String) async throws {
+        _ = try await APIClient.shared.request(path: "/agent/tasks/\(id)/stop", method: "POST")
+    }
+
     static func runTask(id: String, deviceType: String = "ios_companion") async throws {
         _ = try await APIClient.shared.request(
             path: "/agent/tasks/\(id)/run",

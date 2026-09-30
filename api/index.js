@@ -9271,6 +9271,20 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   res.status(started.status).json(started.body);
 });
 
+// Stops a delegated run. The run's next progress write fails its ownership check, so it halts at
+// the next step boundary and can never be picked up again.
+app.post('/agent/tasks/:id/stop', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const stopped = await delegatedRunRouteHandlers.cancel({ userId, taskId: req.params.id });
+    res.status(stopped.status).json(stopped.body);
+  } catch (e) {
+    log('warn', 'agent.task.stop.failed', { userId, taskId: req.params.id, error: e.message });
+    res.status(503).json({ error: 'Could not stop that right now.' });
+  }
+});
+
 app.post('/agent/simulate', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });

@@ -43,7 +43,18 @@ struct MessageBubble: View {
     }
 
     private var richActions: [ActionResult] { completedActions.filter(Self.isRichAction) }
-    private var receiptActions: [ActionResult] { completedActions.filter { !Self.isRichAction($0) } }
+    private static let memoryActionNames: Set<String> = [
+        "remember_person",
+        "save_occasion",
+        "forget_person_detail",
+        "forget_memory"
+    ]
+    private var memoryActions: [ActionResult] {
+        completedActions.filter { Self.memoryActionNames.contains($0.action) && $0.isCompleted }
+    }
+    private var receiptActions: [ActionResult] {
+        completedActions.filter { !Self.isRichAction($0) && !Self.memoryActionNames.contains($0.action) }
+    }
     private var browserRecoveryAction: ActionResult? {
         completedActions.first {
             $0.isFailure &&
@@ -164,7 +175,7 @@ struct MessageBubble: View {
 
             // Agent work: rich handoff cards keep their surface; everything else
             // collapses into one quiet receipt line per turn.
-            if !richActions.isEmpty || !receiptActions.isEmpty {
+            if !richActions.isEmpty || !receiptActions.isEmpty || !memoryActions.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(richActions) { action in
                         if action.action == "book_uber" {
@@ -176,6 +187,11 @@ struct MessageBubble: View {
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
                             DirectionsResultCard(action: action)
                         }
+                    }
+
+                    ForEach(memoryActions) { action in
+                        MemoryChip(action: action)
+                            .padding(.top, 2)
                     }
 
                     if !receiptActions.isEmpty {
@@ -1290,4 +1306,39 @@ struct TravelResultCard: View {
         }
     }
     .background(Color.appObsidian)
+}
+
+
+/// Says out loud when Adam has learned or forgotten something, so remembering is never silent.
+private struct MemoryChip: View {
+    let action: ActionResult
+
+    private var isForget: Bool { action.action.hasPrefix("forget") }
+
+    private var detail: String? {
+        let raw = action.cardText ?? action.text ?? action.actionSummary
+        guard let text = raw?.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text.count > 90 ? String(text.prefix(90)) + "…" : text
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Color.appDone).frame(width: 6, height: 6)
+            Text(isForget ? "Forgotten" : "Remembered")
+                .font(.appBody(12, weight: .semibold))
+                .foregroundStyle(Color.appInk)
+            if let detail {
+                Text(detail)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.appReceivedBubble))
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
 }
