@@ -115,7 +115,7 @@ struct MessageBubble: View {
                             Spacer(minLength: 48)
                             Text(AttributedString(message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
-                                .foregroundStyle(Color.appInk)
+                                .foregroundStyle(Color.appOnAction)
                                 .lineSpacing(isCompact ? 4 : 5)
                                 .textSelection(.enabled)
                                 .padding(.horizontal, 14)
@@ -130,7 +130,13 @@ struct MessageBubble: View {
                         }
                     }
                 } else {
-                    AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
+                    HStack(spacing: 0) {
+                        AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(bubbleShape.fill(Color.appReceivedBubble))
+                        Spacer(minLength: 40)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     if !message.isStreaming,

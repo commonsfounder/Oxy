@@ -134,6 +134,7 @@ struct ThreadBoardCards: View {
                     .foregroundStyle(Color.appMuted)
             }
         }
+        .padding(.trailing, 32)
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.appSpring, value: model.needsYou.map(\.id))
         .animation(.appSpring, value: model.acknowledged)
@@ -178,8 +179,7 @@ struct ThreadBoardCards: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Color.appCardOutline, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
         .accessibilityElement(children: .combine)
     }
 
@@ -203,8 +203,7 @@ struct ThreadBoardCards: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Color.appCardOutline, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
     }
 
     @ViewBuilder
@@ -237,7 +236,7 @@ struct ThreadBoardCards: View {
                 .foregroundStyle(primary ? Color.appOnAction : Color.appInk)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(primary ? Color.appAction : Color.appUserBubble))
+                .background(Capsule().fill(primary ? Color.appAction : Color.appBackground))
         }
         .buttonStyle(.appScale(0.97))
     }
@@ -311,8 +310,7 @@ private struct FinishedCard: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.appCardOutline, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
             .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.99))

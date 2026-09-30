@@ -74,7 +74,11 @@ extension Color {
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
-    static let appUserBubble = appDynamicColor(
+    /// The user's own messages: the strongest surface, like a sent message.
+    static let appUserBubble = appInk
+
+    /// Adam's side of the conversation: message bubbles and cards.
+    static let appReceivedBubble = appDynamicColor(
         dark: Color(red: 0.137, green: 0.149, blue: 0.172),   // #23262C
         light: Color(red: 0.914, green: 0.925, blue: 0.945)   // #E9ECF1
     )

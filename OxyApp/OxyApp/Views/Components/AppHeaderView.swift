@@ -66,7 +66,7 @@ struct AppHeaderView: View {
     }
 }
 
-private struct GhostIcon: View {
+struct GhostIcon: View {
     var active: Bool
 
     var body: some View {

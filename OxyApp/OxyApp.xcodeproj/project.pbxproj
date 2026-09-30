@@ -51,6 +51,7 @@
 		F10C0A110000000000000001 /* CheckoutInformationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10C0A120000000000000001 /* CheckoutInformationSheet.swift */; };
 		A10000010000000000000047 /* TurnReceiptRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000047 /* TurnReceiptRow.swift */; };
 		A10000010000000000000F10 /* ThreadBoardCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F10 /* ThreadBoardCards.swift */; };
+		A10000010000000000000F11 /* ThreadHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F11 /* ThreadHeader.swift */; };
 		A10000010000000000000012 /* Color+Oxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000012 /* Color+Oxy.swift */; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* LoadingIndicator.swift */; };
 		A10000010000000000000014 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000014 /* ErrorBanner.swift */; };
@@ -140,6 +141,7 @@
 		F10C0A120000000000000001 /* CheckoutInformationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutInformationSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000047 /* TurnReceiptRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnReceiptRow.swift; sourceTree = "<group>"; };
 		A20000010000000000000F10 /* ThreadBoardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadBoardCards.swift; sourceTree = "<group>"; };
+		A20000010000000000000F11 /* ThreadHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadHeader.swift; sourceTree = "<group>"; };
 		A20000010000000000000012 /* Color+Oxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Oxy.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		A20000010000000000000014 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
@@ -325,6 +327,7 @@
 				F10C0A120000000000000001 /* CheckoutInformationSheet.swift */,
 				A20000010000000000000047 /* TurnReceiptRow.swift */,
 				A20000010000000000000F10 /* ThreadBoardCards.swift */,
+				A20000010000000000000F11 /* ThreadHeader.swift */,
 				A20000010000000000000031 /* ChatHomeView.swift */,
 				A20000010000000000000034 /* DeviceStatusCard.swift */,
 			);
@@ -634,6 +637,7 @@
 				F10C0A110000000000000001 /* CheckoutInformationSheet.swift in Sources */,
 				A10000010000000000000047 /* TurnReceiptRow.swift in Sources */,
 				A10000010000000000000F10 /* ThreadBoardCards.swift in Sources */,
+				A10000010000000000000F11 /* ThreadHeader.swift in Sources */,
 				A10000010000000000000012 /* Color+Oxy.swift in Sources */,
 				A10000010000000000000032 /* AppTheme.swift in Sources */,
 				A10000010000000000000013 /* LoadingIndicator.swift in Sources */,

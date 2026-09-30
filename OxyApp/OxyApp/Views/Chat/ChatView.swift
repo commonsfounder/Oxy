@@ -199,26 +199,16 @@ struct ChatView: View {
                             guard scrollViewportHeight > 0 else { return }
                             isScrollPinnedToBottom = bottomY <= scrollViewportHeight + 96
                         }
-                        .overlay {
-                            if viewModel.messages.isEmpty && !viewModel.isSending && boardModel.isEmpty {
-                                WelcomeCard { prompt in
-                                    viewModel.inputText = prompt
-                                    sendCurrentDraft()
-                                }
-                                .transition(.opacity)
-                            }
-                        }
                         .scrollDismissesKeyboard(.interactively)
                         .safeAreaInset(edge: .top, spacing: 0) {
-                            AppHeaderView(
+                            ThreadHeader(
                                 isIncognito: $isIncognito,
                                 isEmptyChat: viewModel.messages.isEmpty,
-                                showsBackButton: onMenu == nil,
-                                onLeading: {
+                                isWorking: !boardModel.working.isEmpty,
+                                onMenu: {
                                     HapticManager.shared.impact(.light)
                                     if let onMenu { onMenu() } else { dismiss() }
-                                },
-                                onNewChat: nil
+                                }
                             )
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
@@ -1016,97 +1006,6 @@ struct ChatSessionsResponse: Codable {
 // MARK: - Welcome Card
 
 /// Empty chat.
-private struct WelcomeCard: View {
-    var onAction: (String) -> Void
-    @State private var appeared = false
-    @AppStorage("oxy_starter_actions") private var storedActions = "What's on today?\nSummarise my inbox\nCheck my calendar"
-
-    private static let pool: [(icon: String, label: String)] = [
-        ("sparkle.magnifyingglass", "What's on today?"),
-        ("envelope", "Summarise my inbox"),
-        ("calendar", "Check my calendar"),
-        ("magnifyingglass", "Find something for me"),
-        ("envelope", "Send an email"),
-        ("magnifyingglass", "Search the web"),
-        ("calendar", "Add to my calendar"),
-        ("message", "Send a message"),
-        ("bell", "Set a reminder")
-    ]
-
-    private var actions: [String] {
-        let allowed = Set(Self.pool.map(\.label))
-        let parts = storedActions
-            .split(separator: "\n")
-            .map(String.init)
-            .map { $0 == "What needs attention today?" ? "What's on today?" : $0 }
-            .filter { allowed.contains($0) }
-        return parts.isEmpty ? Array(Self.pool.prefix(3).map(\.label)) : parts
-    }
-
-    private func icon(for label: String) -> String {
-        Self.pool.first { $0.label == label }?.icon ?? "sparkles"
-    }
-
-    private func replace(slot: Int, with label: String) {
-        var parts = actions
-        guard slot < parts.count else { return }
-        parts[slot] = label
-        storedActions = parts.joined(separator: "\n")
-        HapticManager.shared.impact(.light)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(greeting)
-                .font(.system(size: 32, weight: .semibold))
-                .tracking(-0.6)
-                .foregroundStyle(Color.appInk)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 24)
-                .padding(.top, 58)
-                .appEntrance(appeared, riseOffset: 18, delay: 0.1)
-
-            Color.clear.frame(height: 56)
-
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
-                    Button { onAction(label) } label: {
-                        Text(label)
-                            .font(.appBody(16, weight: .medium))
-                            .foregroundStyle(Color.appInk)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 12)
-                            .overlay(Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.appScale(0.97))
-                    .appEntrance(appeared, riseOffset: 10, delay: 0.22 + Double(index) * 0.07)
-                    .contextMenu {
-                        ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
-                            Button { replace(slot: index, with: option.label) } label: {
-                                Label { Text(option.label) } icon: { AppIcon(sf: option.icon, size: 16) }
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 18)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { withAnimation { appeared = true } }
-    }
-
-    private var greeting: String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: return "Good morning."
-        case 12..<17: return "Good afternoon."
-        default: return "Good evening."
-        }
-    }
-}
-
 // ScaleButtonStyle kept for local usage — delegates to AppScaleButtonStyle at 0.96
 private typealias ScaleButtonStyle = AppScaleButtonStyle
 
@@ -1323,13 +1222,13 @@ private struct ChatInputBar: View {
     }
 
     private var buttonFill: Color {
-        if canSend { return Color.appAccent }
+        if canSend { return Color.appAction }
         if isRecording { return Color.appDanger }
         return Color.appSurface
     }
 
     private var buttonForeground: Color {
-        if canSend { return Color.appOnAccent }
+        if canSend { return Color.appOnAction }
         if isRecording { return Color.appInk }
         return canAct ? Color.appMuted : Color.appMuted.opacity(0.5)
     }
