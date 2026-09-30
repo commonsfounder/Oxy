@@ -98,7 +98,7 @@ struct ChatView: View {
         .transition(.opacity.combined(with: .move(edge: .bottom)))
 
         if message.id == viewModel.activeTurnUserMessageID, viewModel.isSending, !replyStarted {
-            WorkingBubble()
+            WorkingBubble(label: currentStepLabel)
                 .id("working-\(message.id)")
                 .padding(.top, 10)
         }
@@ -164,6 +164,13 @@ struct ChatView: View {
         } else {
             onMenuChoice?(choice)
         }
+    }
+
+    /// The step in progress, only when it is something real to report.
+    private var currentStepLabel: String? {
+        guard let step = viewModel.activitySteps.last(where: { $0.state == .active }) else { return nil }
+        let title = step.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty || title == "Working on it" ? nil : title
     }
 
     /// True once Adam's reply has any text, so the working animation can step aside.

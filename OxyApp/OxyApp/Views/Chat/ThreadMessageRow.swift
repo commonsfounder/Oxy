@@ -326,10 +326,13 @@ struct ReplyPreviewBar: View {
 /// Shown while Adam is working on a reply: the three channels of the Adam mark rise and fall
 /// in a slow wave. No guessed step names — only what is true: Adam is on it.
 struct WorkingBubble: View {
+    /// A step the server actually reported ("Checking calendar"), or nil to show the bars alone.
+    var label: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
+            HStack(spacing: 10) {
             TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 HStack(alignment: .center, spacing: 5) {
@@ -342,6 +345,17 @@ struct WorkingBubble: View {
                 }
                 .frame(width: 40, height: 22)
             }
+                if let label {
+                    Text(label)
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                        .id(label)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .animation(.appSpring, value: label)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
@@ -353,6 +367,6 @@ struct WorkingBubble: View {
             removal: .opacity
         ))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Adam is working")
+        .accessibilityLabel(label.map { "Adam is working: \($0)" } ?? "Adam is working")
     }
 }

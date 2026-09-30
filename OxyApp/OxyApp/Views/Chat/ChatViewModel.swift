@@ -124,6 +124,7 @@ final class ChatViewModel {
             if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKING"] == "1" {
                 isSending = true
                 activeTurnUserMessageID = messages.last(where: { $0.role == .user })?.id
+                activitySteps = [ActivityStep(title: "Checking the order", state: .active)]
             }
         }
         #endif
@@ -241,7 +242,7 @@ final class ChatViewModel {
         isSending = true
         statusLabel = nil
         networkError = nil
-        activitySteps = Self.activityTemplate(for: text)
+        activitySteps = []
 
         let userMessageID: UUID
         if let retryingUserMessageID,
@@ -381,7 +382,6 @@ final class ChatViewModel {
                     await MainActor.run {
                         print("[ChatStream] text_event=\(textEventCount) chunk_chars=\(chunk.count) total_chars=\(fullText.count)")
                         guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
-                        setActivity("Preparing result", state: .active)
                         statusLabel = nil
                     }
                     await Task.yield()
@@ -391,13 +391,11 @@ final class ChatViewModel {
                         print("[ChatStream] replace chars=\(replacement.count) after_text_events=\(textEventCount)")
                         fullText = replacement
                         guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
-                        setActivity("Preparing result", state: .active)
                     }
 
                 case .actions(let results):
                     await MainActor.run {
                         guard updateAssistantMessage(id: assistantID, { $0.actions.merging(results) }) else { return }
-                        markActionsComplete(results)
                         openDeepLinks(results)
                         if results.contains(where: { $0.isCompleted }) {
                             HapticManager.shared.success()
@@ -708,10 +706,7 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         statusLabel = isImage ? "Looking at image" : "Reading file"
-        activitySteps = [
-            ActivityStep(title: isImage ? "Looking at image" : "Reading file", state: .active),
-            ActivityStep(title: "Preparing result", state: .pending)
-        ]
+        activitySteps = [ActivityStep(title: isImage ? "Looking at image" : "Reading file", state: .active)]
         networkError = nil
 
         let attachmentTag = isImage ? "[Image attached]" : "[File attached: \(fileName)]"
@@ -840,16 +835,6 @@ final class ChatViewModel {
     }
 
     static func runChatUXRuleCheck() {
-        let trainSteps = activityTemplate(for: "How do I get to Kings Langley by train?")
-        assert(trainSteps.filter { $0.title == "Getting your location" }.count == 1, "activity should include one location step")
-        assert(trainSteps.contains { $0.title == "Finding routes" }, "train activity should find routes")
-        assert(trainSteps.contains { $0.title == "Checking train options" }, "train activity should check train options")
-        assert(trainSteps.last?.title == "Preparing result", "activity should end with result preparation")
-
-        let drivingSteps = activityTemplate(for: "Drive to Birmingham International")
-        assert(drivingSteps.contains { $0.title == "Finding routes" }, "driving activity should find routes")
-        assert(!drivingSteps.contains { $0.title == "Checking train options" }, "driving activity should not show train-only work")
-
         let queued = Message(role: .user, content: "I'm taking a train", queuedForActiveTask: true)
         assert(queued.queuedForActiveTask, "correction message should be visibly queueable")
 
@@ -961,31 +946,6 @@ final class ChatViewModel {
         sendMessage(userId: next.userId, retryingUserMessageID: next.messageID)
     }
 
-    private static func activityTemplate(for text: String) -> [ActivityStep] {
-        let lower = text.lowercased()
-        var titles: [String] = []
-        let needsLocation = shouldFetchLocationText(lower)
-        if needsLocation {
-            titles.append("Getting your location")
-        }
-        if lower.contains("fare") || lower.contains("ticket") || lower.contains("trainline") {
-            titles.append("Checking fares")
-        }
-        if lower.contains("train") || lower.contains("rail") {
-            titles.append("Finding routes")
-            titles.append("Checking train options")
-        } else if lower.contains("bus") || lower.contains("transit") || lower.contains("public transport") || lower.contains("directions") || lower.contains("route") {
-            titles.append("Finding routes")
-        } else if lower.contains("drive") || lower.contains("driving") || lower.contains("navigate") {
-            titles.append("Finding routes")
-        }
-        titles.append("Preparing result")
-        var seen = Set<String>()
-        return titles
-            .filter { seen.insert($0).inserted }
-            .map { ActivityStep(title: $0, state: .pending) }
-    }
-
     private static func shouldFetchLocationText(_ lower: String) -> Bool {
         if lower.hasPrefix("remember ") || lower.hasPrefix("save ") || lower.hasPrefix("note down ") {
             return false
@@ -996,12 +956,12 @@ final class ChatViewModel {
         return localRequestTerms.contains { lower.contains($0) }
     }
 
+    /// Records a step the server or the phone actually reported. Nothing here is guessed.
     private func setActivity(_ title: String, state: ActivityStepState) {
-        guard !activitySteps.isEmpty else { return }
         if let index = activitySteps.firstIndex(where: { $0.title == title }) {
             activitySteps[index].state = state
         } else if state != .complete {
-            activitySteps.insert(ActivityStep(title: title, state: state), at: max(activitySteps.count - 1, 0))
+            activitySteps.append(ActivityStep(title: title, state: state))
         }
         if state == .active {
             for index in activitySteps.indices where activitySteps[index].title != title && activitySteps[index].state == .active {
@@ -1011,11 +971,7 @@ final class ChatViewModel {
     }
 
     private func updateActivity(status: String, label: String) {
-        // Multi-step turns (agentic loop actions, e.g. shopping/browsing) stream real
-        // progress via these two statuses — surface the label directly instead of
-        // silently dropping anything outside the travel-specific cases below, which
-        // is why every non-travel turn used to sit on a single generic step for its
-        // whole duration.
+        // Only steps the server reports are shown; nothing is inferred from the user's words.
         if status == "action_start" {
             setActivity(label, state: .active)
             return
@@ -1031,46 +987,11 @@ final class ChatViewModel {
             return
         }
         if status == "agent_thinking" {
-            setActivity("Working on it", state: .active)
             return
         }
         if status == "browser_progress" {
             setActivity(label, state: .active)
-            return
         }
-
-        let combined = "\(status) \(label)".lowercased()
-        if combined.contains("location") {
-            setActivity("Getting your location", state: .active)
-        } else if combined.contains("train") {
-            setActivity("Finding routes", state: .complete)
-            setActivity("Checking train options", state: .active)
-        } else if combined.contains("fare") || combined.contains("ticket") {
-            setActivity("Checking fares", state: .active)
-        } else if combined.contains("direction") || combined.contains("trip") || combined.contains("route") {
-            setActivity("Finding routes", state: .active)
-        } else if combined.contains("summary") || combined.contains("speaking") {
-            setActivity("Preparing result", state: .active)
-        }
-    }
-
-    private func markActionsComplete(_ results: [ActionResult]) {
-        for result in results {
-            let state: ActivityStepState = result.isCompleted ? .complete : (result.isFailure ? .failed : .neutral)
-            switch result.action {
-            case "get_directions", "plan_trip":
-                setActivity("Finding routes", state: state)
-                if result.itinerary?.contains(where: { ($0.type ?? "").lowercased().contains("rail") }) == true {
-                    setActivity("Checking train options", state: state)
-                }
-            case "search_trains":
-                setActivity("Finding routes", state: state)
-                setActivity("Checking train options", state: state)
-            default:
-                break
-            }
-        }
-        setActivity("Preparing result", state: .active)
     }
 
     private func canPerformClientHandoff(_ result: ActionResult) -> Bool {

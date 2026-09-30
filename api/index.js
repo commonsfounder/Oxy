@@ -2549,11 +2549,28 @@ const ACTION_STATUS_LABELS = {
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
   create_presentation: 'Building presentation',
-  browser_open: 'Opening page'
+  web_search: 'Searching the web',
+  send_message: 'Writing your message',
+  remember_person: 'Remembering that',
+  save_occasion: 'Saving the date',
+  browser_open: 'Opening the website',
+  browser_observe: 'Looking at the page',
+  browser_act: 'Filling it in',
+  browser_upload: 'Adding the file',
+  browser_download: 'Downloading',
+  browser_continue_without_account: 'Continuing as a guest',
+  browser_sign_in: 'Signing in',
+  browser_fill_known_details: 'Filling in your details',
+  browser_close: 'Finishing up',
+  transaction_prepare: 'Getting the total',
+  transaction_authorize: 'Waiting for your yes',
+  transaction_status: 'Checking the order'
 };
 
+// The phone shows these while Adam works, so an unknown action gets a plain phrase, never its
+// internal name.
 function getActionStatusLabel(actionType, phase = 'start') {
-  const base = ACTION_STATUS_LABELS[actionType] || humanizeActionType(actionType);
+  const base = ACTION_STATUS_LABELS[actionType] || 'Working on it';
   if (phase === 'complete') return `${base} complete`;
   if (phase === 'failed') return `${base} failed`;
   return base;
