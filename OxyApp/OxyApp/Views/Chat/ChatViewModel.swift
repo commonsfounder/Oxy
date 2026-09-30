@@ -48,6 +48,9 @@ final class ChatViewModel {
     var isViewingHistorySnapshot = false
     var historySnapshotLabel: String?
     var networkError: String?
+    /// The thread shows everything ever said; older messages load as the user scrolls up.
+    var isLoadingOlder = false
+    var hasOlderHistory = true
     /// When true, this turn is not persisted server-side (shadow / incognito chat).
     var incognito = false
 
@@ -111,9 +114,10 @@ final class ChatViewModel {
 
     func loadHistory(userId: String) async {
         do {
-            let entries = try await chatService.loadHistory(userId: userId, since: activeChatStartedAt)
+            let entries = try await chatService.loadHistory(userId: userId)
             let loaded = messages(from: entries)
             await MainActor.run {
+                hasOlderHistory = entries.count >= 50
                 messages = loaded
                 scrollTargetMessageID = nil
                 isViewingHistorySnapshot = false
@@ -121,6 +125,31 @@ final class ChatViewModel {
             }
         } catch {
             print("[ChatVM] History load failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Loads the page of messages before the oldest one shown. Returns the id of the message that was
+    /// first, so the view can hold its place while older ones appear above it.
+    @discardableResult
+    func loadOlder(userId: String) async -> UUID? {
+        guard !isLoadingOlder, hasOlderHistory, let oldest = messages.first else { return nil }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        do {
+            let entries = try await chatService.loadHistory(
+                userId: userId, before: oldest.timestamp.oxyISO8601String
+            )
+            let known = Set(messages.compactMap(\.dbId))
+            let older = messages(from: entries).filter { message in
+                message.dbId.map { !known.contains($0) } ?? true
+            }
+            hasOlderHistory = entries.count >= 50 && !older.isEmpty
+            guard !older.isEmpty else { return nil }
+            messages.insert(contentsOf: older, at: 0)
+            return oldest.id
+        } catch {
+            print("[ChatVM] Older history load failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

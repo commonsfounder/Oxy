@@ -45,6 +45,23 @@ struct ChatView: View {
     private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
 
+    private func loadOlderMessages(_ proxy: ScrollViewProxy) {
+        Task {
+            guard let anchor = await viewModel.loadOlder(userId: appState.userId) else { return }
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    private static func dayLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        let sameYear = calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+        return date.formatted(sameYear
+            ? .dateTime.weekday(.abbreviated).day().month(.abbreviated)
+            : .dateTime.day().month(.abbreviated).year())
+    }
+
     private func handleMenuChoice(_ choice: ThreadMenuChoice) {
         if choice == .privateChat {
             withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
@@ -135,6 +152,11 @@ struct ChatView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 0) {
+                                if viewModel.hasOlderHistory, !viewModel.messages.isEmpty {
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .onAppear { loadOlderMessages(proxy) }
+                                }
                                 ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
                                     let msgs = viewModel.messages
                                     let prevRole = idx > 0 ? msgs[idx - 1].role : nil
@@ -143,6 +165,14 @@ struct ChatView: View {
                                     let isGroupEnd = nextRole != message.role
                                     let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
                                     let previousMessage = idx > 0 ? msgs[idx - 1] : nil
+                                    if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) {
+                                        Text(Self.dayLabel(for: message.timestamp))
+                                            .font(.appBody(12))
+                                            .foregroundStyle(Color.appMuted)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.top, idx == 0 ? 4 : 16)
+                                            .padding(.bottom, 8)
+                                    }
                                     MessageBubble(
                                         message: message,
                                         showsTypingIndicator: false,

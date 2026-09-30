@@ -3701,6 +3701,7 @@ function parseClientTimestamp(value) {
 
 async function getHistory(userId, trace = null, limit = 12, options = {}) {
   const since = parseClientTimestamp(options.since);
+  const before = parseClientTimestamp(options.before);
   const fetchHistory = () => {
     let query = supabase
       .from('conversations')
@@ -3710,6 +3711,7 @@ async function getHistory(userId, trace = null, limit = 12, options = {}) {
       .order('created_at', { ascending: false })
       .limit(Math.min(Math.max(Number(limit) || 12, 1), 200));
     if (since) query = query.gte('created_at', since.toISOString());
+    if (before) query = query.lt('created_at', before.toISOString());
     return query;
   };
   const { data, error } = trace
@@ -5464,7 +5466,8 @@ app.get('/history/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const history = await getHistory(req.params.userId, null, req.query.limit || 50, {
-      since: req.query.since
+      since: req.query.since,
+      before: req.query.before
     });
     res.json({ history });
   } catch (err) {

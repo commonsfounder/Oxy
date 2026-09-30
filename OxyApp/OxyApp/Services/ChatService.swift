@@ -68,10 +68,13 @@ struct ChatService {
         )
     }
 
-    func loadHistory(userId: String, limit: Int = 50, since: String? = nil) async throws -> [HistoryEntry] {
+    func loadHistory(userId: String, limit: Int = 50, since: String? = nil, before: String? = nil) async throws -> [HistoryEntry] {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
         if let since {
             queryItems.append(URLQueryItem(name: "since", value: since))
+        }
+        if let before {
+            queryItems.append(URLQueryItem(name: "before", value: before))
         }
         let data = try await api.request(
             path: "/history/\(userId)",
