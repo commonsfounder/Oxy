@@ -4,6 +4,7 @@ import SwiftUI
 struct ThreadHeader: View {
     var isIncognito: Bool
     var isWorking: Bool
+    var speakerOnline: Bool
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
 
@@ -25,10 +26,18 @@ struct ThreadHeader: View {
                     Text("Working")
                         .font(.appBody(11))
                         .foregroundStyle(Color.appWorking)
+                } else if speakerOnline {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.appDone).frame(width: 6, height: 6)
+                        Text("Speaker online")
+                            .font(.appBody(11))
+                            .foregroundStyle(Color.appMuted)
+                    }
                 }
             }
             .animation(.appStandard, value: isWorking)
             .animation(.appStandard, value: isIncognito)
+            .animation(.appStandard, value: speakerOnline)
             .accessibilityElement(children: .combine)
 
             HStack {

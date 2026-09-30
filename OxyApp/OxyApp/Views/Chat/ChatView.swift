@@ -297,6 +297,7 @@ struct ChatView: View {
                             ThreadHeader(
                                 isIncognito: isIncognito,
                                 isWorking: !boardModel.working.isEmpty,
+                                speakerOnline: boardModel.speakerOnline,
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
                             )
