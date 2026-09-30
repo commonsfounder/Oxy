@@ -23,7 +23,13 @@ struct MainTabView: View {
                 }
                 .presentationDragIndicator(.visible)
             }
-            .onAppear { HapticManager.shared.prepare() }
+            .onAppear {
+                HapticManager.shared.prepare()
+                #if DEBUG
+                if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN"],
+                   let choice = ThreadMenuChoice(rawValue: raw) { opened = choice }
+                #endif
+            }
     }
 }
 
@@ -128,9 +134,11 @@ private struct PhysicalHomeView: View {
                                 .font(.title.weight(.semibold))
                                 .appHeroTracking(28)
                                 .foregroundStyle(Color.appInk)
-                            Text(homeSummary)
-                                .font(.body)
-                                .foregroundStyle(Color.appMuted)
+                            if let homeSummary {
+                                Text(homeSummary)
+                                    .font(.body)
+                                    .foregroundStyle(Color.appMuted)
+                            }
                         }
 
                         if let errorMessage {
@@ -169,12 +177,15 @@ private struct PhysicalHomeView: View {
         settings.homeLatitude != nil || settings.homeLongitude != nil || !settings.homeAddress.isEmpty || deviceConnected || !displays.isEmpty
     }
 
-    private var homeSummary: String {
-        if hasHomeContext {
-            let deviceCount = displays.count + (deviceConnected ? 1 : 0)
-            return deviceCount == 0 ? "Your home is set up." : "Quiet · \(deviceCount) connected"
+    /// Nothing to say until there is something true to say.
+    private var homeSummary: String? {
+        guard hasHomeContext else { return nil }
+        let deviceCount = displays.count + (deviceConnected ? 1 : 0)
+        switch deviceCount {
+        case 0: return nil
+        case 1: return "1 speaker connected"
+        default: return "\(deviceCount) speakers connected"
         }
-        return "Your home, when you're ready."
     }
 
     private var homeCard: some View {
@@ -185,7 +196,7 @@ private struct PhysicalHomeView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
                     AppIcon("tab-home", size: 23)
-                        .foregroundStyle(Color.appAccent)
+                        .foregroundStyle(Color.appInk)
                     Spacer()
                     Text(settings.homeLatitude == nil ? "Setup incomplete" : "Home")
                         .font(.footnote.weight(.medium))
@@ -210,9 +221,9 @@ private struct PhysicalHomeView: View {
     }
 
     private var homeDetail: String {
-        if settings.homeLatitude != nil { return "Location saved · \(settings.locationReminders ? "arrival reminders on" : "arrival reminders off")" }
-        if !settings.homeAddress.isEmpty { return "Address saved · location needs confirming" }
-        return "Add a location to use home context"
+        if settings.homeLatitude != nil { return "Address saved · arrival reminders \(settings.locationReminders ? "on" : "off")" }
+        if !settings.homeAddress.isEmpty { return "Address saved · needs confirming" }
+        return "Add your address for arrival reminders"
     }
 
     @ViewBuilder
@@ -220,7 +231,7 @@ private struct PhysicalHomeView: View {
         let total = displays.count + (deviceConnected ? 1 : 0)
         if total > 0 {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Adam")
+                Text("Speaker")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Color.appInk)
 
@@ -262,21 +273,37 @@ private struct PhysicalHomeView: View {
     }
 
     private var emptyHome: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 28) {
             AdamPresence(size: 78)
-            Text("Your home, when you're ready.")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Color.appInk)
-            Text("Connect an Adam device or add your home location when it becomes useful.")
-                .font(.subheadline)
-                .foregroundStyle(Color.appMuted)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Set up home") { showsSettings = true }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.appAccent)
-                .frame(minWidth: 44, minHeight: 44)
+            VStack(spacing: 0) {
+                setupRow(title: "Set up your speaker", detail: "Connect it to Adam") { showsDevice = true }
+                AppDivider(inset: 0)
+                setupRow(title: "Add your home address", detail: "For reminders when you arrive") { showsSettings = true }
+            }
+            .padding(.horizontal, 16)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
         }
-        .padding(.top, 28)
+        .padding(.top, 12)
+    }
+
+    private func setupRow(title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.appInk)
+                    Text(detail).font(.footnote).foregroundStyle(Color.appMuted)
+                }
+                Spacer()
+                AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted)
+            }
+            .padding(.vertical, 16)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
     }
 
     private func displayStatus(_ display: PairedDisplay) -> String {
@@ -480,8 +507,16 @@ private struct AdamActivityView: View {
                     }
                 }
                 Spacer(minLength: 4)
-                AppIcon(item.failed == true ? "alert-circle" : "check-circle", size: 16)
-                    .foregroundStyle(item.failed == true ? Color.appWarning : Color.appSuccess)
+                if board.handling.contains(where: { $0.id == item.id }) {
+                    Circle().fill(Color.appWorking)
+                        .frame(width: 8, height: 8)
+                        .frame(width: 16, height: 16)
+                        .accessibilityLabel("Working")
+                } else {
+                    AppIcon(item.failed == true ? "alert-circle" : "check-circle", size: 16)
+                        .foregroundStyle(item.failed == true ? Color.appWarning : Color.appSuccess)
+                        .accessibilityLabel(item.failed == true ? "Couldn't finish" : "Done")
+                }
             }
             .padding(.vertical, 15)
             .contentShape(Rectangle())
@@ -508,6 +543,13 @@ private struct AdamActivityView: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
+            board = ThreadBoardModel.sampleBoard
+            errorMessage = nil
+            return
+        }
+        #endif
         do {
             async let boardTask = HomeBoardService.fetchBoard()
             async let watchTask = AgentTasksService.fetchWatches()
@@ -544,21 +586,17 @@ private struct AdamYouView: View {
 
                         identityHeader
 
-                        youSection("Memory") {
+                        youGroup {
                             youRow(title: "What Adam remembers", subtitle: "See it and change it", icon: "person") { destination = .memory }
-                        }
-
-                        youSection("Apps") {
+                            AppDivider(inset: 50)
                             youRow(title: "Connected apps", subtitle: "Mail, calendar, messages and more", icon: "cube") { destination = .connections }
                         }
 
-                        youSection("Privacy") {
-                            youRow(title: "Privacy and safety", subtitle: "What Adam can do and what it asks first", icon: "shield-check") { destination = .privacy }
+                        youGroup {
+                            youRow(title: "Privacy and safety", subtitle: "What Adam asks you first", icon: "shield-check") { destination = .privacy }
                             AppDivider(inset: 50)
-                            youRow(title: "Settings", subtitle: "Your details and preferences", icon: "list") { destination = .settings }
-                        }
-
-                        youSection("Look") {
+                            youRow(title: "Account and preferences", subtitle: "Your details, alerts and more", icon: "list") { destination = .settings }
+                            AppDivider(inset: 50)
                             youRow(title: "Background", subtitle: ThreadBackground.current.title, icon: "sun") { showsBackgroundPicker = true }
                         }
 
@@ -577,6 +615,12 @@ private struct AdamYouView: View {
             destinationView(item).swipeToDismiss()
         }
         .sheet(isPresented: $showsBackgroundPicker) { BackgroundPicker() }
+        #if DEBUG
+        .onAppear {
+            if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"],
+               let target = Destination(rawValue: raw) { destination = target }
+        }
+        #endif
     }
 
     private var identityHeader: some View {
@@ -615,11 +659,17 @@ private struct AdamYouView: View {
         }
     }
 
+    private func youGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .padding(.horizontal, 16)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
     private func youRow(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 13) {
                 AppIcon(icon, size: 17)
-                    .foregroundStyle(Color.appAccent)
+                    .foregroundStyle(Color.appInk)
                     .frame(width: 36, height: 36)
                     .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {

@@ -657,11 +657,11 @@ struct SettingsToggle: View {
             withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.appAccent : Color.appToggleOff)
+                .fill(isOn ? Color.appAction : Color.appToggleOff)
                 .frame(width: 30, height: 16)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.white : Color.appMuted)
+                        .fill(isOn ? Color.appOnAction : Color.appMuted)
                         .frame(width: 12, height: 12)
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)

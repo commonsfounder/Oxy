@@ -82,7 +82,7 @@ final class ThreadBoardModel {
     }
 
     #if DEBUG
-    private static let sampleBoard: HomeBoard = {
+    static let sampleBoard: HomeBoard = {
         let json = """
         {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242","workflowId":"w1","checkpointId":"c1"}],
          "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","taskId":"t3","progress":{"done":2,"total":3}}],

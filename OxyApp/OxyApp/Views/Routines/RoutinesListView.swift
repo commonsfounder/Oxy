@@ -207,7 +207,7 @@ struct RoutinesListView: View {
             await loadRoutines()
         } catch {
             await MainActor.run {
-                saveMessage = "Could not save that."
+                saveMessage = "Couldn't save that."
                 isSaving = false
             }
         }

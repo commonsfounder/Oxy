@@ -142,7 +142,7 @@ struct ModelRoutingView: View {
             selectedProvider = loaded.selected.provider
             selectedModel = loaded.selected.model
         } catch {
-            errorMessage = "Could not load AI choices."
+            errorMessage = "Couldn't load your choices."
         }
         isLoading = false
     }
@@ -156,7 +156,7 @@ struct ModelRoutingView: View {
                 model: ""
             )
         } catch {
-            errorMessage = "Could not save that choice."
+            errorMessage = "Couldn't save that choice."
         }
         isSaving = false
     }

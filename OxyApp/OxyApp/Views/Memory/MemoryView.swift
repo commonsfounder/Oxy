@@ -259,7 +259,7 @@ struct MemoryView: View {
             await loadMemory()
         } catch {
             await MainActor.run {
-                saveMessage = "Could not save that."
+                saveMessage = "Couldn't save that."
                 isSaving = false
             }
         }

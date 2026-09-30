@@ -34,8 +34,6 @@ struct SettingsView: View {
                     ScrollView {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 28) {
-                        settingsIntro
-
                         settingsSection(title: "Home") {
                             homeAddressEditor
 
@@ -65,7 +63,7 @@ struct SettingsView: View {
 
                             SettingsDivider()
 
-                            settingRow(label: "Daily briefing", description: "A concise check-in when there is something useful") {
+                            settingRow(label: "Daily briefing", description: "A short check-in when there's something useful") {
                                 SettingsToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
@@ -86,7 +84,7 @@ struct SettingsView: View {
 
                             SettingsDivider()
 
-                            navRow(label: "Trust center") { moreDestination = .trust }
+                            navRow(label: "What Adam can do") { moreDestination = .trust }
                         }
 
                         settingsSection(title: "Preferences") {
@@ -114,7 +112,7 @@ struct SettingsView: View {
 
                         settingsSection(title: "Conversation") {
                             dropdownRow(
-                                label: "Response detail",
+                                label: "How long answers are",
                                 options: [
                                     ("low", "Low"),
                                     ("medium", "Medium"),
@@ -126,13 +124,13 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "Account and data") {
-                            navRow(label: "Displays") { moreDestination = .displays }
+                            navRow(label: "Screens") { moreDestination = .displays }
                             SettingsDivider()
                             navRow(label: "Payments") { moreDestination = .payments }
                             SettingsDivider()
                             navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
                             SettingsDivider()
-                            navRow(label: "Import history") { moreDestination = .continuity }
+                            navRow(label: "Bring in old chats") { moreDestination = .continuity }
                         }
 
                         settingsSection(title: "About") {
@@ -195,29 +193,6 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private var settingsIntro: some View {
-        HStack(alignment: .top, spacing: 15) {
-            AdamMark()
-                .frame(width: 48, height: 34)
-                .frame(width: 58, height: 58)
-                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Adam, on your terms.")
-                    .font(.appBody(18, weight: .bold))
-                    .foregroundStyle(Color.appInk)
-                Text("Set home context, initiative and review preferences in one place.")
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Color.appHairline, lineWidth: 0.7))
-    }
-
     private var homeAddressEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Home address")
@@ -238,7 +213,7 @@ struct SettingsView: View {
                     } else {
                         Text("Find")
                             .font(.appBody(13, weight: .semibold))
-                            .foregroundStyle(Color.appAccent)
+                            .foregroundStyle(Color.appInk)
                     }
                 }
                 .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isFindingHomeAddress)
@@ -250,7 +225,7 @@ struct SettingsView: View {
                     } else {
                         Text("Save")
                             .font(.appBody(13, weight: .semibold))
-                            .foregroundStyle(Color.appAccent)
+                            .foregroundStyle(Color.appInk)
                     }
                 }
                 .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
@@ -579,7 +554,7 @@ private struct PairedDisplaysView: View {
                 GlebChrome.pastelBlob.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Displays", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Screens", onBack: { dismiss() })
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: 22) {
@@ -806,7 +781,7 @@ private struct FreedomSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Initiative")
+                Text("How much Adam does on its own")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.appInk)
                 Text(simpleLabel)
@@ -817,8 +792,8 @@ private struct FreedomSlider: View {
 
             // Plain system slider — no glass shell around the track.
             Slider(value: index, in: 0...Double(levels.count - 1), step: 1)
-                .tint(Color.appAccent)
-                .accessibilityLabel("Initiative")
+                .tint(Color.appInk)
+                .accessibilityLabel("How much Adam does on its own")
                 .accessibilityValue(simpleLabel)
         }
         .padding(.vertical, 16)
@@ -827,9 +802,9 @@ private struct FreedomSlider: View {
     private var simpleLabel: String {
         switch OxySettings.normalizedAutonomy(selection) {
         case "Reactive": return "Waits for you to ask"
-        case "Reserved": return "Occasional suggestions"
-        case "Proactive": return "Looks for useful things"
-        case "Autonomous": return "Takes care of routine tasks"
+        case "Reserved": return "Suggests things now and then"
+        case "Proactive": return "Looks for useful things to do"
+        case "Autonomous": return "Takes care of everyday things"
         default: return "Helpful, not noisy"
         }
     }

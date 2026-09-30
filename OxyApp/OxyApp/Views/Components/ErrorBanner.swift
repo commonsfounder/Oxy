@@ -23,14 +23,13 @@ struct ErrorBanner: View {
 
             if let onRetry {
                 Button(action: onRetry) {
-                    Text("Retry")
+                    Text("Try again")
                         .font(.subheadline.weight(.semibold))
-                        .tracking(0.3)
-                        .foregroundStyle(Color.appAccent)
-                        .padding(.vertical, 11)
-                        .padding(.horizontal, 4)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                        .foregroundStyle(Color.appOnAction)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .background(Capsule().fill(Color.appAction))
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.appScale)
             }

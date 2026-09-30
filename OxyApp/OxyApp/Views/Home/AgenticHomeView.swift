@@ -1244,7 +1244,7 @@ struct AgenticHomeView: View {
         } catch {
             await MainActor.run {
                 stoppingWatchIDs.remove(id)
-                errorMessage = "Could not stop watching this."
+                errorMessage = "Couldn't stop watching this."
             }
         }
     }

@@ -174,7 +174,7 @@ struct AgentWorkspaceView: View {
         } catch {
             await MainActor.run {
                 isLoading = false
-                if snapshot == nil { errorMessage = "Could not load the workspace." }
+                if snapshot == nil { errorMessage = "Couldn't load the workspace." }
             }
         }
     }
@@ -194,7 +194,7 @@ struct AgentWorkspaceView: View {
             } catch {
                 await MainActor.run {
                     isCreatingSession = false
-                    errorMessage = "Could not create that session."
+                    errorMessage = "Couldn't create that session."
                 }
             }
         }

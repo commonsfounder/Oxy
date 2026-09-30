@@ -256,7 +256,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isExportingData = false
-                    accountStatusText = "Could not export your data: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't export your data: \(error.localizedDescription)"
                 }
             }
         }
@@ -276,7 +276,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isSigningOutAll = false
-                    accountStatusText = "Could not sign out all devices: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't sign out all devices: \(error.localizedDescription)"
                 }
             }
         }
@@ -296,7 +296,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isDeletingAccount = false
-                    accountStatusText = "Could not delete your account: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't delete your account: \(error.localizedDescription)"
                 }
             }
         }

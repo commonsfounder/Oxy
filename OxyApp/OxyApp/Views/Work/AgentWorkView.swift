@@ -231,7 +231,7 @@ struct AgentWorkView: View {
         } catch {
             await MainActor.run {
                 cancellingWatchIDs.remove(watch.id)
-                errorMessage = "Could not stop that watch."
+                errorMessage = "Couldn't stop that watch."
             }
         }
     }
@@ -253,7 +253,7 @@ struct AgentWorkView: View {
                 if let index = tasks.firstIndex(where: { $0.id == task.id }) {
                     tasks[index].status = task.status
                 }
-                errorMessage = "Could not start that work."
+                errorMessage = "Couldn't start that work."
             }
         }
         _ = await MainActor.run { runningIDs.remove(task.id) }
@@ -417,7 +417,7 @@ private struct AgentGoalComposerView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = "Could not create that goal."
+                    errorMessage = "Couldn't create that goal."
                 }
             }
         }
@@ -777,7 +777,7 @@ private struct AgentTaskDetailView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = "Could not save these controls."
+                    errorMessage = "Couldn't save these controls."
                 }
             }
         }
@@ -798,7 +798,7 @@ struct TrustCenterView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "Trust", onBack: { dismiss() })
+                        ScreenHeaderView(title: "Privacy and safety", onBack: { dismiss() })
 
                         if let errorMessage {
                             ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
@@ -936,7 +936,7 @@ struct TrustCenterView: View {
         } catch {
             await MainActor.run {
                 isLoading = false
-                errorMessage = "Could not load trust details."
+                errorMessage = "Couldn't load this right now."
             }
         }
     }

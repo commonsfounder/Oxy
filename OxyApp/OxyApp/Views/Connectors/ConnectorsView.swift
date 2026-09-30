@@ -39,8 +39,6 @@ struct ConnectorsView: View {
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
-                                serviceIntro
-
                                 if let errorMessage {
                                     ErrorBanner(message: errorMessage)
                                 }
@@ -55,7 +53,12 @@ struct ConnectorsView: View {
                                     section(title: "Connected", connectors: connectedRows)
                                 }
                                 if !availableRows.isEmpty {
-                                    section(title: "Add a service", connectors: availableRows)
+                                    section(title: "Add an app", connectors: availableRows)
+                                }
+                                if !connectedRows.isEmpty {
+                                    Text("You can disconnect an app at any time.")
+                                        .font(.appBody(12))
+                                        .foregroundStyle(Color.appMuted)
                                 }
                             }
                             .padding(.horizontal, AppSpacing.margin)
@@ -95,29 +98,6 @@ struct ConnectorsView: View {
                 Text("Adam will stop using this account until you reconnect it.")
             }
         }
-    }
-
-    private var serviceIntro: some View {
-        HStack(alignment: .top, spacing: 15) {
-            AdamMark()
-                .frame(width: 48, height: 34)
-                .frame(width: 58, height: 58)
-                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Apps Adam can use")
-                    .font(.appBody(17, weight: .bold))
-                    .foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("You can disconnect an account at any time.")
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Color.appHairline, lineWidth: 0.7))
     }
 
     // MARK: - Sections
