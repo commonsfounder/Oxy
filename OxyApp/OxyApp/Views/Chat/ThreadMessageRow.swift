@@ -32,6 +32,28 @@ enum ReplyQuote {
 
 // MARK: - Reactions
 
+/// A tapped reaction travels to Adam as a message in this exact shape (matched on the server by
+/// api/services/reactions.js). Neither it nor a "[quiet]" reply is ever drawn in the thread.
+enum ReactionText {
+    static let quietReply = "[quiet]"
+
+    static func message(_ emoji: String, on message: Message) -> String {
+        let quoted = ReplyQuote.snippet(of: message.content).replacingOccurrences(of: "”", with: "\"")
+        return "Reacted \(emoji) to “\(quoted)”"
+    }
+
+    static func isReaction(_ content: String) -> Bool {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.hasPrefix("Reacted ") && text.contains(" to “") && text.hasSuffix("”")
+    }
+
+    /// True for a quiet reply, including while it is still streaming in.
+    static func isQuiet(_ content: String) -> Bool {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !text.isEmpty && quietReply.hasPrefix(text) || text == quietReply
+    }
+}
+
 /// One emoji per message, kept on this phone. A message that has not been saved yet is recorded
 /// by what it says and when, then matched to its saved copy the next time history loads.
 @MainActor
@@ -65,10 +87,12 @@ final class ReactionStore {
         reactions[key(for: message)]
     }
 
-    /// Tapping the same emoji again removes it, like a tapback.
-    func toggle(_ emoji: String, on message: Message) {
+    /// Tapping the same emoji again removes it, like a tapback. Returns true when a reaction was added.
+    @discardableResult
+    func toggle(_ emoji: String, on message: Message) -> Bool {
         let id = key(for: message)
-        if reactions[id] == emoji {
+        let added = reactions[id] != emoji
+        if !added {
             reactions[id] = nil
             pending.removeAll { $0.key == id }
         } else {
@@ -80,6 +104,7 @@ final class ReactionStore {
             }
         }
         save()
+        return added
     }
 
     func migrate(with messages: [Message]) {

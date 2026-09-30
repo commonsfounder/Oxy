@@ -154,6 +154,7 @@ const { loadAgentContext } = require('./services/agent-context');
 const agentWorkspace = require('./services/agent-workspace');
 const agentRuntime = require('./services/agent-runtime');
 const agentApprovals = require('./services/agent-approval-runtime');
+const reactions = require('./services/reactions');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
 const dailyDigest = require('./services/daily-digest');
@@ -3869,6 +3870,7 @@ function shouldPersistChatTurn(requestedValue) {
 
 async function saveMessage(userId, role, content, trace = null) {
   if (trace?.persistConversation === false) return;
+  if (role === 'assistant' && reactions.isQuietReply(typeof content === 'string' ? content : content?.text)) return;
   const channel = typeof trace?.channel === 'string' ? trace.channel : null;
   const contentWithChannel = channel && typeof content === 'string'
     ? { text: content, channel }
@@ -7191,7 +7193,12 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     const selection = hasReviewSelection
       ? { approvalId: req.body.approvalId, taskId: req.body.approvalTaskId }
       : null;
-    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => approvalRuntime.pending(userId, message, selection));
+    // A reaction is never an answer to something waiting for a yes, whatever the emoji.
+    const isReaction = reactions.isReactionMessage(message);
+    if (isReaction && hasReviewSelection) return res.status(400).json({ error: 'A reaction cannot answer a review.' });
+    const pendingAction = isReaction
+      ? null
+      : await timedDev('chat', 'intent_classification.pending_action', {}, () => approvalRuntime.pending(userId, message, selection));
     if (selection && !pendingAction) {
       return res.status(409).json({ error: 'That review is no longer pending. Refresh the task.' });
     }

@@ -50,6 +50,21 @@ struct ChatView: View {
 
     @ViewBuilder
     private func messageRow(idx: Int, message: Message) -> some View {
+        if isHiddenInThread(message) {
+            EmptyView()
+        } else {
+            visibleMessageRow(idx: idx, message: message)
+        }
+    }
+
+    /// Reactions sent to Adam, and replies Adam chose not to make, are not shown as messages.
+    private func isHiddenInThread(_ message: Message) -> Bool {
+        if message.role == .user { return ReactionText.isReaction(message.content) }
+        return ReactionText.isQuiet(message.content) && message.turnError == nil
+    }
+
+    @ViewBuilder
+    private func visibleMessageRow(idx: Int, message: Message) -> some View {
         let msgs = viewModel.messages
         let prevRole = idx > 0 ? msgs[idx - 1].role : nil
         let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
@@ -112,7 +127,9 @@ struct ChatView: View {
                 anchor: held.frame,
                 current: ReactionStore.shared.reaction(for: held.message),
                 onReact: { emoji in
-                    ReactionStore.shared.toggle(emoji, on: held.message)
+                    if ReactionStore.shared.toggle(emoji, on: held.message) {
+                        viewModel.sendReaction(emoji, on: held.message, userId: appState.userId)
+                    }
                     HapticManager.shared.select()
                     heldMessage = nil
                 },
@@ -187,6 +204,7 @@ struct ChatView: View {
     private var assistantReplySettled: Bool {
         guard let last = viewModel.messages.last else { return false }
         return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
+            && !ReactionText.isQuiet(last.content)
     }
 
     var body: some View {
