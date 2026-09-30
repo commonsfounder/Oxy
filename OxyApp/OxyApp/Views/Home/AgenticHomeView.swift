@@ -973,11 +973,11 @@ struct AgenticHomeView: View {
                 ForEach(recentEntities) { entity in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entity.entityName)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.appBody(13, weight: .medium))
                             .foregroundStyle(GlebChrome.ink.opacity(0.85))
                             .lineLimit(1)
                         Text(entity.site)
-                            .font(.system(size: 11, weight: .regular))
+                            .font(.appBody(11, weight: .regular))
                             .foregroundStyle(GlebChrome.ink.opacity(0.5))
                             .lineLimit(1)
                     }
@@ -1015,7 +1015,7 @@ struct AgenticHomeView: View {
 
             HStack(spacing: 9) {
                 TextField("Ask or delegate", text: $composerDraft)
-                    .font(.system(size: 16))
+                    .font(.appBody(16))
                     .foregroundStyle(GlebChrome.ink)
                     .focused($composerFocused)
                     .submitLabel(.send)
@@ -1454,7 +1454,7 @@ private struct LifeBriefingCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("What matters")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appBody(13, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(0.5))
                 Spacer()
                 AppIcon("sparkles", size: 15)
@@ -1475,13 +1475,13 @@ private struct LifeBriefingCard: View {
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(item.displayTitle)
-                                    .font(.system(size: 15, weight: .semibold))
+                                    .font(.appBody(15, weight: .semibold))
                                     .foregroundStyle(GlebChrome.ink)
                                     .multilineTextAlignment(.leading)
                                 if item.kind.caseInsensitiveCompare("approval") != .orderedSame,
                                    let detail = item.displayDetail {
                                     Text(detail)
-                                        .font(.system(size: 13))
+                                        .font(.appBody(13))
                                         .foregroundStyle(GlebChrome.ink.opacity(0.55))
                                         .multilineTextAlignment(.leading)
                                 }
@@ -1775,14 +1775,14 @@ struct MissionCardView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(mission.displayTitle)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.appBody(19, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let vendor = mission.vendor {
                         HStack(spacing: 5) {
                             AppIcon("box", size: 11)
                             Text(vendor)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.appBody(12, weight: .semibold))
                         }
                         .foregroundStyle(ink.opacity(0.5))
                         .padding(.horizontal, 10)
@@ -1805,7 +1805,7 @@ struct MissionCardView: View {
                 if let eta = deliveryETA {
                     HStack(spacing: 5) {
                         AppIcon("clock", size: 12)
-                        Text(eta).font(.system(size: 12, weight: .medium))
+                        Text(eta).font(.appBody(12, weight: .medium))
                     }
                     .foregroundStyle(ink.opacity(0.5))
                 }
@@ -1888,7 +1888,7 @@ struct MissionCardView: View {
                 Spacer(minLength: 8)
                 if mission.mailItems.count > 1 {
                     Text("\(mailPage + 1)/\(mission.mailItems.count)")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.appBody(12, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
@@ -1921,7 +1921,7 @@ struct MissionCardView: View {
                         .frame(width: 40, height: 40)
                         .overlay(
                             Text(monogram(name))
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.appBody(15, weight: .semibold))
                                 .foregroundStyle(ink.opacity(0.65))
                         )
                     providerBadge(email.provider)
@@ -1929,16 +1929,16 @@ struct MissionCardView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.appBody(15, weight: .semibold))
                         .foregroundStyle(ink)
                         .lineLimit(1)
                     Text(email.cleanSubject)
-                        .font(.system(size: 13))
+                        .font(.appBody(13))
                         .foregroundStyle(ink.opacity(0.55))
                         .lineLimit(1)
                     if let text = (summary?.isEmpty == false ? summary : email.cleanSnippet), !text.isEmpty {
                         Text(text)
-                            .font(.system(size: 12.5))
+                            .font(.appBody(12.5))
                             .foregroundStyle(ink.opacity(0.6))
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1954,7 +1954,7 @@ struct MissionCardView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Text(email.cta?.isEmpty == false ? email.cta! : "Draft reply")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(14, weight: .semibold))
                         AppIcon("arrow-right", size: 15, weight: .semibold)
                     }
                     .foregroundStyle(Color.white)
@@ -2005,11 +2005,11 @@ struct MissionCardView: View {
                         .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.42))
                     Text(mission.displayTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.appBody(17, weight: .semibold))
                         .foregroundStyle(ink)
                     if let detail = mission.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 13))
+                            .font(.appBody(13))
                             .foregroundStyle(ink.opacity(0.55))
                     }
                 }
@@ -2043,12 +2043,12 @@ struct MissionCardView: View {
                             .foregroundStyle(mission.kind == .status ? Color(red: 0.16, green: 0.6, blue: 0.3) : ink.opacity(0.42))
                     }
                     Text(mission.displayTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.appBody(17, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let detail = mission.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 13))
+                            .font(.appBody(13))
                             .foregroundStyle(ink.opacity(0.55))
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -2080,7 +2080,7 @@ struct MissionCardView: View {
         Button(action: onCTA) {
             HStack(spacing: 8) {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                 AppIcon("arrow-right", size: 15, weight: .semibold)
             }
             .foregroundStyle(primary ? Color.white : ink)
@@ -2100,7 +2100,7 @@ struct MissionCardView: View {
             .frame(width: 36, height: 36)
             .overlay(
                 Text(monogram(vendor ?? "•"))
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.appBody(13, weight: .bold))
                     .foregroundStyle(.white)
             )
             .shadow(color: .black.opacity(0.12), radius: 6, y: 2)

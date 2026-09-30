@@ -336,7 +336,7 @@ private struct AppIconView: View {
                 }
             } else if let emoji = firstEmoji(from: candidates) {
                 Text(emoji)
-                    .font(.system(size: 20))
+                    .font(.appBody(20))
             } else {
                 brandFallback
             }

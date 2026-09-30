@@ -143,11 +143,11 @@ struct SettingsView: View {
                             Button(action: handleVersionTap) {
                                 HStack {
                                     Text("Version")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.appBody(14, weight: .semibold))
                                         .foregroundStyle(Color.appInk)
                                     Spacer()
                                     Text("adam-0001-alpha")
-                                        .font(.system(size: 14, weight: .regular))
+                                        .font(.appBody(14, weight: .regular))
                                         .foregroundStyle(Color.appMuted)
                                         .lineLimit(1)
                                 }
@@ -280,7 +280,7 @@ struct SettingsView: View {
 
         return HStack(spacing: 12) {
             Text(label)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(14, weight: .semibold))
                 .foregroundStyle(Color.appInk)
             Spacer(minLength: 8)
             Menu {
@@ -328,7 +328,7 @@ struct SettingsView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer()
                 AppIcon("chevron-right", size: 13)
@@ -347,11 +347,11 @@ struct SettingsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.appBody(12, weight: .regular))
                         .foregroundStyle(Color.appMuted)
                 }
             }
@@ -368,7 +368,7 @@ struct SettingsView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(15, weight: .regular))
                 Spacer()
                 AppIcon("arrow-up-right", size: 12)
                     .foregroundStyle(Color.appMuted)
@@ -507,7 +507,7 @@ private struct BackendURLEditorSheet: View {
                             onDone()
                         } label: {
                             Text("Reset to default")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.appBody(14, weight: .medium))
                         }
                     }
 
@@ -527,7 +527,7 @@ private struct BackendURLEditorSheet: View {
                         currentURL = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                         onDone()
                     }
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appBody(15, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 }
             }
@@ -567,7 +567,7 @@ private struct PairedDisplaysView: View {
 
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Start pairing")
-                                    .font(.system(size: 15, weight: .semibold))
+                                    .font(.appBody(15, weight: .semibold))
                                     .foregroundStyle(Color.appInk)
                                 AppLineField(placeholder: "Display name (optional)", text: $pairingName)
                                 Button {
@@ -577,7 +577,7 @@ private struct PairedDisplaysView: View {
                                         Text(isWorking ? "Creating code…" : "Create pairing code")
                                         Spacer()
                                     }
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.appBody(14, weight: .semibold))
                                     .foregroundStyle(Color.appInk)
                                     .padding(.vertical, 14)
                                 }
@@ -589,7 +589,7 @@ private struct PairedDisplaysView: View {
                             if let challenge {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text("Open this link on the display, then enter the code")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.appBody(14, weight: .semibold))
                                         .foregroundStyle(Color.appInk)
                                     Text(challenge.displayUrl)
                                         .font(.system(size: 12, weight: .regular, design: .monospaced))
@@ -605,7 +605,7 @@ private struct PairedDisplaysView: View {
                                             UIPasteboard.general.string = challenge.code
                                             copied = true
                                         }
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.appBody(13, weight: .semibold))
                                         .foregroundStyle(Color.appAccent)
                                     }
                                     Text("One-time code. It expires after 10 minutes.")
@@ -631,7 +631,7 @@ private struct PairedDisplaysView: View {
                                             HStack(alignment: .top, spacing: 12) {
                                                 VStack(alignment: .leading, spacing: 4) {
                                                     Text(display.name)
-                                                        .font(.system(size: 15, weight: .semibold))
+                                                        .font(.appBody(15, weight: .semibold))
                                                         .foregroundStyle(Color.appInk)
                                                     Text(displayPresenceLabel(display))
                                                         .font(.appBody(12))
@@ -642,7 +642,7 @@ private struct PairedDisplaysView: View {
                                                     pendingRevoke = display
                                                     showRevokeConfirmation = true
                                                 }
-                                                .font(.system(size: 13, weight: .semibold))
+                                                .font(.appBody(13, weight: .semibold))
                                                 .foregroundStyle(Color.appDestructive)
                                             }
                                             .padding(.vertical, 14)
@@ -782,7 +782,7 @@ private struct FreedomSlider: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("How much Adam does on its own")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(15, weight: .regular))
                     .foregroundStyle(Color.appInk)
                 Text(simpleLabel)
                     .font(.appBody(12))

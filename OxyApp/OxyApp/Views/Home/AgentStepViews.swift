@@ -10,11 +10,11 @@ struct StepTitleBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 30, weight: .bold))
+                .font(.appBody(30, weight: .bold))
                 .foregroundStyle(ink)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 15))
+                    .font(.appBody(15))
                     .foregroundStyle(ink.opacity(0.55))
             }
         }
@@ -36,23 +36,23 @@ struct PaymentConfirmStepView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text(details.merchant)
-                        .font(.system(size: 15))
+                        .font(.appBody(15))
                         .foregroundStyle(ink.opacity(0.6))
                     Spacer()
                     Text(details.amount)
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.appBody(26, weight: .bold))
                         .foregroundStyle(ink)
                 }
                 Divider().overlay(ink.opacity(0.08))
                 Text(details.detail)
-                    .font(.system(size: 13))
+                    .font(.appBody(13))
                     .foregroundStyle(ink.opacity(0.5))
             }
             .padding(18)
             .background { MissionGlassPlate() }
 
             Text("Cancel before payment.")
-                .font(.system(size: 12))
+                .font(.appBody(12))
                 .foregroundStyle(ink.opacity(0.4))
                 .padding(.top, 12)
         }
@@ -75,7 +75,7 @@ struct RideConfirmStepView: View {
                         .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     Text(estimate)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.appBody(22, weight: .bold))
                         .foregroundStyle(ink)
                 }
                 .padding(.bottom, 14)
@@ -84,7 +84,7 @@ struct RideConfirmStepView: View {
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
                 Text("Uber shows the final fare before you confirm.")
-                    .font(.system(size: 12))
+                    .font(.appBody(12))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(ink.opacity(0.45))
@@ -107,12 +107,12 @@ struct LinkResultStepView: View {
                     ForEach(Array(details.steps.enumerated()), id: \.offset) { index, step in
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(index + 1)")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.appBody(12, weight: .semibold))
                                 .foregroundStyle(ink.opacity(0.55))
                                 .frame(width: 20, height: 20)
                                 .background(ink.opacity(0.08), in: Circle())
                             Text(step)
-                                .font(.system(size: 14))
+                                .font(.appBody(14))
                                 .foregroundStyle(ink.opacity(0.85))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -130,7 +130,7 @@ struct LinkResultStepView: View {
                                 HStack(spacing: 10) {
                                     AppIcon("arrow-up-right", size: 13)
                                     Text(link.label)
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.appBody(14, weight: .semibold))
                                     Spacer(minLength: 0)
                                 }
                                 .foregroundStyle(ink)
@@ -148,7 +148,7 @@ struct LinkResultStepView: View {
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
                 Text("Links from this email.")
-                    .font(.system(size: 12))
+                    .font(.appBody(12))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(ink.opacity(0.45))
@@ -174,7 +174,7 @@ struct SubjectDetailStepView: View {
                         .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     Text(amountText)
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.appBody(30, weight: .bold))
                         .foregroundStyle(ink)
                 }
             }
@@ -191,7 +191,7 @@ struct SubjectDetailStepView: View {
                             ForEach(Array(details.options.enumerated()), id: \.offset) { index, option in
                                 let isSelected = selectedOptionIndex == index
                                 Text(option)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.appBody(13, weight: .medium))
                                     .foregroundStyle(isSelected ? (colorScheme == .dark ? Color.black : Color.white) : ink.opacity(0.75))
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 9)
@@ -218,7 +218,7 @@ struct SubjectDetailStepView: View {
                 HStack(spacing: 6) {
                     AppIcon("shield-check", size: 13)
                     Text("Final price is confirmed at checkout")
-                        .font(.system(size: 12))
+                        .font(.appBody(12))
                 }
                 .foregroundStyle(ink.opacity(0.45))
             }
@@ -280,7 +280,7 @@ struct AssistantAskStepView: View {
                 AppIcon("sparkles", size: 16)
                     .foregroundStyle(ink.opacity(0.5))
                 Text(text)
-                    .font(.system(size: 19, weight: .medium))
+                    .font(.appBody(19, weight: .medium))
                     .foregroundStyle(ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -290,7 +290,7 @@ struct AssistantAskStepView: View {
 
             HStack(spacing: 8) {
                 TextField("Type your answer", text: $draft, axis: .vertical)
-                    .font(.system(size: 15))
+                    .font(.appBody(15))
                     .foregroundStyle(ink)
                     .focused($focused)
                     .submitLabel(.send)
@@ -383,7 +383,7 @@ struct LiveStepsTraceView: View {
                             .frame(width: 5, height: 5)
                             .padding(.top, 6)
                         Text(step.stepName)
-                            .font(.system(size: 13))
+                            .font(.appBody(13))
                             .foregroundStyle(ink.opacity(0.6))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -405,10 +405,10 @@ struct SessionDoneStepView: View {
             AppIcon("check-circle", size: 30)
                 .foregroundStyle(ink.opacity(0.8))
             Text(title)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.appBody(22, weight: .semibold))
                 .foregroundStyle(ink)
             Text("Added to Home.")
-                .font(.system(size: 14))
+                .font(.appBody(14))
                 .foregroundStyle(ink.opacity(0.55))
         }
         .padding(18)

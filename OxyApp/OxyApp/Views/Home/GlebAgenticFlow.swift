@@ -160,7 +160,7 @@ struct GlebTopChrome: View {
                 AppIcon(AppGlyph.weather(weather.symbolName), size: 15)
                     .foregroundStyle(Color.orange.opacity(0.9))
                 Text("\(Int(weather.temperatureC.rounded()))°")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(0.8))
                 AppIcon("chevron-down", size: 10)
                     .foregroundStyle(GlebChrome.ink.opacity(0.4))
@@ -188,18 +188,18 @@ struct GlebTopChrome: View {
 
         VStack(alignment: .leading, spacing: 14) {
             Text(w.conditionDescription)
-                .font(.system(size: 13, weight: .medium))
+                .font(.appBody(13, weight: .medium))
                 .foregroundStyle(GlebChrome.ink.opacity(0.75))
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
                 ForEach(cells, id: \.0) { cell in
                     VStack(spacing: 4) {
                         Text(cell.0.uppercased())
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.appBody(9, weight: .semibold))
                             .tracking(0.8)
                             .foregroundStyle(GlebChrome.muted)
                         Text(cell.1)
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.appBody(15, weight: .medium))
                             .foregroundStyle(GlebChrome.ink)
                     }
                     .frame(maxWidth: .infinity)

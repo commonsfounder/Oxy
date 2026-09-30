@@ -186,7 +186,7 @@ struct ChatView: View {
                     HStack(spacing: 8) {
                             AppIcon(sf: "wifi.slash", size: 14)
                             Text("No internet connection")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.appBody(12, weight: .medium))
                         }
                         .foregroundStyle(Color.white)
                         .frame(maxWidth: .infinity)
@@ -200,10 +200,10 @@ struct ChatView: View {
                             AppIcon(sf: "clock.arrow.circlepath", size: 14)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Viewing history")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.appBody(12, weight: .semibold))
                                 if let label = viewModel.historySnapshotLabel {
                                     Text(label)
-                                        .font(.system(size: 11))
+                                        .font(.appBody(11))
                                 }
                             }
                             Spacer()
@@ -212,7 +212,7 @@ struct ChatView: View {
                                     await viewModel.returnToCurrentChat(userId: appState.userId)
                                 }
                             }
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.appBody(12, weight: .semibold))
                         }
                         .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 14)
@@ -597,7 +597,7 @@ struct ChatView: View {
     private func attachSheetRow(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 16, weight: .regular))
+                .font(.appBody(16, weight: .regular))
                 .foregroundStyle(Color.appInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -1183,11 +1183,11 @@ private struct ChatInputBar: View {
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.appBody(13, weight: .medium))
                             .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
-                            .font(.system(size: 11))
+                            .font(.appBody(11))
                             .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
@@ -1267,7 +1267,7 @@ private struct ChatInputBar: View {
 
     private var textField: some View {
         TextField(incognito ? "Private — not saved" : "Ask Adam", text: $text, axis: .vertical)
-            .font(.system(size: 14.5, weight: .regular))
+            .font(.appBody(14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .lineLimit(1...6)
@@ -1483,18 +1483,18 @@ struct PendantOverlay: View {
                 AppIcon(sf: "exclamationmark.circle.fill", size: 15)
                     .foregroundStyle(Color.appWarning)
                 Text(notice)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.appBody(14, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
             } else if state == .listening {
                 PendantWaveform(active: true)
                 Text("Listening")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(.primary)
                 if let t = transcript, !t.isEmpty {
                     Text("·").foregroundStyle(.tertiary)
                     Text(t)
-                        .font(.system(size: 14))
+                        .font(.appBody(14))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1506,12 +1506,12 @@ struct PendantOverlay: View {
                     .symbolEffect(.variableColor.iterative, isActive: true)
                 if let t = transcript, !t.isEmpty {
                     Text(t)
-                        .font(.system(size: 14))
+                        .font(.appBody(14))
                         .foregroundStyle(Color.appInk)
                         .lineLimit(1)
                 } else {
                     Text("Transcribing…")
-                        .font(.system(size: 14))
+                        .font(.appBody(14))
                         .foregroundStyle(Color.appMuted)
                 }
             }

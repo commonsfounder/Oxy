@@ -262,8 +262,10 @@ extension Font {
         )))
     }
 
+    /// System text that follows the phone's text-size setting, capped so layouts stay usable.
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight)
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
+        return .system(size: min(scaled, size * 1.7), weight: weight)
     }
 
     static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {

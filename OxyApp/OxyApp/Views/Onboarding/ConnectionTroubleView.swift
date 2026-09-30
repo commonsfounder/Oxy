@@ -55,7 +55,7 @@ struct ConnectionTroubleView: View {
                 .font(.appMono(13))
                 .foregroundStyle(Color.appMuted)
             Text(text)
-                .font(.system(size: 15, weight: .regular))
+                .font(.appBody(15, weight: .regular))
                 .foregroundStyle(Color.appInk)
             Spacer(minLength: 0)
         }

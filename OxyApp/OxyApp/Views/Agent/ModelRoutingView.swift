@@ -41,15 +41,15 @@ struct ModelRoutingView: View {
             HStack(spacing: 10) {
                 AppIcon("sparkles", size: 16).foregroundStyle(Color.appAccent)
                 Text("Adam's AI")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
             }
             Text(providerName(snapshot.active.provider))
-                .font(.system(size: 14, weight: .medium))
+                .font(.appBody(14, weight: .medium))
                 .foregroundStyle(Color.appInk)
             if !snapshot.selected.configured {
                 Text("This choice is not set up yet.")
-                    .font(.system(size: 12))
+                    .font(.appBody(12))
                     .foregroundStyle(Color.appMuted)
             }
         }
@@ -76,7 +76,7 @@ struct ModelRoutingView: View {
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(14, weight: .semibold))
                 .foregroundStyle(Color.appInk)
                 .padding(.vertical, 15)
                 .padding(.horizontal, 16)
@@ -97,15 +97,15 @@ struct ModelRoutingView: View {
                     AppIcon(provider.configured ? "bolt" : "dotted", size: 14)
                         .foregroundStyle(provider.configured ? Color.appAccent : Color.appMuted)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(provider.name).font(.system(size: 14, weight: .semibold))
+                        Text(provider.name).font(.appBody(14, weight: .semibold))
                         Text(provider.configured ? "Ready" : "Not set up")
-                            .font(.system(size: 12))
+                            .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
                     if provider.id == selectedProvider {
                         Text("In use")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.appBody(11, weight: .semibold))
                             .foregroundStyle(Color.appAccent)
                     }
                 }
@@ -116,10 +116,10 @@ struct ModelRoutingView: View {
 
     private func errorState(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("AI choices unavailable").font(.system(size: 18, weight: .semibold))
-            Text(message).font(.system(size: 13)).foregroundStyle(Color.appMuted)
+            Text("AI choices unavailable").font(.appBody(18, weight: .semibold))
+            Text(message).font(.appBody(13)).foregroundStyle(Color.appMuted)
             Button("Try again") { Task { await load() } }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(14, weight: .semibold))
         }
         .foregroundStyle(Color.appInk)
         .padding(.top, 40)

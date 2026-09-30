@@ -73,7 +73,7 @@ struct LegalConsentView: View {
                     + Text(emphasis)
                         .foregroundColor(Color.appInk)
                 )
-                .font(.system(size: 14, weight: .regular))
+                .font(.appBody(14, weight: .regular))
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 20)

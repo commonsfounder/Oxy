@@ -36,14 +36,14 @@ struct ProfileView: View {
                         VStack(alignment: .leading, spacing: 36) {
                             section(title: "Identity") {
                                 HStack {
-                                    Text("Your Name")
-                                        .font(.system(size: 15, weight: .regular))
+                                    Text("Your name")
+                                        .font(.appBody(15, weight: .regular))
                                         .foregroundStyle(Color.appInk)
                                     Spacer(minLength: 16)
                                     TextField(
                                         "",
                                         text: $settings.userName,
-                                        prompt: Text("Not set — tap to add").foregroundStyle(Color.appMuted)
+                                        prompt: Text("Add your name").foregroundStyle(Color.appMuted)
                                     )
                                         .font(.appBody(15))
                                         .foregroundStyle(Color.appInk)
@@ -57,14 +57,14 @@ struct ProfileView: View {
                                 SettingsDivider()
 
                                 HStack {
-                                    Text("Assistant Name")
-                                        .font(.system(size: 15, weight: .regular))
+                                    Text("Assistant name")
+                                        .font(.appBody(15, weight: .regular))
                                         .foregroundStyle(Color.appInk)
                                     Spacer(minLength: 16)
                                     TextField(
                                         "",
                                         text: $settings.name,
-                                        prompt: Text("Not set — tap to name").foregroundStyle(Color.appMuted)
+                                        prompt: Text("Adam").foregroundStyle(Color.appMuted)
                                     )
                                         .font(.appBody(15))
                                         .foregroundStyle(Color.appInk)
@@ -80,31 +80,29 @@ struct ProfileView: View {
                             }
 
                             section(title: "Adam") {
-                                actionRow(label: "About You", action: { profileDestination = .aboutYou })
+                                actionRow(label: "About you", action: { profileDestination = .aboutYou })
                                 SettingsDivider()
                                 actionRow(label: "Memory", action: { profileDestination = .memory })
                             }
 
-                            section(title: "Your Data") {
+                            section(title: "Your data") {
                                 actionRow(
-                                    label: isExportingData ? "Preparing Export…" : "Export My Data",
+                                    label: isExportingData ? "Preparing export…" : "Export my data",
                                     action: exportMyData
                                 )
                                 .disabled(isExportingData || isDeletingAccount)
                             }
 
-                            section(title: "Sign Out & Deletion") {
+                            section(title: "Sign out and delete") {
                                 actionRow(
-                                    label: "Sign Out",
-                                    destructive: true,
+                                    label: "Sign out",
                                     action: { showSignOutConfirm = true }
                                 )
 
                                 SettingsDivider()
 
                                 actionRow(
-                                    label: isSigningOutAll ? "Signing Out…" : "Sign Out All Devices",
-                                    destructive: true,
+                                    label: isSigningOutAll ? "Signing out…" : "Sign out of all devices",
                                     action: { showSignOutAllConfirm = true }
                                 )
                                 .disabled(isSigningOutAll)
@@ -112,7 +110,7 @@ struct ProfileView: View {
                                 SettingsDivider()
 
                                 actionRow(
-                                    label: isDeletingAccount ? "Deleting Account…" : "Delete Account",
+                                    label: isDeletingAccount ? "Deleting account…" : "Delete account",
                                     destructive: true,
                                     action: { showDeleteAccountConfirm = true }
                                 )
@@ -121,7 +119,7 @@ struct ProfileView: View {
                                 if let accountStatusText {
                                     SettingsDivider()
                                     Text(accountStatusText)
-                                        .font(.system(size: 12, weight: .light))
+                                        .font(.appBody(12, weight: .regular))
                                         .foregroundStyle(Color.appMuted)
                                         .lineSpacing(3)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,19 +135,19 @@ struct ProfileView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear(perform: loadSettings)
-            .alert("Sign Out", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) { appState.logout() }
+            .alert("Sign out", isPresented: $showSignOutConfirm) {
+                Button("Sign out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .alert("Sign Out All Devices", isPresented: $showSignOutAllConfirm) {
-                Button("Sign Out All", role: .destructive) { signOutAllDevices() }
+            .alert("Sign out of all devices", isPresented: $showSignOutAllConfirm) {
+                Button("Sign out everywhere", role: .destructive) { signOutAllDevices() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will invalidate all active sessions on every device. You will be signed out here too.")
             }
-            .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
+            .alert("Delete account", isPresented: $showDeleteAccountConfirm) {
                 Button("Delete", role: .destructive) { deleteAccount() }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -184,7 +182,7 @@ struct ProfileView: View {
     private func identityRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 15, weight: .regular))
+                .font(.appBody(15, weight: .regular))
                 .foregroundStyle(Color.appInk)
             Spacer(minLength: 16)
             Text(value)
@@ -207,7 +205,7 @@ struct ProfileView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.appBody(15, weight: .regular))
                 Spacer()
                 AppIcon("chevron-right", size: 14)
                     .foregroundStyle(Color.appMuted)

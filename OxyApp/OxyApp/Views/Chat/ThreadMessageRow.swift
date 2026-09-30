@@ -132,7 +132,7 @@ struct ThreadMessageRow<Content: View>: View {
             .overlay(alignment: isUser ? .topTrailing : .topLeading) {
                 if let reaction {
                     Text(reaction)
-                        .font(.system(size: 15))
+                        .font(.appBody(15))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.appBackground))
                         .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
@@ -238,7 +238,7 @@ struct ReactionPicker: View {
                         ForEach(ReactionStore.choices, id: \.self) { emoji in
                             Button { onReact(emoji) } label: {
                                 Text(emoji)
-                                    .font(.system(size: 26))
+                                    .font(.appBody(26))
                                     .frame(width: 44, height: 44)
                                     .background(Circle().fill(current == emoji ? Color.appReceivedBubble : Color.clear))
                             }

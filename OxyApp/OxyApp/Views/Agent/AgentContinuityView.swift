@@ -27,12 +27,12 @@ struct AgentContinuityView: View {
                         }
                         if let successMessage {
                             Text(successMessage)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.appBody(13, weight: .medium))
                                 .foregroundStyle(Color.appAccent)
                         }
                         if let errorMessage {
                             Text(errorMessage)
-                                .font(.system(size: 13))
+                                .font(.appBody(13))
                                 .foregroundStyle(Color.appDestructive)
                         }
                         if let snapshot {
@@ -68,7 +68,7 @@ struct AgentContinuityView: View {
                 AppSectionTitle("Bring your history", size: 20)
             }
             Text("Import a .zip export. A .json includes conversations only.")
-                .font(.system(size: 13))
+                .font(.appBody(13))
                 .foregroundStyle(Color.appMuted)
             Button {
                 showingImporter = true
@@ -78,7 +78,7 @@ struct AgentContinuityView: View {
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appBody(14, weight: .semibold))
                 .foregroundStyle(Color.appInk)
                 .padding(.vertical, 15)
                 .padding(.horizontal, 16)
@@ -109,7 +109,7 @@ struct AgentContinuityView: View {
                             .foregroundStyle(row.found ? Color.appInk : Color.appMuted)
                         Spacer()
                         Text(row.detail)
-                            .font(.system(size: 12))
+                            .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                     }
                 }
@@ -119,10 +119,10 @@ struct AgentContinuityView: View {
                 SettingsDivider()
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Automations")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                     Text("These arrive switched off. Turn each one off in \(preview.source.capitalized) before enabling it here, or it runs twice.")
-                        .font(.system(size: 12))
+                        .font(.appBody(12))
                         .foregroundStyle(Color.appMuted)
                     ForEach(preview.workflows.prefix(8)) { workflow in
                         HStack(alignment: .top, spacing: 10) {
@@ -130,17 +130,17 @@ struct AgentContinuityView: View {
                                 .foregroundStyle(workflow.isScheduled ? Color.appAccent : Color.appMuted)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(workflow.name)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.appBody(13, weight: .medium))
                                     .foregroundStyle(Color.appInk)
                                 Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger — runs only when you ask")
-                                    .font(.system(size: 11))
+                                    .font(.appBody(11))
                                     .foregroundStyle(Color.appMuted)
                             }
                         }
                     }
                     if preview.workflows.count > 8 {
                         Text("and \(preview.workflows.count - 8) more")
-                            .font(.system(size: 11))
+                            .font(.appBody(11))
                             .foregroundStyle(Color.appMuted)
                     }
                 }
@@ -151,7 +151,7 @@ struct AgentContinuityView: View {
                     Task { await confirmImport() }
                 } label: {
                     Text(isWorking ? "Importing…" : "Import")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(14, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .padding(.vertical, 14)
                         .frame(maxWidth: .infinity)
@@ -161,7 +161,7 @@ struct AgentContinuityView: View {
                 .disabled(isWorking)
 
                 Button("Cancel") { reset() }
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.appBody(14, weight: .medium))
                     .foregroundStyle(Color.appMuted)
                     .disabled(isWorking)
             }
@@ -210,20 +210,20 @@ struct AgentContinuityView: View {
             AppSectionTitle("Imported", size: 20)
             if imports.isEmpty {
                 Text("Nothing imported yet.")
-                    .font(.system(size: 13))
+                    .font(.appBody(13))
                     .foregroundStyle(Color.appMuted)
             } else {
                 ForEach(imports) { item in
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
-                            Text(item.source.capitalized).font(.system(size: 14, weight: .semibold))
+                            Text(item.source.capitalized).font(.appBody(14, weight: .semibold))
                             Spacer()
                             Text(item.status.capitalized)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.appBody(11, weight: .semibold))
                                 .foregroundStyle(item.status == "failed" ? Color.appDestructive : Color.appAccent)
                         }
                         Text("\(item.conversationCount) conversations · \(item.messageCount) messages · \(item.memoryCount) memories")
-                            .font(.system(size: 12))
+                            .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                     }
                     .padding(.vertical, 12)

@@ -115,7 +115,7 @@ private struct PendantPairingSection: View {
             VStack(spacing: 0) {
                 HStack {
                     Text("Status")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(14, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                     Spacer()
                     if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
@@ -144,11 +144,11 @@ private struct PendantPairingSection: View {
                     SettingsDivider()
                     HStack {
                         Text("Device")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(14, weight: .semibold))
                             .foregroundStyle(Color.appInk)
                         Spacer()
                         Text(name)
-                            .font(.system(size: 14, weight: .regular))
+                            .font(.appBody(14, weight: .regular))
                             .foregroundStyle(Color.appMuted)
                     }
                     .padding(.vertical, 16)
@@ -158,7 +158,7 @@ private struct PendantPairingSection: View {
                 if let error = pendant.lastError {
                     SettingsDivider()
                     Text(error)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.appBody(12, weight: .regular))
                         .foregroundStyle(Color.appDestructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 16)
@@ -169,20 +169,20 @@ private struct PendantPairingSection: View {
                     SettingsDivider()
                     HStack {
                         Text("Doorway presence")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(14, weight: .semibold))
                             .foregroundStyle(Color.appInk)
                         Spacer()
                         if pendant.isCurrentBeaconTrustedForDoorwayPresence {
                             Button("Stop using") {
                                 pendant.stopUsingConnectedBeaconForDoorwayPresence()
                             }
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(14, weight: .semibold))
                             .foregroundStyle(Color.appDestructive)
                         } else {
                             Button("Use this device") {
                                 _ = pendant.useConnectedBeaconForDoorwayPresence()
                             }
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appBody(14, weight: .semibold))
                             .foregroundStyle(Color.appInk)
                         }
                     }
@@ -196,21 +196,21 @@ private struct PendantPairingSection: View {
                         Button("Unpair") {
                             showUnpairConfirm = true
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(14, weight: .semibold))
                         .foregroundStyle(Color.appDestructive)
                         .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
                         Button("Cancel") {
                             pendant.stopScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(14, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     } else {
                         Button("Scan for home device") {
                             pendant.startScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appBody(14, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     }

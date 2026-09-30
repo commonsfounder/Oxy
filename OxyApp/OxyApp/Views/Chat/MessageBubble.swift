@@ -352,7 +352,7 @@ struct DisplayRenderSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Choose a paired display")
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.appBody(21, weight: .semibold))
                     .foregroundStyle(Color.appInk)
 
                 Text("This sends the reply as a short readable update.")
@@ -388,7 +388,7 @@ struct DisplayRenderSheet: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(display.name)
-                                            .font(.system(size: 15, weight: .semibold))
+                                            .font(.appBody(15, weight: .semibold))
                                             .foregroundStyle(Color.appInk)
                                         Text("Paired")
                                             .font(.appBody(12))

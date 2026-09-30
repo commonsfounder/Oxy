@@ -18,7 +18,7 @@ struct LiveWorkHeader: View {
                     .tracking(1.7)
                     .foregroundStyle(Color.appAccent)
                 Text(label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(0.82))
                     .contentTransition(.numericText())
             }
@@ -88,7 +88,7 @@ struct BoardLaneSection: View {
                     .foregroundStyle(GlebChrome.ink.opacity(lane == .needsYou ? 0.82 : 0.52))
 
                 Text("\(items.count)")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.appBody(11, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(0.5))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -135,13 +135,13 @@ struct BoardCard: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.appBody(16, weight: .semibold))
                         .foregroundStyle(GlebChrome.ink)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let line = questionLine, !line.isEmpty {
                         Text(line)
-                            .font(.system(size: 14))
+                            .font(.appBody(14))
                             .foregroundStyle(GlebChrome.ink.opacity(0.62))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -179,11 +179,11 @@ struct BoardCard: View {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(option.label)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.appBody(14, weight: .semibold))
                                 .foregroundStyle(GlebChrome.ink)
                             if let detail = option.detail, !detail.isEmpty {
                                 Text(detail)
-                                    .font(.system(size: 12))
+                                    .font(.appBody(12))
                                     .foregroundStyle(GlebChrome.ink.opacity(0.5))
                             }
                         }
@@ -210,7 +210,7 @@ struct BoardCard: View {
                 onDecide(true, nil)
             } label: {
                 Text("Approve")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
@@ -223,7 +223,7 @@ struct BoardCard: View {
                 onDecide(false, nil)
             } label: {
                 Text("Not now")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.appBody(14, weight: .medium))
                     .foregroundStyle(GlebChrome.ink.opacity(0.6))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
@@ -241,7 +241,7 @@ struct BoardCard: View {
         } label: {
             HStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appBody(14, weight: .semibold))
                 AppIcon("arrow-right", size: 12)
             }
             .foregroundStyle(GlebChrome.ink)
@@ -267,14 +267,14 @@ struct BoardCard: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.title)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.appBody(16, weight: .semibold))
                             .foregroundStyle(GlebChrome.ink)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
 
                         if let detail = subtitle, !detail.isEmpty {
                             Text(detail)
-                                .font(.system(size: 13))
+                                .font(.appBody(13))
                                 .foregroundStyle(GlebChrome.ink.opacity(0.55))
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -315,14 +315,14 @@ struct BoardCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.appBody(14, weight: .medium))
                         .foregroundStyle(GlebChrome.ink.opacity(0.9))
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
 
                     if let detail = item.detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 12.5))
+                            .font(.appBody(12.5))
                             .foregroundStyle(GlebChrome.ink.opacity(0.5))
                             .multilineTextAlignment(.leading)
                             .lineLimit(2)
@@ -333,7 +333,7 @@ struct BoardCard: View {
 
                 if let relative = item.date?.oxyRelativeShort {
                     Text(relative)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.appBody(11, weight: .medium))
                         .foregroundStyle(GlebChrome.ink.opacity(0.35))
                         .padding(.top, 2)
                 }
@@ -377,7 +377,7 @@ struct ProgressRail: View {
             .frame(height: 4)
 
             Text("Step \(progress.done) of \(progress.total)")
-                .font(.system(size: 11, weight: .medium))
+                .font(.appBody(11, weight: .medium))
                 .foregroundStyle(GlebChrome.ink.opacity(0.42))
         }
     }

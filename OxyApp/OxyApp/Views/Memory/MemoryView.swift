@@ -161,7 +161,7 @@ struct MemoryView: View {
                             showClearAllConfirm = true
                         } label: {
                             Text("Clear all memories")
-                                .font(.system(size: 13, weight: .regular))
+                                .font(.appBody(13, weight: .regular))
                                 .foregroundStyle(Color.appDestructive)
                                 .padding(.vertical, 18)
                         }

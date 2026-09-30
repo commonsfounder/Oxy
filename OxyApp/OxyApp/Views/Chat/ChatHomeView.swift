@@ -114,7 +114,7 @@ struct ChatHomeView: View {
                 HStack(spacing: 10) {
                     AppIcon(sf: "square.and.pencil", size: 15)
                     Text("New conversation")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.appBody(14, weight: .medium))
                     Spacer()
                 }
                 .foregroundStyle(Color.appInk)
@@ -130,7 +130,7 @@ struct ChatHomeView: View {
                 AppIcon(sf: "magnifyingglass", size: 15)
                     .foregroundStyle(Color.appMuted)
                 TextField("Search", text: $searchQuery)
-                    .font(.system(size: 14))
+                    .font(.appBody(14))
                     .foregroundStyle(Color.appInk)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -253,7 +253,7 @@ struct ChatHomeView: View {
             AppIcon(sf: icon, size: 34)
                 .foregroundStyle(Color.appMuted)
             Text(text)
-                .font(.system(size: 14))
+                .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
             Spacer()
         }
@@ -524,7 +524,7 @@ private struct SidebarSectionHeader: View {
     var body: some View {
         HStack {
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .regular))
+                .font(.appBody(10, weight: .regular))
                 .tracking(2.8)
                 .foregroundStyle(Color.appMuted.opacity(0.8))
             Spacer()
@@ -544,17 +544,17 @@ private struct SidebarSearchResultRow: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(result.role == "user" ? "You" : "Adam")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.appBody(11, weight: .semibold))
                     .foregroundStyle(Color.appMuted)
                 Spacer()
                 if let date = result.formattedDate {
                     Text(date)
-                        .font(.system(size: 11))
+                        .font(.appBody(11))
                         .foregroundStyle(Color.appMuted)
                 }
             }
             Text(result.content)
-                .font(.system(size: 14))
+                .font(.appBody(14))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(2)
         }

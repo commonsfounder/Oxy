@@ -212,7 +212,7 @@ private struct LoginFormPage: View {
                     .padding(.top, 14)
 
                     Text("Debug demo session")
-                        .font(.system(size: 11, weight: .light))
+                        .font(.appBody(11, weight: .light))
                         .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 8)
