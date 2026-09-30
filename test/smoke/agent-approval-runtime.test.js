@@ -156,3 +156,25 @@ test('bound approval runtime fails closed when durable approval storage is unava
   );
   await assert.rejects(() => runtime.pending('user-1', 'yes'), /approval database unavailable/);
 });
+
+test('the push for a waiting approval is short, plain and names what is waiting', () => {
+  const { approvalNotification } = require('../../api/services/agent-approval-runtime');
+  const notice = approvalNotification({
+    approvalId: 'a1',
+    taskId: 't1',
+    taskGoal: 'Buy the headphones',
+    action: { type: 'send_email', input: { to: 'Arina', subject: 'Are you free later?' } }
+  });
+  assert.equal(notice.category, 'action_required');
+  assert.equal(notice.title, 'Needs a yes');
+  assert.match(notice.body, /Arina/);
+  assert.equal(notice.approvalId, 'a1');
+  assert.equal(notice.taskId, 't1');
+});
+
+test('the push still says something sensible when the action has no detail', () => {
+  const { approvalNotification } = require('../../api/services/agent-approval-runtime');
+  const notice = approvalNotification({ approvalId: 'a2', action: { type: 'confirm_browser_payment' } });
+  assert.equal(notice.title, 'Needs a yes');
+  assert.ok(notice.body.length > 0);
+});

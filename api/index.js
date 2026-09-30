@@ -884,7 +884,16 @@ setInterval(() => {
 
 const supabase = createSupabaseServiceClient();
 const approvalRuntime = agentApprovals.createApprovalRuntime(supabase);
-const setPendingAction = (userId, action, context = {}) => approvalRuntime.park(userId, action, context);
+const setPendingAction = async (userId, action, context = {}) => {
+  const parked = await approvalRuntime.park(userId, action, context);
+  // Only work running in the background is worth a push; a confirmation in an open chat is
+  // already in front of the person.
+  if (context.persistedTaskId || context.runtimeSessionId) {
+    notifyApprovalWaiting(userId, parked).catch(error =>
+      log('warn', 'approval.notify.failed', { userId, error: error.message }));
+  }
+  return parked;
+};
 
 // Durable delegated runs have one lifecycle owner. The adapter keeps the
 // existing runtime service's Supabase-shaped API at the boundary; callers do
@@ -3167,6 +3176,19 @@ const notificationDelivery = createDeliveryRuntime({
     return count || 0;
   }
 });
+
+async function notifyApprovalWaiting(userId, parked) {
+  const notice = agentApprovals.approvalNotification(parked);
+  const queued = await notificationDelivery.raise(userId, {
+    category: notice.category,
+    urgency: notifications.gradeUrgency({ category: notice.category, thresholdCrossed: true }),
+    title: notice.title,
+    body: notice.body,
+    dedupeKey: notifications.dedupeKeyFor({ category: notice.category, state: `approval:${notice.approvalId}` }),
+    sourceRef: { approvalId: notice.approvalId, taskId: notice.taskId }
+  });
+  if (queued?.ok) await notificationDelivery.deliverPending(userId);
+}
 
 async function evaluateAndSurfaceContextWatches(userId, nativeContext, now = new Date(), logger = console) {
   const result = await scheduledTasks.evaluateContextWatches(userId, nativeContext, now);

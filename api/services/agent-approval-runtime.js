@@ -132,6 +132,20 @@ function approvalSummary(approval) {
   };
 }
 
+// The push shown when background work stops for a yes. Plain words, no jargon: the person may be
+// across the room from the speaker that raised it.
+function approvalNotification(parked = {}) {
+  const summary = approvalSummary(parked);
+  const body = summary.detail || summary.taskGoal || summary.actionType;
+  return {
+    category: 'action_required',
+    title: 'Needs a yes',
+    body: cleanText(body, 'Something is waiting for you.', 160),
+    approvalId: summary.approvalId,
+    taskId: parked.taskId || null
+  };
+}
+
 function selectPendingApproval(approvals = [], message = '') {
   const valid = approvals.filter(Boolean);
   if (valid.length <= 1) return valid[0] || null;
@@ -289,6 +303,7 @@ module.exports = {
   approvalRow,
   normalizeApproval,
   approvalSummary,
+  approvalNotification,
   actionPayload,
   selectPendingApproval,
   describeAmbiguousApprovals,
