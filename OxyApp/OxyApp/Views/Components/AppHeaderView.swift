@@ -1,71 +1,5 @@
 import SwiftUI
 
-/// Chat header.
-struct AppHeaderView: View {
-    @Binding var isIncognito: Bool
-    var isEmptyChat: Bool = false
-    var showsBackButton: Bool = false
-    var onLeading: () -> Void = {}
-    var onNewChat: (() -> Void)? = nil
-
-    private let circle: CGFloat = 38
-
-    var body: some View {
-        appGlassContainer(spacing: 16) {
-            HStack {
-                Button(action: onLeading) {
-                    AppIcon(showsBackButton ? "chevron-left" : "menu", size: 18)
-                        .foregroundColor(Color.appInk.opacity(0.85))
-                        .frame(width: circle, height: circle)
-                        .appGlass(Circle(), interactive: true)
-                }
-                .buttonStyle(.appScale)
-                .accessibilityLabel(showsBackButton ? "Home" : "History")
-
-                Spacer()
-
-                HStack(spacing: 10) {
-                    if isEmptyChat || isIncognito {
-                        Button {
-                            withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
-                        } label: {
-                            GhostIcon(active: isIncognito)
-                                .frame(width: 18, height: 18)
-                                .frame(width: circle, height: circle)
-                                .appGlass(Circle(), tint: isIncognito ? Color.appInk : nil, interactive: true)
-                        }
-                        .buttonStyle(.appScale)
-                        .accessibilityLabel(isIncognito ? "Private chat on" : "Private chat off")
-                        .accessibilityHint(isIncognito
-                            ? "Private mode is on. Turns are not saved. Double tap to turn off."
-                            : "Turn on private chat. Turns will not be saved.")
-                    }
-
-                    if !isEmptyChat, let onNewChat {
-                        Button(action: onNewChat) {
-                            AppIcon("edit", size: 17)
-                                .foregroundColor(Color.appInk.opacity(0.85))
-                                .frame(width: circle, height: circle)
-                                .appGlass(Circle(), interactive: true)
-                        }
-                        .buttonStyle(.appScale)
-                        .accessibilityLabel("New conversation")
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.appBackground)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.appHairline)
-                .frame(height: 0.5)
-        }
-        .zIndex(10)
-    }
-}
-
 struct GhostIcon: View {
     var active: Bool
 
@@ -101,12 +35,3 @@ private struct GhostShape: Shape {
     }
 }
 
-#Preview {
-    VStack(spacing: 0) {
-        AppHeaderView(isIncognito: .constant(false), isEmptyChat: true)
-        AppHeaderView(isIncognito: .constant(true), isEmptyChat: true)
-        AppHeaderView(isIncognito: .constant(false), isEmptyChat: false)
-        Spacer()
-    }
-    .background(Color.appObsidian)
-}

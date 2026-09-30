@@ -361,32 +361,6 @@ struct AppSectionHeader: View {
     }
 }
 
-struct AppToggle: View {
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Button {
-            withAnimation(.appToggle) { isOn.toggle() }
-        } label: {
-            Capsule()
-                .fill(isOn ? Color.appInk : Color.appAdaptive(dark: .white, light: .black).opacity(0.12))
-                .frame(width: 30, height: 16)
-                .overlay(
-                    Circle()
-                        .fill(isOn ? Color.appObsidian : Color.appMuted)
-                        .frame(width: 12, height: 12)
-                        .padding(2)
-                        .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
-                )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
-        .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
-    }
-}
-
 /// A single-line text field with no box — just a thin bottom rule that brightens
 /// softly while editing. Used for every text input in this language.
 struct AppLineField: View {
@@ -459,19 +433,6 @@ func appGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder conten
 // More menu, action rows, attachment strips) should use this instead of defining its own
 // background + border + radius triple. The content is left-aligned by default; pass a
 // different alignment via the view modifier if needed.
-
-struct AppCard<Content: View>: View {
-    var padding: CGFloat = 16
-    @ViewBuilder let content: Content
-
-    // No background fill, border, or shadow — content sits directly on the pure-black
-    // canvas per the minimalist directive. Separation comes from hairline dividers only.
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(padding)
-    }
-}
 
 // MARK: - BrandWordmark
 //
@@ -718,32 +679,6 @@ struct AppSegmented: View {
 
 typealias SettingsSegmentedControl = AppSegmented
 
-// MARK: - Today tab: light/dark glass language
-//
-// The Today tab is the one screen that breaks the fixed-black rule: it has a
-// living aurora gradient with glass cards floating over it, in two finishes.
-// `TodayPalette` swaps the text/line colours between the dark aurora and the
-// light pastel finish; cards read `p.ink` / `p.muted` etc. so a single bool
-struct TodayPalette {
-    let ink: Color       // primary editorial text
-    let muted: Color     // captions, eyebrows, secondary
-    let titanium: Color  // icons, quiet emphasis
-    let hairline: Color  // 0.5pt rules
-
-    static let dark = TodayPalette(
-        ink:      Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255),
-        muted:    Color(red: 152 / 255, green: 152 / 255, blue: 158 / 255),
-        titanium: Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255),
-        hairline: Color.white.opacity(0.14)
-    )
-    static let light = TodayPalette(
-        ink:      Color(red: 0.13, green: 0.13, blue: 0.15),
-        muted:    Color(red: 0.42, green: 0.42, blue: 0.46),
-        titanium: Color(red: 0.30, green: 0.30, blue: 0.34),
-        hairline: Color.black.opacity(0.10)
-    )
-}
-
 /// Shared raised surface for grouped content.
 struct TodayCard<Content: View>: View {
     var padding: CGFloat = 16
@@ -760,79 +695,11 @@ struct TodayCard<Content: View>: View {
     }
 }
 
-/// The living background for the Today tab: a slowly-drifting 3×3 mesh gradient.
-/// Dark finish is a muted aurora that stays mostly black (text stays readable);
-/// light finish is the soft pastel wash. Falls back to a static linear gradient
-/// before iOS 18 where `MeshGradient` doesn't exist.
-struct TodayAuroraBackground: View {
-    let light: Bool
-
-    private var colors: [Color] { light ? Self.lightColors : Self.darkColors }
-
-    var body: some View {
-        Group {
-            if #available(iOS 18.0, *) {
-                // ponytail: 20fps drift — slow enough to barely cost battery, smooth
-                // enough to read as "alive". Drop the interval if it ever feels jerky.
-                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { ctx in
-                    let t = ctx.date.timeIntervalSinceReferenceDate
-                    MeshGradient(width: 3, height: 3, points: Self.points(t), colors: colors)
-                }
-            } else {
-                LinearGradient(colors: [colors.first!, colors.last!],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-        }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.5), value: light)
-    }
-
-    /// 3×3 control points; corners pinned, interior + edge-mids wobble on sine
-    /// waves at different speeds so the gradient never visibly loops.
-    static func points(_ t: Double) -> [SIMD2<Float>] {
-        func w(_ base: Double, _ speed: Double, _ amp: Double) -> Float {
-            Float(base + sin(t * speed) * amp)
-        }
-        return [
-            [0, 0],                         [w(0.5, 0.6, 0.06), 0],                  [1, 0],
-            [0, w(0.5, 0.5, 0.06)],         [w(0.5, 0.4, 0.08), w(0.5, 0.7, 0.08)], [1, w(0.5, 0.55, 0.06)],
-            [0, 1],                         [w(0.5, 0.65, 0.06), 1],                 [1, 1]
-        ]
-    }
-
-    // Dark: stays mostly true-black with a faint cool lift in the middle band — a
-    // quiet depth, not a purple haze.
-    private static let darkColors: [Color] = {
-        let lift  = Color(red: 0.09, green: 0.10, blue: 0.13)
-        let lift2 = Color(red: 0.11, green: 0.12, blue: 0.15)
-        return [.black, .black, .black,
-                lift,   lift2,  lift,
-                .black, .black, .black]
-    }()
-
-    // Light: near-white overall with only a whisper of colour in the middle band —
-    // clean white top AND bottom (no coloured blob hanging at the edges). Subtle on
-    // purpose; the reference is a faint holographic sheen on white, not a wash.
-    private static let lightColors: [Color] = {
-        let white = Color(red: 0.98, green: 0.975, blue: 0.965)
-        let lilac = Color(red: 0.91, green: 0.89,  blue: 0.97)
-        let peach = Color(red: 0.99, green: 0.93,  blue: 0.89)
-        let sky   = Color(red: 0.89, green: 0.94,  blue: 0.99)
-        return [white, white, white,
-                lilac, peach, sky,
-                white, white, white]
-    }()
-}
-
 // MARK: - Scroll-aware tab bar (legacy no-op)
 //
 // Previously drove a custom floating tab bar. The app now uses the system liquid-glass
 // TabView bar only. Keep the type + modifier so call sites and previews still compile;
 // they no longer hide anything.
-
-@Observable final class TabBarVisibility {
-    var hidden = false
-}
 
 private struct HidesTabBarOnScroll: ViewModifier {
     func body(content: Content) -> some View { content }
@@ -863,120 +730,6 @@ struct AppOutlineButton: View {
 
 // Duplicate editorial ed shims removed to avoid redeclaration. Use the ones earlier in the file.
 
-/// A tiny deterministic RNG so the paper grain is stable across redraws (no per-frame
-/// shimmer). Splitmix64 — good enough for scattering specks.
-struct EditorialSeededRNG: RandomNumberGenerator {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed }
-    mutating func next() -> UInt64 {
-        state &+= 0x9E3779B97F4A7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
-        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
-        return z ^ (z >> 31)
-    }
-}
-
-/// Faint paper-grain overlay for materiality — dark specks multiplied onto a light
-/// canvas, light specks screened onto a dark one. Static (seeded), never animated.
-struct AppGrain: View {
-    @Environment(\.colorScheme) private var scheme
-    var intensity: Double = 0.05
-
-    var body: some View {
-        Canvas { ctx, size in
-            var rng = EditorialSeededRNG(seed: 0x5EED_1234)
-            let speck = scheme == .dark ? Color.white : Color.black
-            let count = Int((size.width * size.height) / 700)
-            for _ in 0..<max(count, 0) {
-                let x = Double.random(in: 0...size.width, using: &rng)
-                let y = Double.random(in: 0...size.height, using: &rng)
-                let o = Double.random(in: 0.2...1.0, using: &rng) * intensity
-                ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.1, height: 1.1)),
-                         with: .color(speck.opacity(o)))
-            }
-        }
-        .blendMode(scheme == .dark ? .screen : .multiply)
-        .allowsHitTesting(false)
-    }
-}
-
-/// The painterly weather sky that fades into the canvas — replaces the old boxed
-/// `HeroSky`. Light mode is a warm day wash with drifting mist; dark mode is a deep
-/// night that falls to black with a soft moon-glow and a few quiet stars. The bottom
-/// of the gradient is clear so the page canvas shows through beneath it. No icons.
-struct AtmosphereSky: View {
-    @Environment(\.colorScheme) private var scheme
-    /// OxyWeatherService symbolName, e.g. "cloud.rain" — only used to cool the palette.
-    var condition: String?
-
-    private var isRain: Bool { (condition ?? "").contains("rain") || (condition ?? "").contains("drizzle") }
-    private var light: Bool { scheme != .dark }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: false)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            ZStack(alignment: .top) {
-                LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
-
-                if light {
-                    // Two soft mist banks drifting at different speeds.
-                    mist(width: 220, y: 150, phase: t * 0.05, amp: 22, opacity: 0.55)
-                    mist(width: 180, y: 104, phase: -t * 0.04 + 2, amp: 18, opacity: 0.4)
-                } else {
-                    // A low moon glow + a scatter of faint, slowly breathing stars.
-                    Circle()
-                        .fill(RadialGradient(colors: [Color(white: 0.96), Color(white: 0.96).opacity(0)],
-                                             center: .center, startRadius: 1, endRadius: 60))
-                        .frame(width: 120, height: 120)
-                        .offset(x: 96, y: 30)
-                    ForEach(0..<7, id: \.self) { i in
-                        let p = Double(i)
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 1.6, height: 1.6)
-                            .opacity(0.25 + 0.55 * (0.5 + 0.5 * sin(t * 0.6 + p * 1.3)))
-                            .offset(x: [-120, -40, 40, 120, -90, 70, 10][i],
-                                    y: [40, 70, 52, 86, 120, 96, 150][i])
-                    }
-                }
-            }
-        }
-        .ignoresSafeArea()
-    }
-
-    private func mist(width: CGFloat, y: CGFloat, phase: Double, amp: CGFloat, opacity: Double) -> some View {
-        Ellipse()
-            .fill(RadialGradient(colors: [Color.white.opacity(opacity), Color.white.opacity(0)],
-                                 center: .center, startRadius: 1, endRadius: width / 2))
-            .frame(width: width, height: width * 0.3)
-            .offset(x: CGFloat(sin(phase)) * amp, y: y)
-    }
-
-    private var stops: [Gradient.Stop] {
-        if light {
-            if isRain {
-                return [.init(color: Color(red: 0.79, green: 0.80, blue: 0.82), location: 0),
-                        .init(color: Color(red: 0.91, green: 0.90, blue: 0.88), location: 0.34),
-                        .init(color: .clear, location: 0.72)]
-            }
-            return [.init(color: Color(red: 0.95, green: 0.76, blue: 0.42), location: 0),
-                    .init(color: Color(red: 0.96, green: 0.86, blue: 0.71), location: 0.32),
-                    .init(color: Color(red: 0.98, green: 0.94, blue: 0.88), location: 0.55),
-                    .init(color: .clear, location: 0.78)]
-        }
-        if isRain {
-            return [.init(color: Color(red: 0.06, green: 0.09, blue: 0.13), location: 0),
-                    .init(color: Color(red: 0.03, green: 0.05, blue: 0.08), location: 0.4),
-                    .init(color: .clear, location: 0.74)]
-        }
-        return [.init(color: Color(red: 0.055, green: 0.114, blue: 0.188), location: 0),
-                .init(color: Color(red: 0.043, green: 0.082, blue: 0.141), location: 0.34),
-                .init(color: Color(red: 0.027, green: 0.043, blue: 0.078), location: 0.6),
-                .init(color: .clear, location: 0.82)]
-    }
-}
-
 /// A Didot section title — the editorial counterpart to a small-caps header.
 struct AppSectionTitle: View {
     let text: String
@@ -987,65 +740,6 @@ struct AppSectionTitle: View {
         Text(text)
             .font(.appBody(15, weight: .semibold))
             .foregroundStyle(Color.appInk)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// Hairline rule with a small centred dot — the only divider ornament the language uses.
-struct AppRule: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-            Circle().fill(Color.appMuted.opacity(0.55)).frame(width: 3, height: 3)
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-        }
-    }
-}
-
-/// A tonal, grained plate for featured blocks (e.g. "This evening"). No border, no
-/// shadow — it reads as a different stock of paper laid on the canvas.
-struct EditorialPlate<Content: View>: View {
-    var padding: CGFloat = 22
-    @ViewBuilder var content: Content
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(padding)
-            .background {
-                ZStack {
-                    Color.appSurface
-                    AppGrain(intensity: 0.06)
-                }
-            }
-            .clipShape(shape)
-    }
-}
-
-/// Editorial body text with a raised Didot initial (a versal). Not a true wrapping
-/// drop cap — SwiftUI has no `::first-letter` — but it gives the paragraph an
-/// editorial opening. `dropSize` is the initial's point size.
-struct DropCapText: View {
-    let text: String
-    var bodySize: CGFloat = 16
-    var dropSize: CGFloat = 38
-    var color: Color = .appMuted
-
-    private var attributed: AttributedString {
-        var a = AttributedString(text)
-        a.font = .system(size: bodySize, weight: .regular)
-        a.foregroundColor = color
-        if !a.characters.isEmpty {
-            let end = a.index(a.startIndex, offsetByCharacters: 1)
-            a[a.startIndex..<end].font = .custom("Didot", size: dropSize)
-            a[a.startIndex..<end].foregroundColor = .appInk
-        }
-        return a
-    }
-
-    var body: some View {
-        Text(attributed)
-            .lineSpacing(4)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

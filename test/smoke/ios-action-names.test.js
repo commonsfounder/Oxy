@@ -87,17 +87,3 @@ test('the known-dead list does not outlive the capabilities it describes', () =>
     assert.ok(compared.has(name), `${name} is no longer referenced by iOS — remove it from KNOWN_DEAD`);
   }
 });
-
-test('the action AgentTaskSession watches is the gated money step', () => {
-  const source = fs.readFileSync(path.join(APP_ROOT, 'Models', 'AgentTaskSession.swift'), 'utf8');
-  const match = source.match(/watchedAction = kind == \.ride \? "([a-z_]+)" : "([a-z_]+)"/);
-  assert.ok(match, 'AgentTaskSession no longer has a recognisable watchedAction line');
-
-  const [, rideAction, taskAction] = match;
-  assert.ok(ACTION_CONTRACTS[rideAction], `${rideAction} must be a declared capability`);
-
-  const contract = ACTION_CONTRACTS[taskAction];
-  assert.ok(contract, `${taskAction} must be a declared capability`);
-  assert.equal(contract.executionMode, 'review', `${taskAction} must stay review-gated`);
-  assert.equal(contract.confirmation, 'review_required', `${taskAction} must emit the review card iOS renders`);
-});

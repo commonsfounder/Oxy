@@ -1036,40 +1036,6 @@ private struct ActionReviewSheet: View {
     }
 }
 
-struct SearchResult: Codable, Identifiable {
-    let messageId: String?
-    let role: String
-    let content: String
-    let createdAt: String?
-
-    var id: String { messageId ?? ((createdAt ?? "") + role + String(content.prefix(20))) }
-
-    init(messageId: String? = nil, role: String, content: String, createdAt: String?) {
-        self.messageId = messageId
-        self.role = role
-        self.content = content
-        self.createdAt = createdAt
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case messageId = "id"
-        case role, content
-        case createdAt = "created_at"
-    }
-
-    var formattedDate: String? {
-        let date = Date.oxyParse(createdAt)
-        guard let date else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "d MMM · HH:mm"
-        return fmt.string(from: date)
-    }
-}
-
-struct SearchResponse: Codable {
-    let results: [SearchResult]
-}
-
 struct ChatSessionSummary: Codable, Identifiable, Hashable {
     static func == (lhs: ChatSessionSummary, rhs: ChatSessionSummary) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -1112,10 +1078,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         fmt.dateFormat = "d MMM"
         return fmt.string(from: date)
     }
-}
-
-struct ChatSessionsResponse: Codable {
-    let sessions: [ChatSessionSummary]
 }
 
 // MARK: - Welcome Card
@@ -1472,99 +1434,6 @@ private struct ActivityStepRow: View {
 
 // MARK: - Pendant Floating Overlay
 
-struct PendantOverlay: View {
-    let state: PendantAudioBridge.BridgeState
-    let transcript: String?
-    var notice: String? = nil
-
-    var body: some View {
-        HStack(spacing: 11) {
-            if let notice {
-                AppIcon(sf: "exclamationmark.circle.fill", size: 15)
-                    .foregroundStyle(Color.appWarning)
-                Text(notice)
-                    .font(.appBody(14, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-            } else if state == .listening {
-                PendantWaveform(active: true)
-                Text("Listening")
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                if let t = transcript, !t.isEmpty {
-                    Text("·").foregroundStyle(.tertiary)
-                    Text(t)
-                        .font(.appBody(14))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .animation(.appFast, value: t)
-                }
-            } else {
-                AppIcon(sf: "waveform", size: 15)
-                    .foregroundStyle(.secondary)
-                    .symbolEffect(.variableColor.iterative, isActive: true)
-                if let t = transcript, !t.isEmpty {
-                    Text(t)
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appInk)
-                        .lineLimit(1)
-                } else {
-                    Text("Transcribing…")
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
-                }
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
-        .appGlass(Capsule())
-        .animation(.appFast, value: state)
-    }
-}
-
-struct PendantWaveform: View {
-    let active: Bool
-
-    var body: some View {
-        HStack(spacing: 3) {
-            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
-            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
-            WaveBar(maxH: 19, dur: 0.50, delay: 0.24, active: active)
-            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
-            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
-        }
-        .frame(height: 22)
-    }
-
-    private struct WaveBar: View {
-        let maxH: CGFloat
-        let dur: Double
-        let delay: Double
-        let active: Bool
-        @State private var on = false
-
-        var body: some View {
-            Capsule()
-                .fill(Color.appMuted)
-                .frame(width: 3, height: on ? maxH : 3)
-                .animation(
-                    active
-                        ? .easeInOut(duration: dur).repeatForever(autoreverses: true).delay(delay)
-                        : .appFast,
-                    value: on
-                )
-                .onAppear { if active { on = true } }
-                .onChange(of: active) { _, a in on = a }
-        }
-    }
-}
-
-#Preview {
-    ChatView()
-        .environment(AppState())
-        .environment(TabBarVisibility())
-}
 
 
 /// The reaction picker and the menu wheel sit above the thread; grouped so the screen's body stays simple.
