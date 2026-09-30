@@ -2,13 +2,13 @@ import SwiftUI
 
 /// What the wheel can open.
 enum ThreadMenuChoice: String, CaseIterable, Identifiable {
-    case history, home, settings, privateChat
+    case activity, home, settings, privateChat
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .history: return "History"
+        case .activity: return "Activity"
         case .home: return "Your home"
         case .settings: return "Settings"
         case .privateChat: return "Private"
@@ -24,7 +24,7 @@ private struct WheelGlyph: View {
     var body: some View {
         Group {
             switch choice {
-            case .history: AppIcon("history", size: size)
+            case .activity: AppIcon("history", size: size)
             case .home: AppIcon("tab-home", size: size)
             case .settings: AppIcon("list", size: size)
             case .privateChat: GhostIcon(active: active).frame(width: size, height: size)
@@ -39,7 +39,7 @@ struct WheelHub: View {
     var incognito: Bool
 
     private static let slots: [(ThreadMenuChoice, CGSize)] = [
-        (.history, CGSize(width: -1, height: -1)), (.home, CGSize(width: 1, height: -1)),
+        (.activity, CGSize(width: -1, height: -1)), (.home, CGSize(width: 1, height: -1)),
         (.settings, CGSize(width: -1, height: 1)), (.privateChat, CGSize(width: 1, height: 1))
     ]
 
@@ -72,6 +72,7 @@ struct WheelHub: View {
 }
 
 /// The open wheel. Items swing out of the hub along an arc, each growing from its tiny slot.
+/// Drag around the hub to spin the wheel; it clicks into place one item at a time.
 struct ThreadWheelMenu: View {
     let hub: CGPoint
     @Binding var isOpen: Bool
@@ -79,19 +80,27 @@ struct ThreadWheelMenu: View {
     var onChoose: (ThreadMenuChoice) -> Void
 
     @State private var progress: CGFloat = 0
+    @State private var spin: Double = 0
+    @State private var dragBase: (angle: Double, spin: Double)?
+    @State private var lastDetent = 0
     @State private var mounted = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static let step: Double = 26
 
     var body: some View {
         ZStack {
             if mounted {
-                WheelLayout(progress: progress, hub: hub, incognito: incognito, reduceMotion: reduceMotion,
+                WheelLayout(progress: progress, spin: spin, hub: hub, incognito: incognito,
                             onChoose: choose, onClose: { isOpen = false })
+                    .simultaneousGesture(dragGesture)
             }
         }
         .allowsHitTesting(mounted)
         .onChange(of: isOpen) { _, open in
             if open {
+                spin = 0
+                lastDetent = 0
                 mounted = true
                 if reduceMotion { progress = 1 } else {
                     withAnimation(.spring(response: 0.55, dampingFraction: 0.74)) { progress = 1 }
@@ -106,6 +115,37 @@ struct ThreadWheelMenu: View {
         }
     }
 
+    private func angle(at point: CGPoint) -> Double {
+        atan2(-Double(point.x - hub.x), Double(point.y - hub.y)) * 180 / .pi
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                if dragBase == nil { dragBase = (angle(at: value.startLocation), spin) }
+                guard let base = dragBase else { return }
+                spin = base.spin + (angle(at: value.location) - base.angle)
+                let detent = Int((spin / Self.step).rounded())
+                if detent != lastDetent {
+                    lastDetent = detent
+                    HapticManager.shared.select()
+                }
+            }
+            .onEnded { value in
+                guard let base = dragBase else { return }
+                dragBase = nil
+                let flick = angle(at: value.predictedEndLocation) - angle(at: value.location)
+                let target = ((spin + flick * 0.5) / Self.step).rounded() * Self.step
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) { spin = target }
+                let detent = Int((target / Self.step).rounded())
+                if detent != lastDetent {
+                    lastDetent = detent
+                    HapticManager.shared.select()
+                }
+                _ = base
+            }
+    }
+
     private func choose(_ choice: ThreadMenuChoice) {
         HapticManager.shared.impact(.light)
         isOpen = false
@@ -118,21 +158,25 @@ struct ThreadWheelMenu: View {
 
 private struct WheelLayout: View, Animatable {
     var progress: CGFloat
+    var spin: Double
     let hub: CGPoint
     let incognito: Bool
-    let reduceMotion: Bool
     let onChoose: (ThreadMenuChoice) -> Void
     let onClose: () -> Void
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<CGFloat, Double> {
+        get { AnimatablePair(progress, spin) }
+        set { progress = newValue.first; spin = newValue.second }
     }
 
     private let radius: CGFloat = 150
     private let firstAngle: Double = 6
-    private let step: Double = 26
-    private let spin: Double = 80
+    private let swing: Double = 80
+
+    private var step: Double { ThreadWheelMenu.step }
+    private var cycle: Double { step * Double(ThreadMenuChoice.allCases.count) }
+    private var windowStart: Double { firstAngle - step / 2 }
+    private var focus: Double { firstAngle + step * 1.5 }
 
     var body: some View {
         ZStack {
@@ -140,11 +184,11 @@ private struct WheelLayout: View, Animatable {
                 Rectangle().fill(.ultraThinMaterial)
                 Color.appBackground.opacity(0.6)
             }
-                .opacity(Double(min(max(progress, 0), 1)))
-                .ignoresSafeArea()
-                .onTapGesture(perform: onClose)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Close menu")
+            .opacity(Double(min(max(progress, 0), 1)))
+            .ignoresSafeArea()
+            .onTapGesture(perform: onClose)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Close menu")
 
             ForEach(Array(ThreadMenuChoice.allCases.enumerated()), id: \.element) { index, choice in
                 item(choice, index: index)
@@ -158,13 +202,24 @@ private struct WheelLayout: View, Animatable {
         }
     }
 
+    /// Where an item sits on the arc once spin is applied; items leaving one end return at the other.
+    private func slotAngle(_ index: Int) -> Double {
+        let raw = firstAngle + step * Double(index) + spin - windowStart
+        let wrapped = raw - cycle * (raw / cycle).rounded(.down)
+        return windowStart + wrapped
+    }
+
     private func item(_ choice: ThreadMenuChoice, index: Int) -> some View {
         let raw = (progress - CGFloat(index) * 0.07) / 0.79
         let q = max(raw, 0)
-        let angle = (firstAngle + step * Double(index) + spin * Double(1 - min(q, 1))) * .pi / 180
-        let slot = WheelHub.slotOffset(choice)
-        let x = hub.x + slot.width * (1 - min(q, 1)) - CGFloat(sin(angle)) * radius * q
-        let y = hub.y + slot.height * (1 - min(q, 1)) + CGFloat(cos(angle)) * radius * q
+        let open = Double(min(q, 1))
+        let slot = slotAngle(index)
+        let angle = (slot + swing * (1 - open)) * .pi / 180
+        let offset = WheelHub.slotOffset(choice)
+        let x = hub.x + offset.width * CGFloat(1 - open) - CGFloat(sin(angle)) * radius * q
+        let y = hub.y + offset.height * CGFloat(1 - open) + CGFloat(cos(angle)) * radius * q
+        let nearness = max(0, 1 - abs(slot - focus) / step)
+        let edge = min(1, max(0, min(slot - windowStart, windowStart + cycle - slot) / 10))
         let active = choice == .privateChat && incognito
         return Button { onChoose(choice) } label: {
             ZStack {
@@ -175,15 +230,15 @@ private struct WheelLayout: View, Animatable {
             .frame(width: 58, height: 58)
             .overlay(alignment: .leading) {
                 Text(active ? "Private on" : choice.title)
-                    .font(.appBody(15, weight: .medium))
+                    .font(.appBody(15, weight: nearness > 0.6 ? .semibold : .medium))
                     .foregroundStyle(Color.appInk)
                     .lineLimit(1)
                     .fixedSize()
                     .alignmentGuide(.leading) { d in d[.trailing] + 12 }
                     .opacity(Double(min(max((q - 0.5) * 2, 0), 1)))
             }
-            .scaleEffect(0.3 + 0.7 * min(q, 1.08))
-            .opacity(Double(min(q * 1.8, 1)))
+            .scaleEffect((0.3 + 0.7 * min(q, 1.08)) * (1 + 0.16 * CGFloat(nearness)))
+            .opacity(Double(min(q * 1.8, 1)) * edge)
         }
         .buttonStyle(.appScale(0.94))
         .position(x: x, y: y)

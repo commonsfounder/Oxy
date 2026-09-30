@@ -16,7 +16,7 @@ struct MainTabView: View {
             .sheet(item: $opened) { choice in
                 Group {
                     switch choice {
-                    case .history: AdamActivityView()
+                    case .activity: AdamActivityView()
                     case .home: PhysicalHomeView()
                     default: AdamYouView()
                     }
@@ -383,7 +383,7 @@ private struct AdamActivityView: View {
 
     private var activityHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("History")
+            Text("Activity")
                 .font(.title.weight(.semibold))
                 .appHeroTracking(28)
                 .foregroundStyle(Color.appInk)
@@ -831,7 +831,7 @@ struct MoreView: View {
     private var menuSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             moreGroup(title: "Adam") {
-                moreRow(title: "History", subtitle: "Conversations and finished work", icon: "history") {
+                moreRow(title: "Activity", subtitle: "Conversations and finished work", icon: "history") {
                     destination = .history
                 }
                 rowDivider
