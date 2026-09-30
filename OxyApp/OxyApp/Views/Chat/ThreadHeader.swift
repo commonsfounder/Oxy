@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The top of the thread: a contact header like Messages. On the right, one button holds the whole menu.
+/// No bar: the thread runs to the top of the screen and fades out under the status bar.
+/// The only control is the menu hub, floating top right, with a small dot for live state.
 struct ThreadHeader: View {
     var isIncognito: Bool
     var isWorking: Bool
@@ -9,36 +10,18 @@ struct ThreadHeader: View {
     @Binding var hubCenter: CGPoint
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 3) {
-                Circle()
-                    .fill(Color.appReceivedBubble)
-                    .frame(width: 38, height: 38)
-                    .overlay(AdamMark().frame(width: 22, height: 16))
-                Text("Adam")
-                    .font(.appBody(12, weight: .medium))
-                    .foregroundStyle(Color.appInk)
-                if isIncognito {
-                    Text("Private")
-                        .font(.appBody(11))
-                        .foregroundStyle(Color.appMuted)
-                } else if isWorking {
-                    Text("Working")
-                        .font(.appBody(11))
-                        .foregroundStyle(Color.appWorking)
-                } else if speakerOnline {
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.appDone).frame(width: 6, height: 6)
-                        Text("Speaker online")
-                            .font(.appBody(11))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                }
+        ZStack(alignment: .top) {
+            if isIncognito {
+                Text("Private")
+                    .font(.appBody(12, weight: .semibold))
+                    .foregroundStyle(Color.appOnAction)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.appAction))
+                    .padding(.top, 14)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityLabel("Private chat is on")
             }
-            .animation(.appStandard, value: isWorking)
-            .animation(.appStandard, value: isIncognito)
-            .animation(.appStandard, value: speakerOnline)
-            .accessibilityElement(children: .combine)
 
             HStack {
                 Spacer()
@@ -47,6 +30,7 @@ struct ThreadHeader: View {
                     wheelOpen = true
                 } label: {
                     WheelHub(progress: 0, incognito: isIncognito)
+                        .overlay(alignment: .topTrailing) { statusDot }
                 }
                 .buttonStyle(.appScale)
                 .opacity(wheelOpen ? 0 : 1)
@@ -55,14 +39,64 @@ struct ThreadHeader: View {
                     return CGPoint(x: frame.midX, y: frame.midY)
                 } action: { hubCenter = $0 }
                 .accessibilityLabel("Menu")
+                .accessibilityValue(statusDescription)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 4)
-        .padding(.bottom, 8)
-        .background(Color.appBackground)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 18)
+        .background {
+            LinearGradient(
+                stops: [
+                    .init(color: Color.appBackground, location: 0),
+                    .init(color: Color.appBackground.opacity(0.92), location: 0.55),
+                    .init(color: Color.appBackground.opacity(0), location: 1)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
         }
+        .animation(.appSpring, value: isIncognito)
+        .animation(.appStandard, value: isWorking)
+        .animation(.appStandard, value: speakerOnline)
+    }
+
+    @ViewBuilder
+    private var statusDot: some View {
+        if isWorking {
+            PulsingDot(color: .appWorking)
+        } else if speakerOnline {
+            Circle().fill(Color.appDone)
+                .frame(width: 9, height: 9)
+                .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
+        }
+    }
+
+    private var statusDescription: String {
+        if isWorking { return "Adam is working" }
+        if speakerOnline { return "Speaker online" }
+        return ""
+    }
+}
+
+private struct PulsingDot: View {
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var on = false
+
+    var body: some View {
+        Circle().fill(color)
+            .frame(width: 9, height: 9)
+            .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
+            .background(
+                Circle().fill(color.opacity(0.35))
+                    .scaleEffect(on && !reduceMotion ? 2.2 : 1)
+                    .opacity(on && !reduceMotion ? 0 : 0.8)
+            )
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { on = true }
+            }
     }
 }

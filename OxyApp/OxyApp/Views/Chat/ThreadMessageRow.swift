@@ -320,3 +320,39 @@ struct ReplyPreviewBar: View {
         .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 }
+
+// MARK: - Working
+
+/// Shown while Adam is working on a reply: the three channels of the Adam mark rise and fall
+/// in a slow wave. No guessed step names — only what is true: Adam is on it.
+struct WorkingBubble: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                HStack(alignment: .center, spacing: 5) {
+                    ForEach(0..<3, id: \.self) { index in
+                        let phase = reduceMotion ? 0.5 : 0.5 + 0.5 * sin(t * 4.2 - Double(index) * 0.9)
+                        Capsule()
+                            .fill(Color.appWorking.opacity(0.55 + 0.45 * phase))
+                            .frame(width: 5, height: 8 + 12 * phase)
+                    }
+                }
+                .frame(width: 40, height: 22)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppSpacing.chatMargin)
+        .transition(.asymmetric(
+            insertion: .scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity),
+            removal: .opacity
+        ))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Adam is working")
+    }
+}

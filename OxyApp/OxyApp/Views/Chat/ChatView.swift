@@ -97,13 +97,10 @@ struct ChatView: View {
         .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-        if message.id == viewModel.activeTurnUserMessageID,
-           !viewModel.activitySteps.isEmpty {
-            ActivityCard(steps: viewModel.activitySteps)
-                .id("activity-\(message.id)")
-                .padding(.horizontal, AppSpacing.chatMargin)
-                .padding(.top, 6)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+        if message.id == viewModel.activeTurnUserMessageID, viewModel.isSending, !replyStarted {
+            WorkingBubble()
+                .id("working-\(message.id)")
+                .padding(.top, 10)
         }
     }
 
@@ -167,6 +164,12 @@ struct ChatView: View {
         } else {
             onMenuChoice?(choice)
         }
+    }
+
+    /// True once Adam's reply has any text, so the working animation can step aside.
+    private var replyStarted: Bool {
+        guard let last = viewModel.messages.last else { return false }
+        return last.role == .assistant && !last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var assistantReplySettled: Bool {
@@ -1338,99 +1341,6 @@ private struct ChatInputBar: View {
 }
 
 // MARK: - Activity Card
-
-private struct ActivityCard: View {
-    let steps: [ActivityStep]
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
-
-    private var visibleSteps: [ActivityStep] {
-        guard !steps.isEmpty else { return [] }
-        let activeIndex = steps.firstIndex { $0.state == .active || $0.state == .failed }
-            ?? steps.firstIndex { $0.state == .pending }
-            ?? steps.indices.last
-        guard let activeIndex else { return [] }
-        var indices = Set<Int>()
-        if activeIndex > 0 { indices.insert(activeIndex - 1) }
-        indices.insert(activeIndex)
-        if activeIndex + 1 < steps.count { indices.insert(activeIndex + 1) }
-        return indices.sorted().map { steps[$0] }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(visibleSteps) { step in
-                ActivityStepRow(step: step, pulse: pulse && !reduceMotion)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface.opacity(0.62))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
-        .animation(.appStandard, value: steps)
-        .onAppear { pulse = true }
-    }
-
-    private var accessibilityLabel: String {
-        visibleSteps.map { "\($0.title), \($0.state.rawValue)" }.joined(separator: ". ")
-    }
-}
-
-private struct ActivityStepRow: View {
-    let step: ActivityStep
-    let pulse: Bool
-
-    private var isDimmed: Bool {
-        step.state == .complete || step.state == .pending
-    }
-
-    var body: some View {
-        HStack(spacing: 9) {
-            glyph
-                .frame(width: 14, height: 16)
-            Text(step.title)
-                .font(.appBody(step.state == .active ? 13 : 12.5, weight: step.state == .active ? .medium : .regular))
-                .foregroundStyle(Color.appMuted.opacity(isDimmed ? 0.62 : 0.96))
-                .lineLimit(1)
-                .contentTransition(.opacity)
-            Spacer(minLength: 24)
-        }
-        .opacity(step.state == .pending ? 0.58 : 1)
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        switch step.state {
-        case .pending:
-            Circle()
-                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
-                .frame(width: 7, height: 7)
-        case .active:
-            Circle()
-                .fill(Color.appAccent.opacity(0.86))
-                .frame(width: 7, height: 7)
-                .scaleEffect(pulse ? 1.18 : 0.9)
-                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
-        case .complete:
-            AppIcon(sf: "checkmark", size: 11)
-                .foregroundStyle(Color.appMuted.opacity(0.7))
-        case .failed:
-            AppIcon(sf: "exclamationmark", size: 11)
-                .foregroundStyle(Color.appDanger)
-        case .neutral:
-            Circle()
-                .fill(Color.appMuted.opacity(0.5))
-                .frame(width: 6, height: 6)
-        }
-    }
-}
 
 // MARK: - Pendant Floating Overlay
 
