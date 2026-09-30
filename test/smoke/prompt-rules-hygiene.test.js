@@ -10,7 +10,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { CORE_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT, buildSystemPrompt } = require('../../api/prompts');
+const { CORE_SYSTEM_PROMPT, ADAM_VOICE_PROMPT, buildSystemPrompt } = require('../../api/prompts');
 const { buildDynamicSystemPrompt } = require('../../api/index');
 
 function phrase(text) {
@@ -41,8 +41,8 @@ test('the working loop preserves the general missing-info policy', () => {
 });
 
 test('structure guidance (no bullets/headings in ordinary conversation) lives once, in the voice section', () => {
-  assert.match(MILLIE_VOICE_PROMPT, phrase('no headings, no bullet points, no numbered lists'));
-  assert.match(MILLIE_VOICE_PROMPT, phrase('an actual itinerary, a set of options the person asked to compare, or step-by-step instructions'));
+  assert.match(ADAM_VOICE_PROMPT, phrase('no headings, no bullet points, no numbered lists'));
+  assert.match(ADAM_VOICE_PROMPT, phrase('an actual itinerary, a set of options the person asked to compare, or step-by-step instructions'));
   // It must not ALSO be restated as a separate rule elsewhere in the composed chat prompt.
   const occurrences = (CORE_SYSTEM_PROMPT.match(/no headings/gi) || []).length;
   assert.equal(occurrences, 1, 'structure guidance is duplicated instead of stated once');
@@ -86,7 +86,7 @@ test('the money-actions paragraph is unchanged', () => {
 
 test('the voice explicitly requires real approval before consequential actions', () => {
   assert.match(
-    MILLIE_VOICE_PROMPT,
+    ADAM_VOICE_PROMPT,
     phrase("Still get a real yes before anything that spends money, sends something, books something, or otherwise can't be quietly undone")
   );
 });
@@ -127,6 +127,6 @@ test('buildDynamicSystemPrompt returns a complete, ready-to-use prompt (voice + 
   // 'chat', ...}) — its return value is the FULL composed prompt, no separate static-prefixing
   // step at the call site anymore.
   const dynamic = buildDynamicSystemPrompt('m', 'p', 'none', 'ctx', []);
-  assert.ok(dynamic.startsWith(MILLIE_VOICE_PROMPT));
+  assert.ok(dynamic.startsWith(ADAM_VOICE_PROMPT));
   assert.match(dynamic, /TRUTHFULNESS & SAFETY:/);
 });

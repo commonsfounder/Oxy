@@ -223,11 +223,9 @@ test('no scheduler/queue/orchestration/artifact jargon leaked into the composed 
 test('"runtime"/"workflow" appear only in the pre-existing voice disclaimer (or a benign consumer sense), not as new internal-jargon vocabulary', () => {
   // The voice section explicitly tells Adam NOT to expose "runtimes"/"workflows" to the user
   // — that single disclaimer sentence is expected and already pinned by adam-voice.test.js.
-  // "workflow" also appears once more in CAPABILITIES_SECTION in an ordinary consumer sense
-  // ("when a workflow would benefit from a visual") that predates this commit. Neither commit-2
-  // section should add a NEW occurrence of either word.
+  // No other section should use either word.
   const runtimeCount = (CORE_SYSTEM_PROMPT.match(/\bruntimes?\b/gi) || []).length;
   const workflowCount = (CORE_SYSTEM_PROMPT.match(/\bworkflows?\b/gi) || []).length;
   assert.equal(runtimeCount, 1, `expected exactly the voice-disclaimer's single "runtimes" — got ${runtimeCount}`);
-  assert.equal(workflowCount, 2, `expected the voice disclaimer's "workflows" plus the pre-existing CAPABILITIES_SECTION mention — got ${workflowCount}`);
+  assert.equal(workflowCount, 1, `expected exactly the voice-disclaimer's single "workflows" — got ${workflowCount}`);
 });

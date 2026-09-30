@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 
-const { buildSystemPrompt, MILLIE_VOICE_PROMPT, CORE_SYSTEM_PROMPT } = require('../../api/prompts');
+const { buildSystemPrompt, ADAM_VOICE_PROMPT, CORE_SYSTEM_PROMPT } = require('../../api/prompts');
 
 function phrase(text) {
   return new RegExp(text.trim().split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
@@ -53,7 +53,7 @@ test('background surface renders memory, preferences, connected capabilities, li
 
 test('background surface keeps identity, capabilities, working loop, truthfulness, and results sections', () => {
   const prompt = buildSystemPrompt({ surface: 'background', context: {} });
-  assert.ok(prompt.startsWith(MILLIE_VOICE_PROMPT), 'background must open with the same voice as chat');
+  assert.ok(prompt.startsWith(ADAM_VOICE_PROMPT), 'background must open with the same voice as chat');
   for (const header of ['WHAT YOU CAN DO:', 'HOW YOU WORK:', 'TRUTHFULNESS & SAFETY:', 'WORKING WITH RESULTS:']) {
     assert.ok(prompt.includes(header), `background prompt missing ${header}`);
   }
@@ -79,7 +79,7 @@ test('background surface has its own repeat-avoidance instruction distinct from 
 // ── Briefing: routed through Adam's identity/voice, not a separate persona ───────────────
 test('briefing surface opens with Adam\'s own voice, not a separate "You are a personal assistant" persona', () => {
   const prompt = buildSystemPrompt({ surface: 'briefing', context: {} });
-  assert.ok(prompt.startsWith(MILLIE_VOICE_PROMPT));
+  assert.ok(prompt.startsWith(ADAM_VOICE_PROMPT));
   assert.doesNotMatch(prompt, /You are a personal assistant/);
 });
 

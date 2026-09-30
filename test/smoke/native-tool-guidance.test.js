@@ -12,7 +12,7 @@ const {
   actionPromptBlock,
   getActionContract
 } = require('../../api/action-contracts');
-const { CORE_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
+const { CORE_SYSTEM_PROMPT, ADAM_VOICE_PROMPT } = require('../../api/prompts');
 
 function nativeDescriptions() {
   const decls = buildToolsForGemini(false)[0].functionDeclarations;
@@ -48,7 +48,7 @@ test('the static prompt shrank by roughly the size of the removed catalogue', ()
 });
 
 test('the personality block itself is untouched by this phase', () => {
-  assert.ok(CORE_SYSTEM_PROMPT.startsWith(MILLIE_VOICE_PROMPT), 'MILLIE_VOICE_PROMPT must still open the prompt, unchanged');
+  assert.ok(CORE_SYSTEM_PROMPT.startsWith(ADAM_VOICE_PROMPT), 'ADAM_VOICE_PROMPT must still open the prompt, unchanged');
 });
 
 test('actionPromptBlock() itself still works — kept as a decommissioned fallback, not deleted', () => {
