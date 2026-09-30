@@ -176,7 +176,8 @@ private struct WheelLayout: View, Animatable {
     private var step: Double { ThreadWheelMenu.step }
     private var cycle: Double { step * Double(ThreadMenuChoice.allCases.count) }
     private var windowStart: Double { firstAngle - step / 2 }
-    private var focus: Double { firstAngle + step * 1.5 }
+    /// The bottom slot, nearest the thumb: the item resting here is the selected one.
+    private var focus: Double { firstAngle }
 
     var body: some View {
         ZStack {
@@ -221,16 +222,18 @@ private struct WheelLayout: View, Animatable {
         let nearness = max(0, 1 - abs(slot - focus) / step)
         let edge = min(1, max(0, min(slot - windowStart, windowStart + cycle - slot) / 10))
         let active = choice == .privateChat && incognito
-        return Button { onChoose(choice) } label: {
+        let highlight: Double = active ? 1 : min(max((nearness - 0.4) / 0.6, 0), 1)
+        return ZStack {
             ZStack {
-                Circle().fill(active ? Color.appAction : Color.appReceivedBubble)
+                Circle().fill(Color.appReceivedBubble)
+                Circle().fill(Color.appAction).opacity(highlight)
                 WheelGlyph(choice: choice, size: 22, active: active)
-                    .foregroundColor(active ? Color.appOnAction : Color.appInk)
+                    .foregroundColor(highlight > 0.5 ? Color.appOnAction : Color.appInk)
             }
             .frame(width: 58, height: 58)
             .overlay(alignment: .leading) {
                 Text(active ? "Private on" : choice.title)
-                    .font(.appBody(15, weight: nearness > 0.6 ? .semibold : .medium))
+                    .font(.appBody(15, weight: nearness > 0.6 || active ? .semibold : .medium))
                     .foregroundStyle(Color.appInk)
                     .lineLimit(1)
                     .fixedSize()
@@ -240,8 +243,12 @@ private struct WheelLayout: View, Animatable {
             .scaleEffect((0.3 + 0.7 * min(q, 1.08)) * (1 + 0.16 * CGFloat(nearness)))
             .opacity(Double(min(q * 1.8, 1)) * edge)
         }
-        .buttonStyle(.appScale(0.94))
+        .contentShape(Circle().inset(by: -6))
+        .onTapGesture { onChoose(choice) }
         .position(x: x, y: y)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(choice.title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onChoose(choice) }
     }
 }
