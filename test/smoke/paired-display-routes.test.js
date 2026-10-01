@@ -45,6 +45,8 @@ test('display receiver page is public while the app display list remains session
   assert.match(display.body, /localStorage/);
   assert.match(display.body, /speechSynthesis/);
   assert.match(display.body, /milgrain_display_mode/);
+  assert.match(display.body, /adamSay/);
+  assert.match(display.body, /adamAsk/);
 
   const appList = await request('/agent/displays');
   assert.equal(appList.status, 401);
