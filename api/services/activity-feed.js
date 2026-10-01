@@ -135,7 +135,8 @@ function eventsFromFinishedWork(completed = []) {
     title: clean(item.title, 120),
     detail: clean(item.detail, 140) || null,
     at: new Date(item.at).toISOString(),
-    failed: item.failed === true
+    failed: item.failed === true,
+    workflowId: item.workflowId || null
   }));
 }
 
@@ -163,7 +164,8 @@ function eventsFromAsks({ approvals = [], needsYou = [] } = {}) {
       detail: 'Waiting for your yes',
       at: validDate(item.at)?.toISOString() || null,
       failed: false,
-      open: true
+      open: true,
+      workflowId: item.workflowId || null
     });
   }
   return asks;

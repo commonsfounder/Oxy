@@ -1,45 +1,61 @@
 import SwiftUI
 
-// MARK: - Household model
+// MARK: - Model
 
-/// What Adam can truthfully say about the household (GET /agent/household). Unknown stays unknown.
-struct Household: Codable, Equatable {
+/// The current state of the home as Adam can know it (GET /agent/home). Devices, rooms, watches and
+/// sensed events; conversation never appears here. Unknown stays unknown.
+struct HomeModel: Codable, Equatable {
     struct Presence: Codable, Equatable {
         let state: String
-        let observedAt: String?
         let homeConfigured: Bool
     }
-    struct Person: Codable, Equatable, Hashable {
+    struct Device: Codable, Equatable, Hashable, Identifiable {
+        let id: String
         let name: String
-        let relationship: String?
+        let kind: String
+        let room: String?
+        let online: Bool
+        let lastSeenAt: String?
     }
-    struct Commitment: Codable, Equatable, Hashable {
-        let what: String
-        let personName: String?
-        let dueAt: String?
+    struct Room: Codable, Equatable, Hashable, Identifiable {
+        let name: String
+        let devices: [Device]
+        let active: Bool
+        var id: String { name }
     }
-    struct Plan: Codable, Equatable, Hashable {
+    struct Watch: Codable, Equatable, Hashable, Identifiable {
+        let id: String
         let title: String
-        let recurrence: String?
+        let detail: String?
         let nextRunAt: String?
-        let contextEvent: String?
+    }
+    /// Something a device sensed or Adam inferred. Never a chat message or a reaction.
+    struct Observation: Codable, Equatable, Hashable, Identifiable {
+        let id: String
+        let kind: String
+        let room: String?
+        let summary: String
+        let at: String
+        let source: String
     }
 
     let presence: Presence
-    let people: [Person]
-    let openCommitments: [Commitment]
-    let activePlans: [Plan]
+    let devices: [Device]
+    let rooms: [Room]
+    let unassignedDevices: [Device]
+    let watches: [Watch]
+    let observations: [Observation]
 
-    static let empty = Household(
-        presence: Presence(state: "unknown", observedAt: nil, homeConfigured: false),
-        people: [], openCommitments: [], activePlans: []
+    static let empty = HomeModel(
+        presence: Presence(state: "unknown", homeConfigured: false),
+        devices: [], rooms: [], unassignedDevices: [], watches: [], observations: []
     )
 }
 
-enum HouseholdService {
-    static func fetch() async throws -> Household {
-        let data = try await APIClient.shared.request(path: "/agent/household")
-        return try JSONDecoder().decode(Household.self, from: data)
+enum HomeService {
+    static func fetch() async throws -> HomeModel {
+        let data = try await APIClient.shared.request(path: "/agent/home")
+        return try JSONDecoder().decode(HomeModel.self, from: data)
     }
 }
 
@@ -56,23 +72,17 @@ enum AskAdam {
 
 // MARK: - Your home
 
-/// A window into the household as Adam understands it: speakers, presence, what it's watching,
-/// what's in motion, promises to people, and what changed. Sections appear only when they're true.
 struct YourHomeView: View {
-    @State private var household: Household = .empty
-    @State private var board: HomeBoard = .empty
-    @State private var displays: [PairedDisplay] = []
+    @State private var home: HomeModel = .empty
     @State private var settings = OxySettings()
     @State private var loaded = false
     @State private var failed = false
     @State private var showsSpeakerSetup = false
     @State private var showsSettings = false
 
-    private var pendantConnected: Bool { NativeIntegrationManager.shared.pendant.isConnected }
-
-    private var onlineSpeakers: Int {
-        displays.filter { isOnline($0) }.count + (pendantConnected ? 1 : 0)
-    }
+    private var hasDevices: Bool { !home.devices.isEmpty }
+    private var onlineCount: Int { home.devices.filter(\.online).count }
+    private var needsAddress: Bool { settings.homeLatitude == nil && settings.homeAddress.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -82,24 +92,25 @@ struct YourHomeView: View {
                         .font(.title.weight(.semibold))
                         .foregroundStyle(Color.appInk)
 
-                    stateHeader
-
                     if failed {
                         ErrorBanner(message: "Couldn't load your home.", onRetry: { Task { await load() } })
                     }
 
-                    speakersSection
-                    plansSection
-                    workingSection
-                    promisesSection
-                    peopleSection
-                    noticedSection
-                    setupSection
+                    if hasDevices {
+                        stateHeader
+                        roomsSection
+                        unassignedSection
+                    } else if loaded && !failed {
+                        notConnected
+                    }
+
+                    watchingSection
+                    if hasDevices { noticedSection }
+                    addressSection
                 }
                 .padding(.horizontal, AppSpacing.margin)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
-                .animation(.appStandard, value: loaded)
             }
             .background(Color.appBackground.ignoresSafeArea())
             .refreshable { await load() }
@@ -114,18 +125,63 @@ struct YourHomeView: View {
         }
     }
 
-    // MARK: State
+    // MARK: Not connected
+
+    private var notConnected: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            AdamPresence(state: .complete, size: 72)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your home isn't connected yet")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.appInk)
+                Text("Add an Adam speaker to give Adam awareness of what's happening around your home.")
+                    .font(.appBody(15))
+                    .foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                HapticManager.shared.impact(.medium)
+                showsSpeakerSetup = true
+            } label: {
+                Text("Set up speaker")
+                    .font(.appBody(16, weight: .semibold))
+                    .foregroundStyle(Color.appOnAction)
+                    .padding(.horizontal, 24)
+                    .frame(minHeight: 48)
+                    .background(Capsule().fill(Color.appAction))
+            }
+            .buttonStyle(.appScale(0.97))
+
+            VStack(alignment: .leading, spacing: 0) {
+                previewRow("Answers out loud, in the room")
+                Rectangle().fill(Color.appCardOutline).frame(height: 1)
+                previewRow("Notices what changes around the house")
+                Rectangle().fill(Color.appCardOutline).frame(height: 1)
+                previewRow("Keeps watching for what you ask it to")
+            }
+            .padding(.horizontal, 16)
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
+        }
+    }
+
+    private func previewRow(_ text: String) -> some View {
+        Text(text)
+            .font(.appBody(14))
+            .foregroundStyle(Color.appMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 14)
+    }
+
+    // MARK: Connected
 
     private var stateHeader: some View {
         HStack(alignment: .center, spacing: 18) {
-            AdamPresence(state: onlineSpeakers > 0 ? .idle : .complete, size: 64)
+            AdamPresence(state: onlineCount > 0 ? .idle : .complete, size: 64)
             VStack(alignment: .leading, spacing: 4) {
-                if let presence = presenceLine {
-                    Text(presence)
-                        .font(.appBody(18, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                }
-                Text(speakerLine)
+                Text(headline)
+                    .font(.appBody(18, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Text(subline)
                     .font(.appBody(14))
                     .foregroundStyle(Color.appMuted)
             }
@@ -134,149 +190,87 @@ struct YourHomeView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var presenceLine: String? {
-        switch household.presence.state {
+    private var headline: String {
+        switch home.presence.state {
         case "home": return "You're home"
         case "away": return "You're out"
-        default: return nil
+        default: return onlineCount > 0 ? "Listening" : "Offline"
         }
     }
 
-    private var speakerLine: String {
-        let total = displays.count + (pendantConnected ? 1 : 0)
-        if total == 0 { return "No speaker set up yet" }
-        if onlineSpeakers == 0 { return total == 1 ? "Speaker offline" : "Speakers offline" }
-        return onlineSpeakers == 1 ? "Speaker listening" : "\(onlineSpeakers) speakers listening"
-    }
-
-    // MARK: Sections
-
-    @ViewBuilder
-    private var speakersSection: some View {
-        if !displays.isEmpty || pendantConnected {
-            section("Speakers") {
-                if pendantConnected {
-                    row(title: NativeIntegrationManager.shared.pendant.peripheralName ?? "Adam speaker",
-                        detail: "Connected", dot: .appDone) { showsSpeakerSetup = true }
-                }
-                ForEach(Array(displays.enumerated()), id: \.element.id) { index, display in
-                    if pendantConnected || index > 0 { divider }
-                    row(title: display.name,
-                        detail: isOnline(display) ? "Listening" : lastSeen(display),
-                        dot: isOnline(display) ? .appDone : nil) {
-                        AskAdam.draft("How is the \(display.name) speaker doing?")
-                    }
-                }
-            }
-        }
+    private var subline: String {
+        if onlineCount == 0 { return home.devices.count == 1 ? "Your speaker is offline" : "Your speakers are offline" }
+        return onlineCount == 1 ? "1 speaker listening" : "\(onlineCount) speakers listening"
     }
 
     @ViewBuilder
-    private var plansSection: some View {
-        if !household.activePlans.isEmpty {
-            section("Keeping an eye on") {
-                ForEach(Array(household.activePlans.enumerated()), id: \.offset) { index, plan in
+    private var roomsSection: some View {
+        ForEach(home.rooms) { room in
+            section(room.name) {
+                ForEach(Array(room.devices.enumerated()), id: \.element.id) { index, device in
                     if index > 0 { divider }
-                    row(title: plan.title, detail: planDetail(plan), dot: .appWorking) {
-                        AskAdam.draft("What's happening with: \(plan.title)?")
-                    }
+                    deviceRow(device)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var workingSection: some View {
-        if !board.handling.isEmpty {
-            section("Happening now") {
-                ForEach(Array(board.handling.prefix(5).enumerated()), id: \.element.id) { index, item in
+    private var unassignedSection: some View {
+        if !home.unassignedDevices.isEmpty {
+            section(home.rooms.isEmpty ? "Speakers" : "Not in a room yet") {
+                ForEach(Array(home.unassignedDevices.enumerated()), id: \.element.id) { index, device in
                     if index > 0 { divider }
-                    row(title: item.title, detail: item.detail, dot: .appWorking) {
-                        AskAdam.draft("How's it going with: \(item.title)?")
-                    }
+                    deviceRow(device)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var promisesSection: some View {
-        if !household.openCommitments.isEmpty {
-            section("Things you said you'd do") {
-                ForEach(Array(household.openCommitments.enumerated()), id: \.offset) { index, item in
+    private var watchingSection: some View {
+        if !home.watches.isEmpty {
+            section("Watching") {
+                ForEach(Array(home.watches.enumerated()), id: \.element.id) { index, watch in
                     if index > 0 { divider }
-                    row(title: item.what, detail: commitmentDetail(item), dot: .appNeedsYou) {
-                        AskAdam.draft("Help me with: \(item.what)")
+                    row(title: watch.title, detail: watch.detail ?? nextCheck(watch), dot: .appWorking) {
+                        AskAdam.draft("What's happening with: \(watch.title)?")
                     }
                 }
             }
         }
     }
 
+    /// Only what a device sensed or Adam inferred. Empty until hardware reports something.
     @ViewBuilder
-    private var peopleSection: some View {
-        if !household.people.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("People")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 14) {
-                        ForEach(household.people, id: \.self) { person in
-                            Button { AskAdam.draft("What's coming up with \(person.name)?") } label: {
-                                VStack(spacing: 6) {
-                                    Text(initials(person.name))
-                                        .font(.appBody(17, weight: .semibold))
-                                        .foregroundStyle(Color.appInk)
-                                        .frame(width: 52, height: 52)
-                                        .background(Circle().fill(Color.appReceivedBubble))
-                                    Text(person.name)
-                                        .font(.appBody(12, weight: .medium))
-                                        .foregroundStyle(Color.appInk)
-                                        .lineLimit(1)
-                                    Text(person.relationship ?? " ")
-                                        .font(.appBody(11))
-                                        .foregroundStyle(Color.appMuted)
-                                        .lineLimit(1)
-                                }
-                                .frame(width: 72)
-                            }
-                            .buttonStyle(.appScale(0.95))
+    private var noticedSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Noticed recently")
+            if home.observations.isEmpty {
+                Text("Nothing noticed yet.")
+                    .font(.appBody(14))
+                    .foregroundStyle(Color.appMuted)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(home.observations.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { divider }
+                        row(title: item.summary, detail: observationDetail(item), dot: nil) {
+                            AskAdam.draft("Tell me more about: \(item.summary)")
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
             }
         }
     }
 
     @ViewBuilder
-    private var noticedSection: some View {
-        if !board.changed.isEmpty {
-            section("Noticed recently") {
-                ForEach(Array(board.changed.prefix(5).enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { divider }
-                    row(title: item.title, detail: relativeTime(item.date), dot: nil) {
-                        AskAdam.draft("Tell me more about: \(item.title)")
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var setupSection: some View {
-        let needsSpeaker = displays.isEmpty && !pendantConnected
-        let needsAddress = settings.homeLatitude == nil && settings.homeAddress.isEmpty
-        if loaded && (needsSpeaker || needsAddress) {
+    private var addressSection: some View {
+        if loaded && needsAddress {
             section("Set up") {
-                if needsSpeaker {
-                    row(title: "Set up your speaker", detail: "So Adam can hear and answer at home", dot: nil, chevron: true) {
-                        showsSpeakerSetup = true
-                    }
-                }
-                if needsSpeaker && needsAddress { divider }
-                if needsAddress {
-                    row(title: "Add your home address", detail: "For reminders when you arrive", dot: nil, chevron: true) {
-                        showsSettings = true
-                    }
+                row(title: "Add your home address", detail: "So Adam knows when you're home or out", dot: nil, chevron: true) {
+                    showsSettings = true
                 }
             }
         }
@@ -297,19 +291,23 @@ struct YourHomeView: View {
                 .padding(.horizontal, 16)
                 .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
         }
-        .transition(.opacity)
     }
 
     private var divider: some View {
         Rectangle().fill(Color.appCardOutline).frame(height: 1)
     }
 
+    private func deviceRow(_ device: HomeModel.Device) -> some View {
+        row(title: device.name, detail: device.online ? "Listening" : lastSeen(device),
+            dot: device.online ? .appDone : Color.appMuted.opacity(0.4)) {
+            AskAdam.draft("How is the \(device.name) doing?")
+        }
+    }
+
     private func row(title: String, detail: String?, dot: Color?, chevron: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                if let dot {
-                    Circle().fill(dot).frame(width: 8, height: 8)
-                }
+                if let dot { Circle().fill(dot).frame(width: 8, height: 8) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.appBody(15, weight: .medium))
@@ -335,37 +333,25 @@ struct YourHomeView: View {
 
     // MARK: Formatting
 
-    private func isOnline(_ display: PairedDisplay) -> Bool {
-        guard let raw = display.lastSeenAt, let date = DisplayTimestampParser.date(from: raw) else { return false }
-        return Date().timeIntervalSince(date) < 180
-    }
-
-    private func lastSeen(_ display: PairedDisplay) -> String {
-        guard let raw = display.lastSeenAt, let date = DisplayTimestampParser.date(from: raw) else { return "Not connected yet" }
+    private func lastSeen(_ device: HomeModel.Device) -> String {
+        guard let raw = device.lastSeenAt, let date = Date.oxyParse(raw) else { return "Not connected yet" }
         return "Last heard from \(date.formatted(.relative(presentation: .named)))"
     }
 
-    private func planDetail(_ plan: Household.Plan) -> String? {
-        if let next = plan.nextRunAt.flatMap(Date.oxyParse), next > Date() {
-            return "Next check \(next.formatted(.relative(presentation: .named)))"
+    private func nextCheck(_ watch: HomeModel.Watch) -> String? {
+        guard let raw = watch.nextRunAt, let date = Date.oxyParse(raw), date > Date() else { return nil }
+        return "Next check \(date.formatted(.relative(presentation: .named)))"
+    }
+
+    private func observationDetail(_ item: HomeModel.Observation) -> String {
+        let when = Date.oxyParse(item.at).map { $0.formatted(.relative(presentation: .named)) } ?? ""
+        let how: String
+        switch item.source {
+        case "sensor": how = "Sensed"
+        case "inferred": how = "Inferred"
+        default: how = "Reported"
         }
-        return plan.recurrence.map { $0.capitalized }
-    }
-
-    private func commitmentDetail(_ item: Household.Commitment) -> String? {
-        let who = item.personName.map { "For \($0)" }
-        let when = item.dueAt.flatMap(Date.oxyParse).map { "due \($0.formatted(.relative(presentation: .named)))" }
-        let parts = [who, when].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private func relativeTime(_ date: Date?) -> String? {
-        date.map { $0.formatted(.relative(presentation: .named)) }
-    }
-
-    private func initials(_ name: String) -> String {
-        let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
-        return String(letters).uppercased()
+        return [item.room, how, when].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     // MARK: Loading
@@ -376,30 +362,41 @@ struct YourHomeView: View {
             settings = saved
         }
         #if DEBUG
-        if ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
-            board = ThreadBoardModel.sampleBoard
-            household = Self.sampleHousehold
+        let env = ProcessInfo.processInfo.environment
+        if env["OXY_DEBUG_HOME"] == "connected" {
+            home = Self.sampleConnected
+            loaded = true
+            return
+        }
+        if env["OXY_DEBUG_HOME"] == "empty" {
+            home = .empty
             loaded = true
             return
         }
         #endif
-        async let householdTask = try? HouseholdService.fetch()
-        async let boardTask = try? HomeBoardService.fetchBoard()
-        async let displaysTask = try? PairedDisplaysService.fetchDisplays()
-        let (fetchedHousehold, fetchedBoard, fetchedDisplays) = await (householdTask, boardTask, displaysTask)
-        failed = fetchedHousehold == nil && fetchedBoard == nil
-        if let fetchedHousehold { household = fetchedHousehold }
-        if let fetchedBoard { board = fetchedBoard }
-        if let fetchedDisplays { displays = fetchedDisplays }
+        do {
+            home = try await HomeService.fetch()
+            failed = false
+        } catch {
+            failed = true
+        }
         loaded = true
     }
 
     #if DEBUG
-    private static let sampleHousehold = Household(
-        presence: .init(state: "home", observedAt: nil, homeConfigured: true),
-        people: [.init(name: "Arina", relationship: "flatmate"), .init(name: "Mum", relationship: nil)],
-        openCommitments: [.init(what: "Send Arina the flat photos", personName: "Arina", dueAt: nil)],
-        activePlans: [.init(title: "Bin day reminder", recurrence: "weekly", nextRunAt: nil, contextEvent: nil)]
-    )
+    private static let sampleConnected: HomeModel = {
+        let seen = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30))
+        let living = HomeModel.Device(id: "d1", name: "Living room speaker", kind: "speaker", room: "Living room", online: true, lastSeenAt: seen)
+        let kitchen = HomeModel.Device(id: "d2", name: "Kitchen speaker", kind: "speaker", room: "Kitchen", online: false,
+                                       lastSeenAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)))
+        return HomeModel(
+            presence: .init(state: "home", homeConfigured: true),
+            devices: [living, kitchen],
+            rooms: [.init(name: "Living room", devices: [living], active: true), .init(name: "Kitchen", devices: [kitchen], active: false)],
+            unassignedDevices: [],
+            watches: [.init(id: "w1", title: "Front door", detail: "Tell me if it opens after 22:00", nextRunAt: nil)],
+            observations: []
+        )
+    }()
     #endif
 }

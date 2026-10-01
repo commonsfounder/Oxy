@@ -18,6 +18,7 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
     @State private var wheelOpen = false
+    @State private var showsPrivateExplainer = false
     @State private var replyingTo: Message?
     @State private var displayText: String?
     @State private var heldMessage: (message: Message, frame: CGRect)?
@@ -183,6 +184,11 @@ struct ChatView: View {
     private func handleMenuChoice(_ choice: ThreadMenuChoice) {
         if choice == .privateChat {
             withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
+            let key = "adam_private_explained"
+            if isIncognito, !UserDefaults.standard.bool(forKey: key) {
+                UserDefaults.standard.set(true, forKey: key)
+                showsPrivateExplainer = true
+            }
         } else {
             onMenuChoice?(choice)
         }
@@ -443,6 +449,11 @@ struct ChatView: View {
                     try? await Task.sleep(for: .milliseconds(450))
                     isInputFocused = true
                 }
+            }
+            .alert("Private mode", isPresented: $showsPrivateExplainer) {
+                Button("Got it", role: .cancel) {}
+            } message: {
+                Text("This chat isn't saved to your history, and Adam doesn't learn from it. Adam still searches the web and uses your connected apps to answer, and anything it does for you, like sending a message, is still recorded in Activity.")
             }
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .onChange(of: assistantReplySettled) { _, settled in

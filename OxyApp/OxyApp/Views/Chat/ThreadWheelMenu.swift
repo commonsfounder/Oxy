@@ -44,11 +44,19 @@ struct WheelHub: View {
     var body: some View {
         let open = min(max(progress, 0), 1)
         ZStack {
-            Circle().fill(Color.appReceivedBubble)
-            AdamMark()
-                .frame(width: 22, height: 16)
-                .scaleEffect(1 - 0.4 * open)
-                .opacity(1 - open)
+            Circle().fill(incognito && open < 0.5 ? Color.appAction : Color.appReceivedBubble)
+            if incognito {
+                GhostIcon(active: true)
+                    .frame(width: 20, height: 20)
+                    .foregroundColor(Color.appOnAction)
+                    .scaleEffect(1 - 0.4 * open)
+                    .opacity(1 - open)
+            } else {
+                AdamMark()
+                    .frame(width: 22, height: 16)
+                    .scaleEffect(1 - 0.4 * open)
+                    .opacity(1 - open)
+            }
             ZStack {
                 Capsule().frame(width: 16, height: 2)
                 Capsule().frame(width: 2, height: 16)

@@ -11,18 +11,6 @@ struct ThreadHeader: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            if isIncognito {
-                Text("Private")
-                    .font(.appBody(12, weight: .semibold))
-                    .foregroundStyle(Color.appOnAction)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.appAction))
-                    .padding(.top, 14)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .accessibilityLabel("Private chat is on")
-            }
-
             HStack {
                 Spacer()
                 Button {
@@ -39,7 +27,7 @@ struct ThreadHeader: View {
                     return CGPoint(x: frame.midX, y: frame.midY)
                 } action: { hubCenter = $0 }
                 .accessibilityLabel("Menu")
-                .accessibilityValue(statusDescription)
+                .accessibilityValue(isIncognito ? "Private mode on" : statusDescription)
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
@@ -58,7 +46,6 @@ struct ThreadHeader: View {
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
         }
-        .animation(.appSpring, value: isIncognito)
         .animation(.appStandard, value: isWorking)
         .animation(.appStandard, value: speakerOnline)
     }

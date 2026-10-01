@@ -235,6 +235,8 @@ struct AgentWatch: Codable, Identifiable, Equatable {
 
     var nextCheckLabel: String? {
         guard let nextRunAt, let date = Date.oxyParse(nextRunAt) else { return nil }
+        // A time already past is not a "next" check; say so instead of showing an old date.
+        guard date > Date() else { return "Waiting to run" }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short

@@ -285,56 +285,6 @@ extension View {
     }
 }
 
-struct AppStatusDot: View {
-    enum Kind {
-        case live      // green — active / streaming
-        case enabled   // silver — enabled, idle
-        case off       // gray — disabled / off
-        case error     // coral — error / disconnected-with-a-problem
-        case degraded  // amber — attention-needed
-
-        var color: Color {
-            switch self {
-            case .live:     return .appLive
-            case .enabled:  return .appGlow
-            case .off:      return .appMuted.opacity(0.4)
-            case .error:    return .appDanger
-            case .degraded: return .appAttention
-            }
-        }
-        var halo: Bool { self == .live }
-    }
-
-    var kind: Kind
-    var diameter: CGFloat = 6
-
-    /// Back-compat shorthand: live link vs. idle. Prefer `kind:` for full semantics.
-    init(isLive: Bool, diameter: CGFloat = 6) {
-        self.kind = isLive ? .live : .off
-        self.diameter = diameter
-    }
-
-    init(kind: Kind, diameter: CGFloat = 6) {
-        self.kind = kind
-        self.diameter = diameter
-    }
-
-    var body: some View {
-        ZStack {
-            if kind.halo {
-                Circle()
-                    .fill(kind.color.opacity(0.35))
-                    .frame(width: diameter * 2.4, height: diameter * 2.4)
-                    .blur(radius: diameter * 0.5)
-            }
-            Circle()
-                .fill(kind.color)
-                .frame(width: diameter, height: diameter)
-        }
-        .frame(width: diameter * 2.4, height: diameter * 2.4)
-    }
-}
-
 // MARK: - List primitives
 
 extension Color {
