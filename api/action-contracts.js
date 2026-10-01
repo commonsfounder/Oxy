@@ -522,6 +522,23 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  show_scene: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['title', 'scene_html'],
+    optional: ['body'],
+    inputExample: { title: 'Bleed a radiator', scene_html: '<div class="scene"><h1 class="title">Bleed a radiator</h1><ol class="steps"><li class="on">Turn the heating off</li></ol></div>' },
+    paramHints: {
+      title: 'a short name for the page',
+      body: 'one plain sentence saying what the page shows',
+      scene_html: 'a small page to look at or tap through on the phone, as an HTML fragment (no html/head tags). Use the screen kit: .scene wrapper, .eyebrow, .title, .lede, .cards > .card, .big + .unit, ol.steps > li (li.on = current), .chip, .dot.working|needs|done, .bar > i[style=width:60%], .row, .btn, <button class="btn" data-ask="what the person would say">. Inline SVG for charts, inline <script> for interaction. No external links, images or network.'
+    },
+    guidance: 'Use when the person wants something to look at or tap through (a how-to, plan, comparison, checklist, chart), not when one sentence answers it. One idea per page, large short text. It can look and compute but cannot act, and a button only asks Adam for something, like typing it. If they ask to put it on a screen in the home, use render_to_display with the same page.',
+    successSummary: 'Made a page',
+    failureSummary: 'Could not make that page',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   get_display_scene: {
     adapter: { kind: 'inline' },
     risk: 'low',

@@ -42,6 +42,24 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
   };
 }
 
+async function showScene({ params }) {
+  const displayScene = require('../services/display-scene');
+  const title = String(params?.title || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Adam';
+  let srcdoc;
+  try {
+    srcdoc = displayScene.buildSceneDocument(params?.scene_html ?? params?.sceneHtml, { title });
+  } catch (e) {
+    return { success: false, outcome: 'failed', error: e.message };
+  }
+  return {
+    success: true,
+    outcome: 'completed',
+    text: String(params?.body || title).replace(/\s+/g, ' ').trim().slice(0, 300),
+    actionSummary: 'Made a page: ' + title,
+    scene: { title, srcdoc }
+  };
+}
+
 async function getDisplayScene({ userId, params, deps }) {
   const { supabase } = deps;
   const pairedDisplays = require('../services/paired-displays');
@@ -94,6 +112,7 @@ module.exports = {
     list_paired_displays: listPairedDisplays,
     render_to_display: renderToDisplay,
     get_display_scene: getDisplayScene,
+    show_scene: showScene,
     generate_visual: generateVisual
   }
 };

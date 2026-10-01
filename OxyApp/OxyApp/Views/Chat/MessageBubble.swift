@@ -108,6 +108,14 @@ struct MessageBubble: View {
         return out
     }
 
+    private var sceneActions: [(scene: SceneContent, summary: String?)] {
+        guard !isUser, !message.isStreaming else { return [] }
+        return message.actions.compactMap { action in
+            guard action.isCompleted, let scene = action.scene else { return nil }
+            return (scene, action.text)
+        }
+    }
+
     private var actionChoices: [ActionSelectionOption] {
         guard !isUser, !message.isStreaming else { return [] }
         return message.actions
@@ -186,6 +194,11 @@ struct MessageBubble: View {
 
             if let turnError = message.turnError {
                 FailedTurnView(message: turnError, onRetry: onRetryFailedTurn)
+                    .padding(.top, message.content.isEmpty ? 0 : 8)
+            }
+
+            ForEach(Array(sceneActions.enumerated()), id: \.offset) { _, item in
+                SceneCard(scene: item.scene, summary: item.summary)
                     .padding(.top, message.content.isEmpty ? 0 : 8)
             }
 

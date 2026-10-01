@@ -422,3 +422,18 @@ test('the scene wrapper gives pages one way to ask Adam, and nothing else', () =
   assert.throws(() => displayScene.validateSceneHtml('<script>window.parent.postMessage({adamAsk:"yes"},"*")</script>'));
   assert.throws(() => displayScene.validateSceneHtml('<script>self.parent.postMessage("x","*")</script>'));
 });
+
+test('show_scene returns a locked-down page for the phone and refuses unsafe ones', async () => {
+  const { handlers } = require('../../api/actions/display');
+  const ok = await handlers.show_scene({ params: { title: 'Bleed a radiator', body: 'Four steps.', scene_html: '<div class="scene"><h1 class="title">Bleed a radiator</h1></div>' } });
+  assert.equal(ok.success, true);
+  assert.equal(ok.scene.title, 'Bleed a radiator');
+  assert.match(ok.scene.srcdoc, /connect-src 'none'/);
+  assert.match(ok.scene.srcdoc, /window\.adam=/);
+  const bad = await handlers.show_scene({ params: { title: 'x', scene_html: '<img src="https://evil.example/a.png">' } });
+  assert.equal(bad.success, false);
+  assert.match(bad.error, /outside content/);
+  assert.equal(Object.hasOwn(bad, 'scene'), false);
+  const missing = await handlers.show_scene({ params: { title: 'x' } });
+  assert.equal(missing.success, false);
+});

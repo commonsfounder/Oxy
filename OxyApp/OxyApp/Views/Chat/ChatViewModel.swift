@@ -135,6 +135,11 @@ final class ChatViewModel {
                 failed.turnError = "Network connection was lost."
                 messages.append(failed)
             }
+            if let path = ProcessInfo.processInfo.environment["OXY_DEBUG_SCENE_FILE"],
+               let data = FileManager.default.contents(atPath: path),
+               let actions = try? JSONDecoder().decode([ActionResult].self, from: data) {
+                messages.append(Message(dbId: "d6", role: .assistant, content: "Here are the four steps.", timestamp: now, actions: actions, sources: []))
+            }
             if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKING"] == "1" {
                 isSending = true
                 activeTurnUserMessageID = messages.last(where: { $0.role == .user })?.id

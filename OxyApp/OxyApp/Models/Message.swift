@@ -147,6 +147,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let taskId: String?
     /// Exact observed choices for a later user selection. Never reconstructed from prose.
     let selection: ActionSelection?
+    /// A page Adam wrote to look at or tap through; shown as a card that opens it.
+    let scene: SceneContent?
 
     /// Bounded backend outcomes keep handoffs and review pauses visible without
     /// treating their legacy `success` compatibility flag as a completed effect.
@@ -165,7 +167,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
-        case subject, taskId, selection
+        case subject, taskId, selection, scene
         // Older servers sent these at the top level; decoded into `subject` below.
         case imageUrls, productName, price, total, colorOptions
     }
@@ -194,7 +196,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         recoveryAction: BrowserRecoveryAction? = nil,
         subject: ResultSubject? = nil,
         taskId: String? = nil,
-        selection: ActionSelection? = nil
+        selection: ActionSelection? = nil,
+        scene: SceneContent? = nil
     ) {
         self.action = action
         self.success = success
@@ -220,6 +223,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.subject = subject
         self.taskId = taskId
         self.selection = selection
+        self.scene = scene
     }
 
     init(native result: NativeLocalActionResult) {
@@ -267,6 +271,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             subject = try ResultSubject.decode(from: result)
             taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
             selection = try result.decodeIfPresent(ActionSelection.self, forKey: .selection)
+            scene = try result.decodeIfPresent(SceneContent.self, forKey: .scene)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
@@ -291,6 +296,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             subject = try ResultSubject.decode(from: container)
             taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
             selection = try container.decodeIfPresent(ActionSelection.self, forKey: .selection)
+            scene = try container.decodeIfPresent(SceneContent.self, forKey: .scene)
         }
     }
 
@@ -320,6 +326,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(subject, forKey: .subject)
         try container.encodeIfPresent(taskId, forKey: .taskId)
         try container.encodeIfPresent(selection, forKey: .selection)
+        try container.encodeIfPresent(scene, forKey: .scene)
     }
 }
 
