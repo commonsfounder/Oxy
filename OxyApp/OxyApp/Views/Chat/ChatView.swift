@@ -832,12 +832,10 @@ struct ChatView: View {
         next: Message?,
         isGroupEnd: Bool
     ) -> Bool {
+        // Only where the conversation actually pauses, not under every reply.
         guard isGroupEnd, !message.isStreaming else { return false }
-        if next == nil { return true }
-        if message.role == .assistant, !(message.content.isEmpty && message.actions.isEmpty) { return true }
-        if let next, next.timestamp.timeIntervalSince(message.timestamp) > 5 * 60 { return true }
-        if let previous, message.timestamp.timeIntervalSince(previous.timestamp) > 5 * 60 { return true }
-        return false
+        guard let next else { return true }
+        return next.timestamp.timeIntervalSince(message.timestamp) > 20 * 60
     }
 }
 

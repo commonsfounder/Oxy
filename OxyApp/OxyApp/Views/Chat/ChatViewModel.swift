@@ -127,6 +127,11 @@ final class ChatViewModel {
                 Message(dbId: "d5", role: .user, content: "↩︎ Adam: Basket is ready. I need your yes before I pay.\n\nMake it the cheaper delivery", timestamp: now.addingTimeInterval(-300), actions: [], sources: [])
             ]
             hasOlderHistory = false
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_FAILED"] == "1" {
+                var failed = Message(dbId: nil, role: .assistant, content: "", timestamp: now, actions: [], sources: [])
+                failed.turnError = "Network connection was lost."
+                messages.append(failed)
+            }
             if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKING"] == "1" {
                 isSending = true
                 activeTurnUserMessageID = messages.last(where: { $0.role == .user })?.id

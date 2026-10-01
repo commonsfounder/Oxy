@@ -132,13 +132,13 @@ struct MessageBubble: View {
                                 .padding(.trailing, 2)
                         }
                         HStack(alignment: .bottom, spacing: 0) {
-                            Spacer(minLength: 48)
+                            Spacer(minLength: 64)
                             Text(AttributedString(ReplyQuote.split(message.content)?.body ?? message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
                                 .foregroundStyle(Color.appOnAction)
-                                .lineSpacing(isCompact ? 4 : 5)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
+                                .lineSpacing(isCompact ? 3 : 4)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
                                 .background(bubbleShape.fill(Color.appUserBubble))
                                 .overlay(alignment: .topLeading) {
                                     if let reaction { ReactionBadge(emoji: reaction).offset(x: -10, y: -14) }
@@ -153,14 +153,24 @@ struct MessageBubble: View {
                     }
                 } else {
                     HStack(spacing: 0) {
-                        AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
+                        VStack(alignment: .leading, spacing: 0) {
+                            AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
+                            if !memoryActions.isEmpty && !message.isStreaming {
+                                Rectangle().fill(Color.appCardOutline).frame(height: 1)
+                                    .padding(.top, 9)
+                                    .padding(.bottom, 7)
+                                ForEach(memoryActions) { action in
+                                    MemoryNote(action: action)
+                                }
+                            }
+                        }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
                             .background(bubbleShape.fill(Color.appReceivedBubble))
                             .overlay(alignment: .topTrailing) {
                                 if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
                             }
-                        Spacer(minLength: 40)
+                        Spacer(minLength: 64)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -182,7 +192,7 @@ struct MessageBubble: View {
 
             // Agent work: rich handoff cards keep their surface; everything else
             // collapses into one quiet receipt line per turn.
-            if !richActions.isEmpty || !receiptActions.isEmpty || !memoryActions.isEmpty {
+            if !richActions.isEmpty || !receiptActions.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(richActions) { action in
                         if action.action == "book_uber" {
@@ -194,11 +204,6 @@ struct MessageBubble: View {
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
                             DirectionsResultCard(action: action)
                         }
-                    }
-
-                    ForEach(memoryActions) { action in
-                        MemoryChip(action: action)
-                            .padding(.top, 2)
                     }
 
                     if !receiptActions.isEmpty {
@@ -789,28 +794,37 @@ private struct FailedTurnView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            AppIcon(sf: "exclamationmark.circle", size: 15)
-                .foregroundStyle(Color.appWarning)
+            AppIcon("alert-circle", size: 16)
+                .foregroundStyle(Color.appDanger)
             Text(message)
-                .font(.appBody(13.5))
-                .foregroundStyle(Color.appInk.opacity(0.95))
+                .font(.appBody(14, weight: .medium))
+                .foregroundStyle(Color.appInk)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if let onRetry {
-                Button("Retry", action: onRetry)
-                    .font(.appBody(13, weight: .semibold))
-                    .foregroundStyle(Color.appAccent)
-                    .buttonStyle(.plain)
+                Button {
+                    HapticManager.shared.impact(.medium)
+                    onRetry()
+                } label: {
+                    Text("Try again")
+                        .font(.appBody(14, weight: .semibold))
+                        .foregroundStyle(Color.appOnAction)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 36)
+                        .background(Capsule().fill(Color.appAction))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.appScale(0.95))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.appSurface.opacity(0.78))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.5)
-        )
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.appDanger.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.appDanger.opacity(0.45), lineWidth: 1))
+        .padding(.trailing, 32)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1316,8 +1330,8 @@ struct TravelResultCard: View {
 }
 
 
-/// Says out loud when Adam has learned or forgotten something, so remembering is never silent.
-private struct MemoryChip: View {
+/// Inside Adam's reply: what it just saved to (or removed from) memory.
+private struct MemoryNote: View {
     let action: ActionResult
 
     private var isForget: Bool { action.action.hasPrefix("forget") }
@@ -1330,13 +1344,15 @@ private struct MemoryChip: View {
     }
 
     var body: some View {
-        (Text(isForget ? "Forgot" : "Remembered").fontWeight(.medium)
-            + Text(detail.map { " · \($0)" } ?? ""))
-            .font(.appBody(13))
-            .foregroundStyle(Color.appMuted)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, 2)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            AppIcon("list", size: 11)
+                .foregroundStyle(Color.appMuted)
+                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 1 }
+            Text(isForget ? "Forgot\(detail.map { " · \($0)" } ?? "")" : "I'll remember\(detail.map { ": \($0)" } ?? " this")")
+                .font(.appBody(13))
+                .foregroundStyle(Color.appMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         .accessibilityElement(children: .combine)
     }
 }
