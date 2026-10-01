@@ -25,7 +25,8 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
     displayId: params?.display_id || params?.displayId,
     title: params?.title,
     body: params?.body,
-    kind: params?.kind
+    kind: params?.kind,
+    sceneHtml: params?.scene_html ?? params?.sceneHtml
   });
   return {
     // The server has queued the event; the display still has to poll and acknowledge

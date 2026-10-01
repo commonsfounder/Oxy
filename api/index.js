@@ -8930,6 +8930,7 @@ function displayPageHtml() {
     'input{background:#1d1b1a;color:#fff;width:100%;box-sizing:border-box;margin:8px 0}',
     'button{background:#e97961;color:#111;border:0;font-weight:700;cursor:pointer}',
     '#content{white-space:pre-wrap;font-size:clamp(20px,4vw,42px);line-height:1.35;color:#f5f1ec}',
+    'body.scene main{padding:0;display:block}body.scene section{width:100%;height:100vh}iframe{border:0;width:100%;height:100vh;display:block}',
     '.muted{font-size:13px;color:#8f8781}</style></head><body><main><section id="app"></section></main>',
     '<script>',
     'const app=document.getElementById("app");',
@@ -8939,7 +8940,7 @@ function displayPageHtml() {
     'const savedId=localStorage.getItem("milgrain_display_id");',
     'const savedToken=localStorage.getItem("milgrain_display_token");',
     'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Adam.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
-    'function renderEvent(event){app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'function renderEvent(event){if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
     'document.addEventListener("click",event=>{if(event.target?.id==="pair")localStorage.setItem("milgrain_display_mode",voiceMode?"voice":"text")});',
     'const renderTextEvent=renderEvent;renderEvent=event=>{renderTextEvent(event);if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(event.title+". "+event.body);utterance.lang="en-GB";window.speechSynthesis.speak(utterance)}};',
     'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){renderPair();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");renderPair();return}if(!response.ok)return;const data=await response.json();if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
@@ -9100,7 +9101,8 @@ app.post('/agent/displays/:id/render', requireSessionAuth, async (req, res) => {
       displayId: req.params.id,
       title: req.body?.title,
       body: req.body?.body,
-      kind: req.body?.kind
+      kind: req.body?.kind,
+      sceneHtml: req.body?.scene_html
     });
     res.json({ event });
   } catch (e) {

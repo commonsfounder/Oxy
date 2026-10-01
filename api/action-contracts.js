@@ -526,15 +526,16 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['display_id', 'title', 'body'],
-    optional: ['kind'],
+    optional: ['kind', 'scene_html'],
     inputExample: { display_id: 'id from list_paired_displays', title: 'Dinner tonight', body: 'Reservation at 7:30pm — The Anchor' },
     paramHints: {
       display_id: 'the id of a display returned by list_paired_displays',
       title: 'a short heading for the physical display',
       body: 'the useful content to show, bounded to a short readable update',
-      kind: 'agent_update | reminder | approval | status'
+      kind: 'agent_update | reminder | approval | status',
+      scene_html: 'optional: a small page for a screen across the room, as an HTML fragment (no html/head tags). Use the screen kit: .scene wrapper, .eyebrow, .title, .lede, .cards > .card, .big + .unit, ol.steps > li (li.on = current), .chip, .dot.working|needs|done, .bar > i[style=width:60%], .row, .btn. Inline SVG for charts, inline <script> for interaction. No external links, images or network. title/body stay plain text: body is read aloud and shown on text-only screens.'
     },
-    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body.',
+    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send scene_html written for reading from across a room: one idea per screen, large short text, no clutter. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes.',
     successSummary: 'Queued for display',
     failureSummary: 'Could not show that on the display',
     confirmation: 'none',

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const displayScene = require('./display-scene');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const EVENT_TTL_MS = 15 * 60 * 1000;
@@ -8,7 +9,7 @@ const MAX_DISPLAY_NAME = 80;
 const MAX_TITLE = 160;
 const MAX_BODY = 2000;
 const MAX_KIND = 40;
-const DISPLAY_KINDS = new Set(['agent_update', 'reminder', 'approval', 'status']);
+const DISPLAY_KINDS = new Set(['agent_update', 'reminder', 'approval', 'status', 'scene']);
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SECRET_CONTENT_PATTERN = /(?:\bauthorization\s*:\s*bearer\b|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(?:password|passwd|passphrase|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|cookie|set-cookie|session[_-]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 
@@ -204,14 +205,18 @@ async function displayForToken(supabase, displayId, token) {
   return data || null;
 }
 
-async function queueRender(supabase, userId, { displayId, title, body, kind, now = new Date() } = {}) {
+async function queueRender(supabase, userId, { displayId, title, body, kind, sceneHtml, now = new Date() } = {}) {
   assertUser(userId);
   if (!displayId) throw displayDomainError('invalid_display', 'Choose a paired display first.');
   const display = await supabase.from('paired_displays').select('id, user_id, revoked_at')
     .eq('id', displayId).eq('user_id', userId).is('revoked_at', null).maybeSingle();
   if (display.error) throw display.error;
   if (!display.data) throw displayDomainError('not_paired', 'That display is not paired.');
-  const content = assertDisplayContent({ title, body, kind });
+  const hasScene = sceneHtml != null && sceneHtml !== '';
+  const content = assertDisplayContent({ title, body, kind: hasScene ? 'scene' : kind });
+  // The scene is checked here and again when it is wrapped for the screen. Its title and body stay
+  // plain text: they are what a text-only screen shows and what voice mode reads aloud.
+  const scene = hasScene ? displayScene.validateSceneHtml(sceneHtml) : null;
   const expiresAt = new Date(new Date(now).getTime() + EVENT_TTL_MS).toISOString();
   const { data, error } = await supabase.from('display_render_events').insert({
     user_id: userId,
@@ -219,11 +224,11 @@ async function queueRender(supabase, userId, { displayId, title, body, kind, now
     kind: content.kind,
     title: content.title,
     body: content.body,
-    payload: { text: true },
+    payload: scene ? { text: true, scene: { html: scene } } : { text: true },
     expires_at: expiresAt
   }).select().single();
   if (error) throw error;
-  return { id: data.id, displayId, kind: content.kind, title: content.title, body: content.body, expiresAt: data.expires_at || expiresAt };
+  return { id: data.id, displayId, kind: content.kind, title: content.title, body: content.body, scene: Boolean(scene), expiresAt: data.expires_at || expiresAt };
 }
 
 async function pollNextRender(supabase, displayId, token, now = new Date()) {
@@ -236,10 +241,16 @@ async function pollNextRender(supabase, displayId, token, now = new Date()) {
   if (error) throw error;
   if (!data?.[0]) return { display: summarizeDisplay(display), event: null };
   const event = data[0];
-  return {
-    display: summarizeDisplay(display),
-    event: { id: event.id, kind: event.kind, title: event.title, body: event.body, createdAt: event.created_at, expiresAt: event.expires_at }
-  };
+  const out = { id: event.id, kind: event.kind, title: event.title, body: event.body, createdAt: event.created_at, expiresAt: event.expires_at };
+  const sceneHtml = event.payload?.scene?.html;
+  if (typeof sceneHtml === 'string') {
+    try {
+      out.scene = { srcdoc: displayScene.buildSceneDocument(sceneHtml, { title: event.title }) };
+    } catch {
+      // A scene that no longer passes the checks is shown as its plain text, never as a page.
+    }
+  }
+  return { display: summarizeDisplay(display), event: out };
 }
 
 async function acknowledgeRender(supabase, displayId, token, eventId, now = new Date()) {

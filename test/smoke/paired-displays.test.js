@@ -291,3 +291,80 @@ test('revoked displays stop receiving content', async () => {
   assert.equal(await pairedDisplays.revokeDisplay(db, 'user-1', display.id, now), true);
   assert.equal(await pairedDisplays.pollNextRender(db, display.id, token, now), null);
 });
+
+test('a generated scene is wrapped in a locked-down page, and plain text stays plain', async () => {
+  const displayScene = require('../../api/services/display-scene');
+  const db = fakeSupabase();
+  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
+    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
+  });
+  const { display, token } = await pairedDisplays.redeemPairingChallenge(db, {
+    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
+  });
+  const html = '<div class="scene"><h1 class="title">Bleed a radiator</h1><ol class="steps"><li class="on">Turn the heating off</li></ol><script>document.querySelector(".steps").style.opacity=1</script></div>';
+  const event = await pairedDisplays.queueRender(db, 'user-1', {
+    displayId: display.id, title: 'Bleed a radiator', body: 'Four steps. First turn the heating off.', sceneHtml: html, now
+  });
+  assert.equal(event.kind, 'scene');
+  assert.equal(event.scene, true);
+
+  const polled = await pairedDisplays.pollNextRender(db, display.id, token, now);
+  assert.equal(polled.event.kind, 'scene');
+  const doc = polled.event.scene.srcdoc;
+  assert.match(doc, /Content-Security-Policy/);
+  assert.match(doc, /connect-src 'none'/);
+  assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('Bleed a radiator</h1>'));
+  assert.ok(doc.includes(html));
+
+  const plain = await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Dinner', body: '7:30pm', now });
+  await pairedDisplays.acknowledgeRender(db, display.id, token, event.id, now);
+  const next = await pairedDisplays.pollNextRender(db, display.id, token, now);
+  assert.equal(next.event.id, plain.id);
+  assert.equal(Object.hasOwn(next.event, 'scene'), false);
+});
+
+test('a scene cannot reach outside, read the page around it, or carry secrets', async () => {
+  const displayScene = require('../../api/services/display-scene');
+  const attempts = [
+    '<img src="https://evil.example/x.png">',
+    '<a href="//evil.example">go</a>',
+    '<iframe src="about:blank"></iframe>',
+    '<script src="app.js"></script>',
+    '<style>@import url(https://evil.example/a.css);</style>',
+    '<div style="background:url(https://evil.example/p)"></div>',
+    '<script>fetch("/agent/home")</script>',
+    '<script>new XMLHttpRequest()</script>',
+    '<script>navigator.sendBeacon("/x")</script>',
+    '<script>window.parent.postMessage("x","*")</script>',
+    '<script>document.cookie</script>',
+    '<script>localStorage.getItem("milgrain_display_token")</script>',
+    '<script>location.href = "https://evil.example"</script>',
+    '<meta http-equiv="refresh" content="0;url=https://evil.example">',
+    '<form action="/x"><button>Go</button></form>',
+    '<p>Authorization: Bearer sk-live-secret-value</p>',
+    '<a href="javascript:alert(1)">x</a>'
+  ];
+  for (const html of attempts) {
+    assert.throws(() => displayScene.validateSceneHtml(html), error => error.code === 'invalid_content', `accepted: ${html}`);
+  }
+  assert.throws(() => displayScene.validateSceneHtml('x'.repeat(displayScene.MAX_SCENE_HTML + 1)), /too large/);
+  assert.throws(() => displayScene.validateSceneHtml('   '), /needs some content/);
+  assert.throws(() => displayScene.validateSceneHtml({ html: 'x' }), /HTML text/);
+  const fine = '<p>Stir from the top. Then wait.</p><svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">';
+  assert.equal(displayScene.validateSceneHtml(fine), fine);
+
+  const db = fakeSupabase();
+  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
+    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
+  });
+  const { display } = await pairedDisplays.redeemPairingChallenge(db, {
+    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
+  });
+  await assert.rejects(
+    () => pairedDisplays.queueRender(db, 'user-1', {
+      displayId: display.id, title: 'Hi', body: 'Hello', sceneHtml: '<img src="https://evil.example/x.png">', now
+    }),
+    error => error.code === 'invalid_content'
+  );
+  assert.equal(db.tables.display_render_events.length, 0);
+});
