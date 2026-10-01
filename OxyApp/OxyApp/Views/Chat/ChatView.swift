@@ -58,10 +58,39 @@ struct ChatView: View {
         }
     }
 
+    /// The user message an agent reaction lands on, or nil when it should be shown as the plain emoji.
+    private func adamReactionTarget(of message: Message) -> Message? {
+        guard let index = viewModel.messages.firstIndex(where: { $0.id == message.id }), index > 0 else { return nil }
+        let target = viewModel.messages[index - 1]
+        guard target.role == .user, !ReactionText.isReaction(target.content),
+              ReactionText.canReact(to: target.content) else { return nil }
+        return target
+    }
+
+    /// An agent reaction that couldn't become a badge is shown as just the emoji.
+    private func plainEmojiIfNeeded(_ message: Message) -> Message {
+        guard message.role == .assistant, let emoji = ReactionText.agentReaction(message.content) else { return message }
+        var shown = message
+        shown.content = emoji
+        return shown
+    }
+
+    /// The emoji Adam reacted with on this user message, if the next message is such a reaction.
+    private func adamReaction(on message: Message) -> String? {
+        guard message.role == .user,
+              let index = viewModel.messages.firstIndex(where: { $0.id == message.id }),
+              index + 1 < viewModel.messages.count else { return nil }
+        let next = viewModel.messages[index + 1]
+        guard next.role == .assistant, let emoji = ReactionText.agentReaction(next.content),
+              adamReactionTarget(of: next)?.id == message.id else { return nil }
+        return emoji
+    }
+
     /// Reactions sent to Adam, and replies Adam chose not to make, are not shown as messages.
     private func isHiddenInThread(_ message: Message) -> Bool {
         if message.role == .user { return ReactionText.isReaction(message.content) }
-        if ReactionText.isQuiet(message.content) { return true }
+        if ReactionText.isQuiet(message.content) || ReactionText.isAgentReactionInProgress(message.content) { return true }
+        if ReactionText.agentReaction(message.content) != nil { return adamReactionTarget(of: message) != nil }
         // A reply to a reaction that failed or never came isn't worth an error.
         guard message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let index = viewModel.messages.firstIndex(where: { $0.id == message.id }), index > 0 else { return false }
@@ -92,7 +121,7 @@ struct ChatView: View {
             onHold: { frame in heldMessage = (message, frame) }
         ) {
             MessageBubble(
-                message: message,
+                message: plainEmojiIfNeeded(message),
                 showsTypingIndicator: false,
                 isGroupStart: isGroupStart,
                 isGroupEnd: isGroupEnd,
@@ -111,7 +140,7 @@ struct ChatView: View {
                 onRetryFailedTurn: {
                     viewModel.retryLastFailedMessage(userId: appState.userId)
                 },
-                reaction: ReactionStore.shared.reaction(for: message)
+                reaction: adamReaction(on: message) ?? ReactionStore.shared.reaction(for: message)
             )
         }
         .id(message.id)
@@ -215,7 +244,7 @@ struct ChatView: View {
     private var assistantReplySettled: Bool {
         guard let last = viewModel.messages.last else { return false }
         return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
-            && !ReactionText.isQuiet(last.content)
+            && !ReactionText.isQuiet(last.content) && ReactionText.agentReaction(last.content) == nil
     }
 
     var body: some View {

@@ -124,6 +124,8 @@ final class ChatViewModel {
                 Message(dbId: "d4", role: .assistant, content: "Basket is ready. I need your yes before I pay.", timestamp: now.addingTimeInterval(-590), actions: [], sources: []),
                 Message(dbId: "d4r", role: .user, content: "Reacted 👍 to “Basket is ready. I need your yes before I pay.”", timestamp: now.addingTimeInterval(-400), actions: [], sources: []),
                 Message(dbId: "d4q", role: .assistant, content: "[quiet]", timestamp: now.addingTimeInterval(-399), actions: [], sources: []),
+                Message(dbId: "d4t", role: .user, content: "thanks!", timestamp: now.addingTimeInterval(-350), actions: [], sources: []),
+                Message(dbId: "d4u", role: .assistant, content: "[react:👍]", timestamp: now.addingTimeInterval(-349), actions: [], sources: []),
                 Message(dbId: "d5", role: .user, content: "↩︎ Adam: Basket is ready. I need your yes before I pay.\n\nMake it the cheaper delivery", timestamp: now.addingTimeInterval(-300), actions: [], sources: [])
             ]
             hasOlderHistory = false

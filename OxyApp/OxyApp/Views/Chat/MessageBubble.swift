@@ -141,7 +141,7 @@ struct MessageBubble: View {
                                 .padding(.vertical, 9)
                                 .background(bubbleShape.fill(Color.appUserBubble))
                                 .overlay(alignment: .topLeading) {
-                                    if let reaction { ReactionBadge(emoji: reaction).offset(x: -10, y: -14) }
+                                    if let reaction { ReactionBadge(emoji: reaction).offset(x: -14, y: -16) }
                                 }
                         }
                         if message.queuedForActiveTask {

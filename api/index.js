@@ -676,7 +676,8 @@ async function sendChatResultToTelegram(chatId, result) {
     });
     return;
   }
-  const replyText = String(result?.text || 'Done.').slice(0, 4096);
+  if (reactions.isQuietReply(result?.text)) return;
+  const replyText = reactions.plainReply(result?.text || 'Done.').slice(0, 4096);
   await telegramBot.sendMessage(chatId, replyText);
 }
 
@@ -2490,6 +2491,8 @@ function buildVoiceExcerpt(text) {
 
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
+  // A reaction or a deliberate silence is not something to say out loud.
+  if (reactions.isQuietReply(text) || reactions.isAgentReaction(text)) return null;
   if (getVoiceProvider() === 'openai') return synthesizeSpeechOpenAI(text, voiceName);
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
   console.log(`[tts] generateSpeech start voice=${safeVoiceName} chars=${text.trim().length}`);

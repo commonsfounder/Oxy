@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseReaction, isReactionMessage, isQuietReply, QUIET_REPLY } = require('../../api/services/reactions');
+const { parseReaction, isReactionMessage, isQuietReply, parseAgentReaction, isAgentReaction, plainReply, QUIET_REPLY } = require('../../api/services/reactions');
 
 test('a reaction message is recognised with its emoji and the quoted text', () => {
   assert.deepEqual(parseReaction('Reacted 👎 to “Booked for Saturday at 10:30”'), {
@@ -22,3 +22,18 @@ test('only the exact quiet marker counts as no reply', () => {
   assert.equal(isQuietReply(''), false);
 });
 
+
+test('Adam can answer with a reaction, and only an exact marker counts', () => {
+  assert.equal(parseAgentReaction('[react:👍]'), '👍');
+  assert.equal(parseAgentReaction('  [react:❤️] '), '❤️');
+  assert.equal(isAgentReaction('[react:😂]'), true);
+  for (const text of ['[react:👍] glad to help', 'I would [react:👍]', '[react:]', '[react:abcdefghijklmnopqrstuvwxyz]', 'react 👍', '']) {
+    assert.equal(isAgentReaction(text), false, JSON.stringify(text));
+  }
+});
+
+test('where a badge cannot be shown, the reaction is just the emoji', () => {
+  assert.equal(plainReply('[react:👍]'), '👍');
+  assert.equal(plainReply('Booked it.'), 'Booked it.');
+  assert.equal(plainReply(undefined), '');
+});

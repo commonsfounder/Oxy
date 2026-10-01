@@ -47,6 +47,29 @@ enum ReactionText {
         return text.hasPrefix("Reacted ") && text.contains(" to “") && text.hasSuffix("”")
     }
 
+    /// The emoji when Adam answered with a reaction instead of words: exactly `[react:EMOJI]`.
+    static func agentReaction(_ content: String) -> String? {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("[react:"), text.hasSuffix("]") else { return nil }
+        let emoji = String(text.dropFirst(7).dropLast())
+        return !emoji.isEmpty && emoji.count <= 4 && !emoji.contains(" ") ? emoji : nil
+    }
+
+    /// True while a reaction is still arriving ("[re", "[react:👍"), so half a marker never flashes in a bubble.
+    static func isAgentReactionInProgress(_ content: String) -> Bool {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty, text.count < 24 else { return false }
+        if "[react:".hasPrefix(text) { return true }
+        return text.hasPrefix("[react:") && !text.contains("]")
+    }
+
+    /// A reaction only stands in for words on a short, plain message. Anything that asked something is
+    /// shown as the emoji on its own so the user is never left without an answer.
+    static func canReact(to userContent: String) -> Bool {
+        let text = (ReplyQuote.split(userContent)?.body ?? userContent).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.contains("?") && text.split(whereSeparator: { $0.isWhitespace }).count <= 12
+    }
+
     /// True for a quiet reply, including while it is still streaming in.
     static func isQuiet(_ content: String) -> Bool {
         let text = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
