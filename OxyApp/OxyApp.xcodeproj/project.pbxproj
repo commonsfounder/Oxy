@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F08 /* WorkflowTimelineView.swift */; };
+		A10000010000000000000F14 /* YourHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F14 /* YourHomeView.swift */; };
 		A10000010000000000000F07 /* HomeBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F07 /* HomeBoardView.swift */; };
 		A10000010000000000000F06 /* HomeBoardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F06 /* HomeBoardService.swift */; };
 		A10000010000000000000F05 /* HomeBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F05 /* HomeBoard.swift */; };
@@ -86,6 +87,7 @@
 
 /* Begin PBXFileReference section */
 		A20000010000000000000F08 /* WorkflowTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowTimelineView.swift; sourceTree = "<group>"; };
+		A20000010000000000000F14 /* YourHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourHomeView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F07 /* HomeBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F06 /* HomeBoardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardService.swift; sourceTree = "<group>"; };
 		A20000010000000000000F05 /* HomeBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoard.swift; sourceTree = "<group>"; };
@@ -408,6 +410,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000F08 /* WorkflowTimelineView.swift */,
+				A20000010000000000000F14 /* YourHomeView.swift */,
 				A20000010000000000000F07 /* HomeBoardView.swift */,
 				A20000010000000000000100 /* AgenticHomeView.swift */,
 				A20000010000000000000104 /* GlebAgenticFlow.swift */,
@@ -555,6 +558,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */,
+				A10000010000000000000F14 /* YourHomeView.swift in Sources */,
 				A10000010000000000000F07 /* HomeBoardView.swift in Sources */,
 				A10000010000000000000F06 /* HomeBoardService.swift in Sources */,
 				A10000010000000000000F05 /* HomeBoard.swift in Sources */,

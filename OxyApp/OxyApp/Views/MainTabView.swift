@@ -17,11 +17,14 @@ struct MainTabView: View {
                 Group {
                     switch choice {
                     case .activity: AdamActivityView()
-                    case .home: PhysicalHomeView()
+                    case .home: YourHomeView()
                     default: AdamYouView()
                     }
                 }
                 .presentationDragIndicator(.visible)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { _ in
+                opened = nil
             }
             .onAppear {
                 HapticManager.shared.prepare()

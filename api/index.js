@@ -9003,6 +9003,34 @@ app.post('/agent/displays/pairing', requireSessionAuth, async (req, res) => {
   }
 });
 
+// What Adam can truthfully say about the household right now, for the app's home view. Nothing
+// here is inferred beyond what household-state.js already normalises: unknown stays unknown.
+app.get('/agent/household', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const [nativeContext, people, commitments, plans] = await Promise.all([
+      supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle(),
+      supabase.from('participants').select('display_name, relationship').eq('user_id', userId)
+        .order('updated_at', { ascending: false, nullsFirst: false }).limit(12),
+      supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId)
+        .eq('status', 'open').order('due_at', { ascending: true }).limit(12),
+      supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event')
+        .eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12)
+    ]);
+    res.json(normalizeHouseholdState({
+      nativeContext: nativeContext.data || {},
+      people: people.data || [],
+      commitments: commitments.data || [],
+      scheduledTasks: plans.data || [],
+      now: new Date()
+    }));
+  } catch (e) {
+    log('warn', 'household.load.failed', { userId, error: e.message });
+    res.status(503).json({ error: 'Home details are unavailable right now.' });
+  }
+});
+
 app.get('/agent/displays', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });

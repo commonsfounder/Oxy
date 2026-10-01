@@ -436,6 +436,14 @@ struct ChatView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await boardModel.refresh() } }
             }
+            .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { note in
+                guard let text = note.object as? String else { return }
+                viewModel.inputText = text
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    isInputFocused = true
+                }
+            }
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .onChange(of: assistantReplySettled) { _, settled in
                 guard settled else { return }
@@ -1208,11 +1216,14 @@ private struct ChatInputBar: View {
 
             HStack(alignment: .bottom, spacing: 8) {
                 Button(action: onAttach) {
-                    AppIcon(sf: "plus", size: 19)
-                        .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
-                        .frame(width: 34, height: 34)
+                    AppIcon(sf: "plus", size: 18)
+                        .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appInk.opacity(0.8))
+                        .frame(width: 38, height: 38)
                         .appGlass(Circle(), interactive: true)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
+                .accessibilityLabel("Add a photo or file")
                 .buttonStyle(.appScale)
                 .disabled(isSending || isVoiceActive)
 
@@ -1240,14 +1251,15 @@ private struct ChatInputBar: View {
                         }
                     }
                     .foregroundStyle(buttonForeground)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Circle())
+                    .frame(width: 38, height: 38)
                     .background {
                         Circle().fill(buttonFill)
                         if !canSend && !isRecording {
                             Circle().strokeBorder(Color.appHairline, lineWidth: 0.5)
                         }
                     }
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
                 }
                 .disabled(!canAct && !showsStop)
                 .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : "Talk to Adam"))
@@ -1264,7 +1276,7 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(incognito ? "Private — not saved" : "Ask Adam", text: $text, axis: .vertical)
+        TextField(isSending ? "You're offline" : (incognito ? "Private · not saved" : "Ask Adam"), text: $text, axis: .vertical)
             .font(.appBody(14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
