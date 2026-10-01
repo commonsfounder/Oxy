@@ -464,8 +464,8 @@ private struct AdamActivityView: View {
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(filter == .done ? "Done" : "Recently")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Color.appInk)
+                .font(.appBody(13, weight: .semibold))
+                .foregroundStyle(Color.appMuted)
             VStack(spacing: 0) {
                 ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                     activityRow(item)
@@ -473,7 +473,20 @@ private struct AdamActivityView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+    }
+
+    /// Says plainly what kind of thing this is, from the event's real kind; never guessed.
+    static func kindLabel(for item: BoardItem, working: Bool) -> String {
+        if working { return "Working on" }
+        if item.failed == true { return "Couldn't finish" }
+        switch item.kind.lowercased() {
+        case "watch", "observation", "context": return "Noticed"
+        case "checkpoint_opened", "checkpoint": return "Asked you"
+        case "checkpoint_resolved": return "You decided"
+        case "status_changed", "note": return "Update"
+        default: return "Did"
         }
     }
 
@@ -492,6 +505,9 @@ private struct AdamActivityView: View {
                     .foregroundStyle(Color.appMuted)
                     .frame(width: 40, alignment: .leading)
                 VStack(alignment: .leading, spacing: 5) {
+                    Text(Self.kindLabel(for: item, working: board.handling.contains(where: { $0.id == item.id })))
+                        .font(.appBody(11, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
                     Text(item.title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.appInk)
