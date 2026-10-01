@@ -26,7 +26,7 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
     title: params?.title,
     body: params?.body,
     kind: params?.kind,
-    sceneHtml: params?.scene_html ?? params?.sceneHtml
+    scene: params?.scene
   });
   return {
     // The server has queued the event; the display still has to poll and acknowledge
@@ -43,11 +43,10 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
 }
 
 async function showScene({ params }) {
-  const displayScene = require('../services/display-scene');
   const title = String(params?.title || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Adam';
   let srcdoc;
   try {
-    srcdoc = displayScene.buildSceneDocument(params?.scene_html ?? params?.sceneHtml, { title });
+    srcdoc = require('../services/scene-runtime').buildSpecDocument(params?.scene);
   } catch (e) {
     return { success: false, outcome: 'failed', error: e.message };
   }
@@ -70,7 +69,7 @@ async function getDisplayScene({ userId, params, deps }) {
     found: true,
     title: scene.title,
     body: scene.body,
-    sceneHtml: scene.sceneHtml,
+    scene: scene.scene,
     text: 'The screen is showing: ' + scene.title
   };
 }

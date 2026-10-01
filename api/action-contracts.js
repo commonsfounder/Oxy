@@ -14,7 +14,8 @@ const CONVERSATIONAL_MESSAGE_GUIDANCE = 'Keep the message brief, natural, and te
 // Adam's-own-identity email contracts.
 const EMAIL_TONE_GUIDANCE = 'Draft the body as 1-3 short paragraphs. Default tone is warm, clear, and human — most email is professional or corporate, so use polished business language when the thread calls for it, but avoid empty cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the thread or user specifically warrants that formality. If the user specifies a tone (casual, friendly, firm, apologetic, confident, less desperate, short, professional), make the draft visibly follow it. If the user gives no real content (e.g. only "say hello" or "introduce myself"), ask for the actual substance before sending — never send a placeholder or generic template body; it must contain specific content from the user, the conversation, memory, or tool results.';
 
-const SCENE_HTML_HINT = 'A page for a screen, as an HTML fragment (no html/head tags). For an explainer or step-by-step guide write a deck: <div class="deck"><section class="slide" data-say="the sentence spoken aloud and shown as the caption">...</section>...</div>. Up to 12 slides, under 55 words each, one idea per slide; it plays by itself with Back/Pause/Next. Draw only with the kit pieces: <svg class="pic xl"><use href="#p-NAME"/></svg>, sizes xs sm (default) xl; NAME is one of radiator valve key turn drop bubbles cloth clock pot oven person house train check alert bulb arrow-right arrow-down calendar heat bell. Do not draw your own shapes. Layout: .cols > svg + .col, .h headline, .t text, .sub quiet text, .num step number. Motion: add class in, pop (appear), rise, drip, pulse (loop), turn (quarter turn). For a comparison or something to tap through, use .scene with .cards > .card, .big + .unit, .chip, .bar, <button class="btn" data-ask="what the person would say">. No external links, images or network. Use only facts the person gave or that you know; never add labels or details you were not told.';
+const { PIECES: SCENE_PIECES } = require('./services/scene-spec');
+const SCENE_HINT = 'A scene as a JSON object (data only, never HTML): {"title", "visual"?: {"things": [...]}, "panel"?: [...], "beats": [{"say", "secs"?, "do": [...]}], "asks"?: ["a short follow-up the person might want"]}. You never place or size anything: Adam lays the picture out. visual.things is up to 8 pieces or rings plus connectors, each with a unique lowercase "id" (like "valve"): {"type":"piece","id","piece":NAME,"label"?,"accent"?} with NAME exactly one single word from this list: ' + SCENE_PIECES.map(n => '"' + n + '"').join(', ') + ' (a piece is one drawing; for two things use two pieces); {"type":"ring","id","value":0-1,"label"?}; and connectors between two ids: {"type":"arrow"|"line"|"flow","id","from":"id","to":"id"}. Panel blocks (stacked beside or below the picture, each with an "id"): {"type":"text","text","style":"h"|"t"|"sub"}; {"type":"number","value","unit"?,"label"?,"decimals"?}; {"type":"bars","items":[{"label","value"}],"unit"?}; {"type":"timeline","items":[{"label","from":"HH:MM","to"?}],"end"?}; {"type":"timer","to":"HH:MM" or "secs","label"?}; {"type":"steps","items":[...]}; {"type":"compare","items":[{"title","facts":[{"label","value"}],"ask"?:"what to ask when tapped"}]}. Beats play in order; each has one spoken line (under 45 words) and actions {"verb","id",...}: show / hide; focus (highlights the id and dims the rest; no id clears it); dim; move (to: the id of a piece or ring to move toward); turn (deg, pieces only); count (value, on a number block); progress (value 0-1, on a ring); step (n, on a steps block); set (text); flow (animate along a connector); pulse; trace (draw a connector in). A thing that some beat shows starts hidden; anything no beat mentions is simply there. Keep it simple: one idea, 1 to 6 pieces, short labels. The picture shows what things are and what happens to them; the panel carries the numbers, times and steps, so do not repeat the same information in both. Use only facts the person gave or that you know, and put every number and time in the data; never add labels or details you were not told.';
 
 const ACTION_CONTRACTS = {
   send_message: {
@@ -527,15 +528,15 @@ const ACTION_CONTRACTS = {
   show_scene: {
     adapter: { kind: 'inline' },
     risk: 'low',
-    required: ['title', 'scene_html'],
+    required: ['title', 'scene'],
     optional: ['body'],
-    inputExample: { title: 'Bleed a radiator', scene_html: '<div class="deck"><section class="slide" data-say="Turn the heating off first."><svg class="pic xl pop"><use href="#p-heat"/></svg><p class="h in">Heating off</p></section></div>' },
+    inputExample: { title: 'Bleed a radiator', scene: { title: 'Bleed a radiator', visual: { things: [{ id: 'rad', type: 'piece', piece: 'radiator', label: 'Radiator' }] }, beats: [{ say: 'Turn the heating off first.', do: [{ verb: 'show', id: 'rad' }] }] } },
     paramHints: {
       title: 'a short name for the page',
       body: 'one plain sentence saying what the page shows',
-      scene_html: SCENE_HTML_HINT
+      scene: SCENE_HINT
     },
-    guidance: 'Use when the person wants something to look at or tap through (a how-to, plan, comparison, checklist, chart), not when one sentence answers it. One idea per page, large short text. It can look and compute but cannot act, and a button only asks Adam for something, like typing it. If they ask to put it on a screen in the home, use render_to_display with the same page.',
+    guidance: 'Use when the person wants something to look at or tap through (a how-to, plan, comparison, checklist, chart), not when one sentence answers it. Make it a short animated, narrated explainer, a live plan, or options to tap: one idea per beat, a picture that changes. It can look and compute but cannot act; a tap only asks Adam for something, like typing it. If they ask to put it on a screen in the home, use render_to_display with the same scene.',
     successSummary: 'Made a page',
     failureSummary: 'Could not make that page',
     confirmation: 'none',
@@ -548,7 +549,7 @@ const ACTION_CONTRACTS = {
     optional: [],
     inputExample: { display_id: 'id from list_paired_displays' },
     paramHints: { display_id: 'the id of a display returned by list_paired_displays' },
-    guidance: 'Use before changing what is already on a screen ("make it bigger", "add the next step", "now show the other option"). It returns the page and text currently shown; then send the full changed page with render_to_display scene_html. If nothing is returned, say the screen is not showing a page.',
+    guidance: 'Use before changing what is already on a screen ("make it bigger", "add the next step", "now show the other option"). It returns the page and text currently shown; then send the full changed scene with render_to_display scene. If nothing is returned, say the screen is not showing a page.',
     successSummary: 'Checked what is on the screen',
     failureSummary: 'Could not check the screen',
     confirmation: 'none',
@@ -558,16 +559,16 @@ const ACTION_CONTRACTS = {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: ['display_id', 'title', 'body'],
-    optional: ['kind', 'scene_html'],
+    optional: ['kind', 'scene'],
     inputExample: { display_id: 'id from list_paired_displays', title: 'Dinner tonight', body: 'Reservation at 7:30pm — The Anchor' },
     paramHints: {
       display_id: 'the id of a display returned by list_paired_displays',
       title: 'a short heading for the physical display',
       body: 'the useful content to show, bounded to a short readable update',
       kind: 'agent_update | reminder | approval | status',
-      scene_html: SCENE_HTML_HINT + ' Optional. title/body stay plain text: body is read aloud and shown on text-only screens.'
+      scene: SCENE_HINT + ' Optional. title/body stay plain text: body is read aloud and shown on text-only screens.'
     },
-    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send scene_html written for reading from across a room: one idea per screen, large short text, no clutter. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes. A button that asks Adam for something is <button class="btn" data-ask="what the person would say">; a tap is the same as typing that, and a screen can never approve anything.',
+    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send a scene (a short animated, narrated explainer, a live plan, or options to tap): one idea per beat, a picture that changes rather than slides of text. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes. A tap on a compare card or an ask is the same as typing that sentence, and a screen can never approve anything.',
     successSummary: 'Queued for display',
     failureSummary: 'Could not show that on the display',
     confirmation: 'none',

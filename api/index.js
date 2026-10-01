@@ -9135,7 +9135,7 @@ app.post('/agent/displays/:id/render', requireSessionAuth, async (req, res) => {
       title: req.body?.title,
       body: req.body?.body,
       kind: req.body?.kind,
-      sceneHtml: req.body?.scene_html
+      scene: req.body?.scene
     });
     res.json({ event });
   } catch (e) {

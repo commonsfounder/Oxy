@@ -1,90 +1,9 @@
 'use strict';
 
-// A scene is a small page Adam writes for a screen in the home (a how-to, a plan, a chart, a
-// little interactive). It is shown in a sandboxed frame that cannot reach the network, the
-// display's own page, or anything stored in it; the sandbox and CSP are the boundary, the checks
-// below only turn away the obvious attempts early. Scenes can look and compute but never act:
-// anything that spends, messages or unlocks still goes through the approval step.
-
-const kit = require('./display-scene-kit');
-
-const MAX_SCENE_HTML = 48000;
-const MAX_SLIDES = 12;
-const MAX_SLIDE_WORDS = 55;
-
-const SECRET_PATTERN = /(?:\bauthorization\s*:\s*bearer\b|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(?:password|passwd|passphrase|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|cookie|set-cookie|session[_-]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
-
-const BLOCKED = [
-  /<\s*(?:iframe|frame|frameset|object|embed|link|base|meta|form|applet)\b/i,
-  /<\s*script\b[^>]*\bsrc\s*=/i,
-  /\b(?:src|href|action|poster|data|srcset)\s*=\s*["']?\s*(?:https?:|ftp:|wss?:)?\/\//i,
-  /\b(?:src|href|action|poster|data|srcset)\s*=\s*["']?\s*javascript:/i,
-  /url\(\s*["']?\s*(?:https?:|ftp:)?\/\//i,
-  /@import\b/i,
-  /\b(?:fetch|importScripts|import)\s*\(/i,
-  /\b(?:XMLHttpRequest|WebSocket|EventSource|sendBeacon|WebTransport|RTCPeerConnection)\b/,
-  /\bwindow\s*\.\s*(?:parent|top|opener|frames)\b/i,
-  /\b(?:parent|top|opener)\s*\.\s*(?:postMessage|document|location|frames)\b/i,
-  /\bdocument\.(?:cookie|domain)\b/i,
-  /\b(?:localStorage|sessionStorage|indexedDB|serviceWorker)\b/,
-  /\blocation\s*(?:=|\.\s*(?:href|assign|replace))/i
-];
-
-function sceneError(message) {
-  const error = new Error(message);
-  error.code = 'invalid_content';
-  error.status = 400;
-  return error;
-}
-
-function plainWords(fragment) {
-  return fragment
-    .replace(/<(script|style|svg)\b[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean).length;
-}
-
-// A deck is one idea per slide, short enough to read from across a room. A slide that is too long is
-// turned away with the reason, so it gets rewritten shorter instead of shrinking to fit.
-function validateDeck(text) {
-  if (!/class\s*=\s*["'][^"']*\bdeck\b/i.test(text)) return;
-  const slides = text.split(/<section\b[^>]*class\s*=\s*["'][^"']*\bslide\b/i).slice(1);
-  if (!slides.length) throw sceneError('A deck needs at least one <section class="slide">.');
-  if (slides.length > MAX_SLIDES) throw sceneError(`A deck can have up to ${MAX_SLIDES} slides.`);
-  slides.forEach((slide, index) => {
-    const body = slide.split(/<\/section>/i)[0];
-    const count = plainWords(body.replace(/^[^>]*>/, ''));
-    const spoken = /data-say\s*=\s*["']([^"']*)["']/i.exec(slide.split('>')[0]);
-    const spokenCount = spoken ? spoken[1].trim().split(/\s+/).filter(Boolean).length : 0;
-    if (count > MAX_SLIDE_WORDS || spokenCount > MAX_SLIDE_WORDS) {
-      throw sceneError(`Slide ${index + 1} has too many words (keep each under ${MAX_SLIDE_WORDS}); one idea per slide.`);
-    }
-  });
-}
-
-function validatePieces(text) {
-  const names = new Set(kit.PIECE_NAMES);
-  for (const match of text.matchAll(/<use\b[^>]*\bhref\s*=\s*["']#p-([^"']+)["']/gi)) {
-    if (!names.has(match[1])) {
-      throw sceneError(`There is no piece called ${match[1]}. Pieces: ${kit.PIECE_NAMES.filter(n => !['play', 'pause', 'replay'].includes(n)).join(', ')}.`);
-    }
-  }
-}
-
-function validateSceneHtml(html) {
-  if (typeof html !== 'string') throw sceneError('A scene must be HTML text.');
-  const text = html.trim();
-  if (!text) throw sceneError('A scene needs some content.');
-  if (text.length > MAX_SCENE_HTML) throw sceneError('That scene is too large for a screen.');
-  if (SECRET_PATTERN.test(text)) throw sceneError('A scene cannot contain credentials.');
-  if (BLOCKED.some(pattern => pattern.test(text))) {
-    throw sceneError('A scene cannot load outside content or reach the page around it.');
-  }
-  validatePieces(text);
-  validateDeck(text);
-  return text;
-}
+// What every scene page shares: the policy that blocks the network, Adam's look, and the one bridge
+// back to Adam (ask a question, say a line). The scene itself is data rendered by scene-runtime.js;
+// the model never supplies markup or code. Scenes can look and compute but never act: anything that
+// spends, messages or unlocks still goes through the approval step.
 
 const CSP = [
   "default-src 'none'",
@@ -135,19 +54,8 @@ svg{max-width:100%;height:auto}
 // were typed. It carries no authority; approvals still happen where the person can see them.
 const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim().slice(0,200);if(!t)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}function say(t){t=String(t||'').trim().slice(0,400);if(t&&!(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.adam))window.parent.postMessage({adamSay:t},'*')}window.adam={ask:send,say:say};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
 
-// The frame the display page shows. The CSP comes first so nothing the scene contains can
-// loosen it (extra policies only tighten).
-function buildSceneDocument(html, { title = '' } = {}) {
-  const safe = validateSceneHtml(html);
-  const label = String(title || 'Adam').replace(/[<>&"]/g, '').slice(0, 120);
-  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}</title><style>${KIT_CSS}${kit.DECK_CSS}</style></head><body>${kit.SPRITE}${safe}<script>${BRIDGE_JS}</script><script>${kit.DECK_JS}</script></body></html>`;
-}
-
 module.exports = {
-  MAX_SCENE_HTML,
   CSP,
   KIT_CSS,
-  BRIDGE_JS,
-  validateSceneHtml,
-  buildSceneDocument
+  BRIDGE_JS
 };

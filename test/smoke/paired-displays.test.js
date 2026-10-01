@@ -292,109 +292,6 @@ test('revoked displays stop receiving content', async () => {
   assert.equal(await pairedDisplays.pollNextRender(db, display.id, token, now), null);
 });
 
-test('a generated scene is wrapped in a locked-down page, and plain text stays plain', async () => {
-  const displayScene = require('../../api/services/display-scene');
-  const db = fakeSupabase();
-  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
-    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
-  });
-  const { display, token } = await pairedDisplays.redeemPairingChallenge(db, {
-    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
-  });
-  const html = '<div class="scene"><h1 class="title">Bleed a radiator</h1><ol class="steps"><li class="on">Turn the heating off</li></ol><script>document.querySelector(".steps").style.opacity=1</script></div>';
-  const event = await pairedDisplays.queueRender(db, 'user-1', {
-    displayId: display.id, title: 'Bleed a radiator', body: 'Four steps. First turn the heating off.', sceneHtml: html, now
-  });
-  assert.equal(event.kind, 'scene');
-  assert.equal(event.scene, true);
-
-  const polled = await pairedDisplays.pollNextRender(db, display.id, token, now);
-  assert.equal(polled.event.kind, 'scene');
-  const doc = polled.event.scene.srcdoc;
-  assert.match(doc, /Content-Security-Policy/);
-  assert.match(doc, /connect-src 'none'/);
-  assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('Bleed a radiator</h1>'));
-  assert.ok(doc.includes(html));
-
-  const plain = await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Dinner', body: '7:30pm', now });
-  await pairedDisplays.acknowledgeRender(db, display.id, token, event.id, now);
-  const next = await pairedDisplays.pollNextRender(db, display.id, token, now);
-  assert.equal(next.event.id, plain.id);
-  assert.equal(Object.hasOwn(next.event, 'scene'), false);
-});
-
-test('a scene cannot reach outside, read the page around it, or carry secrets', async () => {
-  const displayScene = require('../../api/services/display-scene');
-  const attempts = [
-    '<img src="https://evil.example/x.png">',
-    '<a href="//evil.example">go</a>',
-    '<iframe src="about:blank"></iframe>',
-    '<script src="app.js"></script>',
-    '<style>@import url(https://evil.example/a.css);</style>',
-    '<div style="background:url(https://evil.example/p)"></div>',
-    '<script>fetch("/agent/home")</script>',
-    '<script>new XMLHttpRequest()</script>',
-    '<script>navigator.sendBeacon("/x")</script>',
-    '<script>window.parent.postMessage("x","*")</script>',
-    '<script>document.cookie</script>',
-    '<script>localStorage.getItem("milgrain_display_token")</script>',
-    '<script>location.href = "https://evil.example"</script>',
-    '<meta http-equiv="refresh" content="0;url=https://evil.example">',
-    '<form action="/x"><button>Go</button></form>',
-    '<p>Authorization: Bearer sk-live-secret-value</p>',
-    '<a href="javascript:alert(1)">x</a>'
-  ];
-  for (const html of attempts) {
-    assert.throws(() => displayScene.validateSceneHtml(html), error => error.code === 'invalid_content', `accepted: ${html}`);
-  }
-  assert.throws(() => displayScene.validateSceneHtml('x'.repeat(displayScene.MAX_SCENE_HTML + 1)), /too large/);
-  assert.throws(() => displayScene.validateSceneHtml('   '), /needs some content/);
-  assert.throws(() => displayScene.validateSceneHtml({ html: 'x' }), /HTML text/);
-  const fine = '<p>Stir from the top. Then wait.</p><svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">';
-  assert.equal(displayScene.validateSceneHtml(fine), fine);
-
-  const db = fakeSupabase();
-  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
-    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
-  });
-  const { display } = await pairedDisplays.redeemPairingChallenge(db, {
-    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
-  });
-  await assert.rejects(
-    () => pairedDisplays.queueRender(db, 'user-1', {
-      displayId: display.id, title: 'Hi', body: 'Hello', sceneHtml: '<img src="https://evil.example/x.png">', now
-    }),
-    error => error.code === 'invalid_content'
-  );
-  assert.equal(db.tables.display_render_events.length, 0);
-});
-
-test('Adam can read back what a screen is showing so it can change it', async () => {
-  const db = fakeSupabase();
-  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
-    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
-  });
-  const { display } = await pairedDisplays.redeemPairingChallenge(db, {
-    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
-  });
-  assert.equal(await pairedDisplays.currentScene(db, 'user-1', display.id), null);
-
-  await pairedDisplays.queueRender(db, 'user-1', {
-    displayId: display.id, title: 'First', body: 'one', sceneHtml: '<p>one</p>', now
-  });
-  await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Note', body: 'plain', now });
-  const latest = await pairedDisplays.queueRender(db, 'user-1', {
-    displayId: display.id, title: 'Bigger', body: 'two', sceneHtml: '<p class="title">two</p>', now
-  });
-  const current = await pairedDisplays.currentScene(db, 'user-1', display.id);
-  assert.equal(current.title, 'Bigger');
-  assert.equal(current.sceneHtml, '<p class="title">two</p>');
-  assert.equal(new Date(db.tables.display_render_events.find(row => row.id === latest.id).expires_at).getTime(),
-    now.getTime() + pairedDisplays.SCENE_TTL_MS);
-
-  await assert.rejects(() => pairedDisplays.currentScene(db, 'someone-else', display.id), /not paired/);
-});
-
 test('a tap on a screen can ask for things but can never approve or cancel', () => {
   const displayAsk = require('../../api/services/display-ask');
   displayAsk._reset();
@@ -413,53 +310,151 @@ test('a tap on a screen can ask for things but can never approve or cancel', () 
   displayAsk.checkAskRate('d2', 1000);
 });
 
-test('the scene wrapper gives pages one way to ask Adam, and nothing else', () => {
-  const displayScene = require('../../api/services/display-scene');
-  const doc = displayScene.buildSceneDocument('<button class="btn" data-ask="Next step">Next</button>');
-  assert.match(doc, /window\.adam=\{ask:send,say:say\}/);
-  assert.match(doc, /data-ask/);
-  assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('<script>'));
-  assert.throws(() => displayScene.validateSceneHtml('<script>window.parent.postMessage({adamAsk:"yes"},"*")</script>'));
-  assert.throws(() => displayScene.validateSceneHtml('<script>self.parent.postMessage("x","*")</script>'));
+
+function pairedDisplayFixture() {
+  const db = fakeSupabase();
+  return pairedDisplays.createPairingChallenge(db, 'user-1', {
+    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
+  }).then(challenge => pairedDisplays.redeemPairingChallenge(db, {
+    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
+  })).then(({ display, token }) => ({ db, display, token }));
+}
+
+const radiatorScene = () => ({
+  title: 'Bleed a radiator',
+  visual: {
+    things: [
+      { id: 'rad', type: 'piece', piece: 'radiator', label: 'Radiator' },
+      { id: 'valve', type: 'piece', piece: 'valve', label: 'Bleed valve', accent: true },
+      { id: 'air', type: 'flow', from: 'valve', to: 'rad' }
+    ]
+  },
+  panel: [{ id: 'steps', type: 'steps', items: ['Heating off', 'Quarter turn', 'Close it'] }],
+  beats: [
+    { say: 'Turn the heating off first.', do: [{ verb: 'show', id: 'rad' }, { verb: 'step', id: 'steps', n: 1 }] },
+    { say: 'Find the valve.', do: [{ verb: 'show', id: 'valve' }, { verb: 'focus', id: 'valve' }, { verb: 'step', id: 'steps', n: 2 }] },
+    { say: 'A quarter turn lets the air out.', do: [{ verb: 'turn', id: 'valve', deg: 90 }, { verb: 'flow', id: 'air' }] }
+  ],
+  asks: ['Where is the valve on mine?']
 });
 
-test('show_scene returns a locked-down page for the phone and refuses unsafe ones', async () => {
+test('a scene is stored as data and rendered by Adam, never as markup from the model', async () => {
+  const { db, display, token } = await pairedDisplayFixture();
+  const event = await pairedDisplays.queueRender(db, 'user-1', {
+    displayId: display.id, title: 'Bleed a radiator', body: 'Four steps.', scene: radiatorScene(), now
+  });
+  assert.equal(event.kind, 'scene');
+  assert.equal(event.scene, true);
+  const stored = db.tables.display_render_events.find(row => row.id === event.id);
+  assert.equal(stored.payload.scene.spec.title, 'Bleed a radiator');
+  assert.equal(Object.hasOwn(stored.payload.scene, 'html'), false);
+  assert.equal(new Date(stored.expires_at).getTime(), now.getTime() + pairedDisplays.SCENE_TTL_MS);
+
+  const polled = await pairedDisplays.pollNextRender(db, display.id, token, now);
+  const doc = polled.event.scene.srcdoc;
+  assert.match(doc, /Content-Security-Policy/);
+  assert.match(doc, /connect-src 'none'/);
+  assert.match(doc, /id="spec"/);
+  assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('id="spec"'));
+
+  const plain = await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Dinner', body: '7:30pm', now });
+  await pairedDisplays.acknowledgeRender(db, display.id, token, event.id, now);
+  const next = await pairedDisplays.pollNextRender(db, display.id, token, now);
+  assert.equal(next.event.id, plain.id);
+  assert.equal(Object.hasOwn(next.event, 'scene'), false);
+});
+
+test('scene text can never become markup or script on the page', () => {
+  const sceneRuntime = require('../../api/services/scene-runtime');
+  const evil = '</script><script>fetch("https://evil.example")</script><img src=x onerror=alert(1)>';
+  const doc = sceneRuntime.buildSpecDocument({
+    title: evil,
+    visual: { things: [{ id: 'a', type: 'piece', piece: 'radiator', label: evil }] },
+    panel: [{ id: 't', type: 'text', text: evil }],
+    beats: [{ say: evil }]
+  });
+  assert.equal((doc.match(/<script/g) || []).length, 3, 'only the two bridges and the renderer run');
+  assert.equal(doc.includes('</script><script>fetch'), false);
+  assert.equal(doc.includes('<img src=x'), false);
+  assert.match(doc, /\\u003c\/script\\u003e/);
+});
+
+test('the scene format turns away what is not allowed, and says why', () => {
+  const { validateScene } = require('../../api/services/scene-spec');
+  const good = radiatorScene();
+  assert.equal(validateScene(good).beats.length, 3);
+  assert.equal(validateScene(JSON.stringify(good)).title, 'Bleed a radiator');
+
+  const bad = (mutate, pattern) => {
+    const scene = radiatorScene();
+    mutate(scene);
+    assert.throws(() => validateScene(scene), pattern);
+  };
+  bad(s => { s.visual.things[0].piece = 'radiator valve key'; }, /no piece called radiator valve key/);
+  bad(s => { delete s.visual.things[0].id; }, /needs an id/);
+  bad(s => { s.visual.things[1].id = 'rad'; }, /used twice/);
+  bad(s => { s.visual.things.push({ id: 'x', type: 'arrow', from: 'rad', to: 'nothing' }); }, /must go from one piece's id/);
+  bad(s => { s.visual.things.push({ id: 'c', type: 'circle', at: [10, 10], size: 5 }); }, /unknown type "circle"/);
+  bad(s => { s.beats[0].do[0].id = 'ghost'; }, /nothing called "ghost"/);
+  bad(s => { s.beats[0].do[0] = { verb: 'count', id: 'rad', value: 3 }; }, /works on number/);
+  bad(s => { s.beats[0].do[0] = { verb: 'explode', id: 'rad' }; }, /unknown verb/);
+  bad(s => { s.beats[0].say = 'word '.repeat(60); }, /too long/);
+  bad(s => { s.beats = []; }, /beats needs/);
+  bad(s => { s.visual.things = Array.from({ length: 9 }, (_, k) => ({ id: `p${k}`, type: 'piece', piece: 'clock' })); }, /up to 8 pieces/);
+  bad(s => { s.panel[0].items = []; }, /needs 1 to 8/);
+  assert.throws(() => validateScene('not json'), /JSON object/);
+  assert.throws(() => validateScene({ title: 'x', beats: [{ say: 'hi' }] }), /visual, a panel, or both/);
+
+  const clean = validateScene({ title: ' Hi ', panel: [{ id: 't', type: 'text', text: 'a   b', extra: 'dropped' }], beats: [{ say: 'ok', evil: 1 }] });
+  assert.equal(clean.panel[0].text, 'a b');
+  assert.equal(Object.hasOwn(clean.panel[0], 'extra'), false);
+  assert.equal(Object.hasOwn(clean.beats[0], 'evil'), false);
+  const timeline = validateScene({ title: 't', panel: [{ id: 'tl', type: 'timeline', items: [{ label: 'a', from: '9:05' }] }], beats: [{ say: 'ok' }] });
+  assert.equal(timeline.panel[0].items[0].from, '09:05');
+  assert.throws(() => validateScene({ title: 't', panel: [{ id: 'tl', type: 'timeline', items: [{ label: 'a', from: '25:99' }] }], beats: [{ say: 'ok' }] }), /24-hour time/);
+});
+
+test('Adam can read back the scene a screen is showing so it can change it', async () => {
+  const { db, display } = await pairedDisplayFixture();
+  assert.equal(await pairedDisplays.currentScene(db, 'user-1', display.id), null);
+  await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'First', body: 'one', scene: radiatorScene(), now });
+  await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Note', body: 'plain', now });
+  const bigger = radiatorScene();
+  bigger.title = 'Bigger';
+  await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Bigger', body: 'two', scene: bigger, now });
+  const current = await pairedDisplays.currentScene(db, 'user-1', display.id);
+  assert.equal(current.title, 'Bigger');
+  assert.equal(current.scene.title, 'Bigger');
+  await assert.rejects(() => pairedDisplays.currentScene(db, 'someone-else', display.id), /not paired/);
+});
+
+test('show_scene makes a page for the phone, and refuses a scene that is not allowed', async () => {
   const { handlers } = require('../../api/actions/display');
-  const ok = await handlers.show_scene({ params: { title: 'Bleed a radiator', body: 'Four steps.', scene_html: '<div class="scene"><h1 class="title">Bleed a radiator</h1></div>' } });
+  const ok = await handlers.show_scene({ params: { title: 'Bleed a radiator', body: 'Four steps.', scene: radiatorScene() } });
   assert.equal(ok.success, true);
   assert.equal(ok.scene.title, 'Bleed a radiator');
   assert.match(ok.scene.srcdoc, /connect-src 'none'/);
   assert.match(ok.scene.srcdoc, /window\.adam=/);
-  const bad = await handlers.show_scene({ params: { title: 'x', scene_html: '<img src="https://evil.example/a.png">' } });
+  const bad = await handlers.show_scene({ params: { title: 'x', scene: { title: 'x', beats: [] } } });
   assert.equal(bad.success, false);
-  assert.match(bad.error, /outside content/);
   assert.equal(Object.hasOwn(bad, 'scene'), false);
-  const missing = await handlers.show_scene({ params: { title: 'x' } });
-  assert.equal(missing.success, false);
+  assert.equal((await handlers.show_scene({ params: { title: 'x' } })).success, false);
 });
 
-test('a deck is held to one idea per slide, real pieces, and a sensible length', () => {
-  const displayScene = require('../../api/services/display-scene');
+test('the model is told about every piece and verb, and a bad scene never reaches a screen', async () => {
   const kit = require('../../api/services/display-scene-kit');
-  const slide = (words, extra = '') => `<section class="slide" data-say="Say this."><p class="t">${'word '.repeat(words)}</p>${extra}</section>`;
-  const deck = inner => `<div class="deck">${inner}</div>`;
-
-  assert.ok(displayScene.validateSceneHtml(deck(slide(20, '<svg class="pic"><use href="#p-radiator"/></svg>'))));
-  assert.throws(() => displayScene.validateSceneHtml(deck(slide(20) + slide(80))), /Slide 2 has too many words/);
-  assert.throws(() => displayScene.validateSceneHtml(deck(slide(10).repeat(13))), /up to 12 slides/);
-  assert.throws(() => displayScene.validateSceneHtml('<div class="deck"><p>no slides</p></div>'), /at least one/);
-  assert.throws(
-    () => displayScene.validateSceneHtml(deck(slide(10, '<svg class="pic"><use href="#p-radiator-valve"/></svg>'))),
-    /no piece called radiator-valve/
-  );
-  assert.throws(() => displayScene.validateSceneHtml(deck(`<section class="slide" data-say="${'word '.repeat(70)}"><p>Short</p></section>`)), /too many words/);
-  for (const name of kit.PIECE_NAMES) assert.ok(kit.SPRITE.includes(`id="p-${name}"`), name);
-
+  const { VERBS } = require('../../api/services/scene-spec');
   const contract = require('../../api/action-contracts').getActionContract('show_scene');
   for (const name of kit.PIECE_NAMES.filter(n => !['play', 'pause', 'replay'].includes(n))) {
-    assert.ok(contract.paramHints.scene_html.includes(name), `the model is not told about ${name}`);
+    assert.ok(contract.paramHints.scene.includes(`"${name}"`), `the model is not told about ${name}`);
   }
-  const doc = displayScene.buildSceneDocument(deck(slide(10)));
-  assert.match(doc, /id="p-radiator"/);
-  assert.match(doc, /class="deck"/);
+  for (const verb of VERBS) assert.ok(contract.paramHints.scene.includes(verb), `the model is not told about ${verb}`);
+  for (const name of kit.PIECE_NAMES) assert.ok(kit.SPRITE.includes(`id="p-${name}"`), name);
+
+  const { db, display } = await pairedDisplayFixture();
+  await assert.rejects(
+    () => pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'x', body: 'y', scene: { title: 'x', beats: [] }, now }),
+    error => error.code === 'invalid_content'
+  );
+  assert.equal(db.tables.display_render_events.length, 0);
 });

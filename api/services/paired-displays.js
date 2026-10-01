@@ -1,7 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const displayScene = require('./display-scene');
+const sceneSpec = require('./scene-spec');
+const sceneRuntime = require('./scene-runtime');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const EVENT_TTL_MS = 15 * 60 * 1000;
@@ -206,30 +207,30 @@ async function displayForToken(supabase, displayId, token) {
   return data || null;
 }
 
-async function queueRender(supabase, userId, { displayId, title, body, kind, sceneHtml, now = new Date() } = {}) {
+async function queueRender(supabase, userId, { displayId, title, body, kind, scene: sceneSpecInput, now = new Date() } = {}) {
   assertUser(userId);
   if (!displayId) throw displayDomainError('invalid_display', 'Choose a paired display first.');
   const display = await supabase.from('paired_displays').select('id, user_id, revoked_at')
     .eq('id', displayId).eq('user_id', userId).is('revoked_at', null).maybeSingle();
   if (display.error) throw display.error;
   if (!display.data) throw displayDomainError('not_paired', 'That display is not paired.');
-  const hasScene = sceneHtml != null && sceneHtml !== '';
-  const content = assertDisplayContent({ title, body, kind: hasScene ? 'scene' : kind });
-  // The scene is checked here and again when it is wrapped for the screen. Its title and body stay
-  // plain text: they are what a text-only screen shows and what voice mode reads aloud.
-  const scene = hasScene ? displayScene.validateSceneHtml(sceneHtml) : null;
-  const expiresAt = new Date(new Date(now).getTime() + (scene ? SCENE_TTL_MS : EVENT_TTL_MS)).toISOString();
+  const hasSpec = sceneSpecInput != null && sceneSpecInput !== '';
+  const content = assertDisplayContent({ title, body, kind: hasSpec ? 'scene' : kind });
+  // The scene is checked here and again when it is rendered. Its title and body stay plain text:
+  // they are what a text-only screen shows and what voice mode reads aloud.
+  const spec = hasSpec ? sceneSpec.validateScene(sceneSpecInput) : null;
+  const expiresAt = new Date(new Date(now).getTime() + (spec ? SCENE_TTL_MS : EVENT_TTL_MS)).toISOString();
   const { data, error } = await supabase.from('display_render_events').insert({
     user_id: userId,
     display_id: displayId,
     kind: content.kind,
     title: content.title,
     body: content.body,
-    payload: scene ? { text: true, scene: { html: scene } } : { text: true },
+    payload: spec ? { text: true, scene: { spec } } : { text: true },
     expires_at: expiresAt
   }).select().single();
   if (error) throw error;
-  return { id: data.id, displayId, kind: content.kind, title: content.title, body: content.body, scene: Boolean(scene), expiresAt: data.expires_at || expiresAt };
+  return { id: data.id, displayId, kind: content.kind, title: content.title, body: content.body, scene: Boolean(spec), expiresAt: data.expires_at || expiresAt };
 }
 
 // What a screen is showing now, so Adam can change it instead of starting over. The latest scene
@@ -243,9 +244,9 @@ async function currentScene(supabase, userId, displayId) {
   const { data, error } = await supabase.from('display_render_events').select('id, title, body, payload, created_at')
     .eq('display_id', displayId).eq('kind', 'scene').order('created_at', { ascending: false }).limit(5);
   if (error) throw error;
-  const row = (data || []).find(item => typeof item.payload?.scene?.html === 'string');
+  const row = (data || []).find(item => item.payload?.scene?.spec);
   if (!row) return null;
-  return { title: row.title, body: row.body, sceneHtml: row.payload.scene.html, at: row.created_at };
+  return { title: row.title, body: row.body, scene: row.payload.scene.spec, at: row.created_at };
 }
 
 async function pollNextRender(supabase, displayId, token, now = new Date()) {
@@ -259,10 +260,10 @@ async function pollNextRender(supabase, displayId, token, now = new Date()) {
   if (!data?.[0]) return { display: summarizeDisplay(display), event: null };
   const event = data[0];
   const out = { id: event.id, kind: event.kind, title: event.title, body: event.body, createdAt: event.created_at, expiresAt: event.expires_at };
-  const sceneHtml = event.payload?.scene?.html;
-  if (typeof sceneHtml === 'string') {
+  const storedSpec = event.payload?.scene?.spec;
+  if (storedSpec && typeof storedSpec === 'object') {
     try {
-      out.scene = { srcdoc: displayScene.buildSceneDocument(sceneHtml, { title: event.title }) };
+      out.scene = { srcdoc: sceneRuntime.buildSpecDocument(storedSpec) };
     } catch {
       // A scene that no longer passes the checks is shown as its plain text, never as a page.
     }

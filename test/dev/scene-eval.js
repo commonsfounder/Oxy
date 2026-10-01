@@ -17,7 +17,7 @@ if (fs.existsSync(envPath)) {
 const { generateBrain } = require('../../api/services/brain-provider');
 const { resolveModelRoute } = require('../../api/services/model-routing');
 const { getActionContract } = require('../../api/action-contracts');
-const displayScene = require('../../api/services/display-scene');
+const sceneRuntime = require('../../api/services/scene-runtime');
 
 const CASES = [
   { id: 'radiator', say: "Explain how to bleed a radiator. I'll be watching the screen from across the room while I do it." },
@@ -33,27 +33,34 @@ async function main() {
   const system = [
     'You are Adam. When someone wants something to look at or tap through, you write one small web page.',
     `Tool: show_scene. ${contract.guidance}`,
-    `scene_html: ${contract.paramHints.scene_html}`,
-    'Reply with ONLY the HTML fragment for scene_html. No markdown fences, no commentary.'
+    `scene: ${contract.paramHints.scene}`,
+    'Reply with ONLY the JSON object for scene. No markdown fences, no commentary.'
   ].join('\n\n');
   console.log(`# scene eval · ${route.provider}/${route.model}`);
   for (const c of CASES) {
-    const res = await generateBrain({
-      provider: route.provider,
-      model: route.model,
-      contents: [{ role: 'user', parts: [{ text: c.say }] }],
-      config: { systemInstruction: system, maxOutputTokens: 12000 }
-    });
-    const html = String(res.text || '').replace(/^```(?:html)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const contents = [{ role: 'user', parts: [{ text: c.say }] }];
+    let html = '';
     let verdict = 'accepted';
     let doc = null;
-    try {
-      doc = displayScene.buildSceneDocument(html, { title: c.id });
-    } catch (e) {
-      verdict = 'REFUSED: ' + e.message;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await generateBrain({
+        provider: route.provider,
+        model: route.model,
+        contents,
+        config: { systemInstruction: system, maxOutputTokens: 12000 }
+      });
+      html = String(res.text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+      try {
+        doc = sceneRuntime.buildSpecDocument(html);
+        verdict = attempt ? `accepted after ${attempt} retry` : 'accepted';
+        break;
+      } catch (e) {
+        verdict = 'REFUSED: ' + e.message;
+        contents.push({ role: 'model', parts: [{ text: html }] }, { role: 'user', parts: [{ text: `That was refused: ${e.message} Send the corrected JSON only.` }] });
+      }
     }
     if (doc) fs.writeFileSync(path.join(out, c.id + '.html'), doc);
-    fs.writeFileSync(path.join(out, c.id + '.raw.html'), html);
+    fs.writeFileSync(path.join(out, c.id + '.raw.json'), html);
     console.log(`${c.id}: ${html.length} chars, ${verdict}`);
   }
 }
