@@ -400,42 +400,79 @@ struct ReplyPreviewBar: View {
 
 // MARK: - Working
 
-/// Shown while Adam is working on a reply: the three channels of the Adam mark rise and fall
-/// in a slow wave. No guessed step names — only what is true: Adam is on it.
-struct WorkingBubble: View {
-    /// A step the server actually reported ("Checking calendar"), or nil to show the bars alone.
-    var label: String? = nil
+/// A small dot with soft rings that expand and fade, like a quiet ping. Used wherever Adam is
+/// attentive: working on a reply, or listening.
+struct PulseOrb: View {
+    var color: Color = .appWorking
+    var size: CGFloat = 24
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            ZStack {
+                ForEach(0..<2, id: \.self) { index in
+                    let p = reduceMotion ? 0.5 : ((t / 2.2) + Double(index) * 0.5).truncatingRemainder(dividingBy: 1)
+                    Circle()
+                        .stroke(color.opacity(0.55 * (1 - p)), lineWidth: 1.5)
+                        .scaleEffect(0.3 + 0.7 * p)
+                }
+                Circle()
+                    .fill(color)
+                    .frame(width: size * 0.4, height: size * 0.4)
+                    .scaleEffect(reduceMotion ? 1 : 1 + 0.1 * sin(t * 2.8))
+            }
+            .frame(width: size, height: size)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Text with a slow highlight sweeping across it.
+struct ShimmerText: View {
+    let text: String
+    var font: Font = .appBody(14)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = reduceMotion ? 1.0 : (t / 1.8).truncatingRemainder(dividingBy: 1) * 2
+            Text(text)
+                .font(font)
+                .foregroundStyle(LinearGradient(
+                    stops: [
+                        .init(color: Color.appMuted, location: 0),
+                        .init(color: Color.appInk, location: 0.5),
+                        .init(color: Color.appMuted, location: 1)
+                    ],
+                    startPoint: UnitPoint(x: phase - 1, y: 0),
+                    endPoint: UnitPoint(x: phase, y: 0)
+                ))
+        }
+    }
+}
+
+/// Shown while Adam works on a reply. Only a real step is ever named; otherwise it is just the ping.
+struct WorkingBubble: View {
+    var label: String? = nil
 
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-            TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                HStack(alignment: .center, spacing: 5) {
-                    ForEach(0..<3, id: \.self) { index in
-                        let phase = reduceMotion ? 0.5 : 0.5 + 0.5 * sin(t * 4.2 - Double(index) * 0.9)
-                        Capsule()
-                            .fill(Color.appWorking.opacity(0.55 + 0.45 * phase))
-                            .frame(width: 5, height: 8 + 12 * phase)
-                    }
-                }
-                .frame(width: 40, height: 22)
-            }
+                PulseOrb(size: 26)
                 if let label {
-                    Text(label)
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
+                    ShimmerText(text: label)
                         .lineLimit(1)
-                        .contentTransition(.opacity)
                         .id(label)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .animation(.appSpring, value: label)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+            .padding(.leading, 12)
+            .padding(.trailing, label == nil ? 12 : 16)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Color.appReceivedBubble))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, AppSpacing.chatMargin)
@@ -443,11 +480,14 @@ struct WorkingBubble: View {
             insertion: .scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity),
             removal: .opacity
         ))
+        .onAppear { HapticManager.shared.impact(.soft) }
+        .onChange(of: label) { _, new in
+            if new != nil { HapticManager.shared.select() }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label.map { "Adam is working: \($0)" } ?? "Adam is working")
     }
 }
-
 
 /// The reaction badge, pinned to the corner of the bubble itself.
 struct ReactionBadge: View {

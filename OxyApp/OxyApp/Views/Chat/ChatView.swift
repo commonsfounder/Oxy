@@ -437,17 +437,18 @@ struct ChatView: View {
                         },
                         onVoice: {
                             guard !voiceInput.isTranscribing else { return }
-                            HapticManager.shared.impact(.medium)
                             if voiceInput.isRecording {
+                                HapticManager.shared.impact(.rigid)
                                 voiceInput.stopRecording()
                             } else {
+                                HapticManager.shared.impact(.medium)
                                 voiceInput.startRecording(userId: appState.userId)
                             }
                         },
                         onAttach: {
                             HapticManager.shared.impact(.light)
                             isInputFocused = false
-                            withAnimation(.easeOut(duration: 0.2)) { showAttachMenu = true }
+                            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) { showAttachMenu = true }
                         },
                         onCancelVoice: {
                             voiceInput.cancel()
@@ -464,6 +465,14 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
+            #if DEBUG
+            .onAppear {
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_RECORDING"] == "1" {
+                    voiceInput.isRecording = true
+                    voiceInput.transcript = "Remind me to call the dentist tomorrow morning and"
+                }
+            }
+            #endif
             .modifier(ThreadLayers(reaction: reactionOverlay, wheel: wheelOverlay, heldID: heldMessage?.message.id, displayText: $displayText))
             .task {
                 while !Task.isCancelled {
@@ -653,51 +662,57 @@ struct ChatView: View {
     @ViewBuilder
     private var attachmentSheetOverlay: some View {
         if showAttachMenu {
-            ZStack(alignment: .bottom) {
-                Color.appScrim
+            ZStack(alignment: .bottomLeading) {
+                Color.black.opacity(0.18)
                     .ignoresSafeArea()
                     .onTapGesture { dismissAttachMenu() }
 
                 VStack(spacing: 0) {
-                    attachSheetRow("Photo Library") {
+                    attachSheetRow("Photo Library", icon: "photo") {
                         dismissAttachMenu()
                         showPhotoPicker = true
                     }
-                    AppDivider()
-                    attachSheetRow("Files") {
+                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
+                    attachSheetRow("Files", icon: "doc") {
                         dismissAttachMenu()
                         showFileImporter = true
                     }
                 }
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
-                )
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .frame(width: 232)
+                .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
+                .padding(.leading, 14)
+                .padding(.bottom, 74)
+                .transition(.scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity))
             }
             .zIndex(20)
         }
     }
 
-    private func attachSheetRow(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.appBody(16, weight: .regular))
-                .foregroundStyle(Color.appInk)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 17)
-                .contentShape(Rectangle())
+    private func attachSheetRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                AppIcon(icon, size: 20)
+                    .foregroundStyle(Color.appInk)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.appBody(16, weight: .medium))
+                    .foregroundStyle(Color.appInk)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.appScale(0.98))
+        .buttonStyle(.appScale(0.97))
     }
 
     private func dismissAttachMenu() {
-        withAnimation(.appFast) { showAttachMenu = false }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showAttachMenu = false }
     }
 
     /// Send a spoken transcript once.
@@ -1296,6 +1311,12 @@ private struct ChatInputBar: View {
                     .foregroundStyle(buttonForeground)
                     .frame(width: 38, height: 38)
                     .background {
+                        if isRecording {
+                            Circle()
+                                .strokeBorder(Color.appAction.opacity(pulse ? 0 : 0.4), lineWidth: 2)
+                                .scaleEffect(pulse ? 1.6 : 1)
+                                .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: pulse)
+                        }
                         Circle().fill(buttonFill)
                         if !canSend && !isRecording {
                             Circle().strokeBorder(Color.appHairline, lineWidth: 0.5)
@@ -1349,42 +1370,47 @@ private struct ChatInputBar: View {
     }
 
     private var voiceField: some View {
-        HStack(spacing: 10) {
-            Button(action: onCancelVoice) {
+        let heard = voiceTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(spacing: 10) {
+            Button {
+                HapticManager.shared.select()
+                onCancelVoice()
+            } label: {
                 AppIcon(sf: "xmark", size: 13)
                     .foregroundStyle(Color.appMuted)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
             .buttonStyle(.appScale)
+            .accessibilityLabel("Cancel")
 
-            Circle()
-                .fill(isPreparingVoice ? Color.appMuted : Color.appDanger)
-                .frame(width: 7, height: 7)
-                .scaleEffect(pulse && isRecording ? 1.2 : 0.85)
-                .opacity(isPreparingVoice ? 0.65 : 1)
-                .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true), value: pulse)
+            PulseOrb(color: isPreparingVoice ? Color.appMuted : Color.appWorking, size: 22)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(isPreparingVoice ? "Transcribing" : "Listening")
-                    .font(.appBody(13, weight: .medium))
-                    .foregroundStyle(Color.appInk)
-                if !voiceTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isPreparingVoice {
-                    Text(voiceTranscript)
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
-                        .lineLimit(1)
+            Group {
+                if isPreparingVoice {
+                    ShimmerText(text: "Writing it down", font: .appBody(15, weight: .medium))
+                } else if heard.isEmpty {
+                    Text("Listening")
+                        .font(.appBody(15, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                } else {
+                    Text(heard)
+                        .font(.appBody(15))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(2)
+                        .truncationMode(.head)
                 }
             }
+            .animation(.appStandard, value: heard)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.appSurface)
+        .padding(.trailing, 10)
+        .frame(minHeight: 46)
+        .background(Color.appReceivedBubble.opacity(0.72))
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                .strokeBorder(isRecording ? Color.appDanger.opacity(0.22) : Color.appHairline, lineWidth: 0.75)
+                .strokeBorder(Color.appCardOutline, lineWidth: 1)
         )
     }
 
@@ -1400,14 +1426,12 @@ private struct ChatInputBar: View {
     }
 
     private var buttonFill: Color {
-        if canSend || showsStop { return Color.appAction }
-        if isRecording { return Color.appDanger }
+        if canSend || showsStop || isRecording { return Color.appAction }
         return Color.appSurface
     }
 
     private var buttonForeground: Color {
-        if canSend { return Color.appOnAction }
-        if isRecording { return Color.appInk }
+        if canSend || isRecording { return Color.appOnAction }
         return canAct ? Color.appMuted : Color.appMuted.opacity(0.5)
     }
 
