@@ -159,19 +159,6 @@ struct ThreadMessageRow<Content: View>: View {
 
     var body: some View {
         content
-            .overlay(alignment: isUser ? .topLeading : .topTrailing) {
-                if let reaction {
-                    Text(reaction)
-                        .font(.appBody(15))
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color.appBackground))
-                        .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
-                        .padding(.leading, isUser ? 40 : 0)
-                        .padding(.trailing, isUser ? 0 : 34)
-                        .offset(y: -12)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
             .padding(.top, reaction == nil ? 0 : 8)
             .animation(.appSpring, value: reaction)
             .offset(x: dx)
@@ -435,5 +422,21 @@ struct WorkingBubble: View {
         ))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label.map { "Adam is working: \($0)" } ?? "Adam is working")
+    }
+}
+
+
+/// The reaction badge, pinned to the corner of the bubble itself.
+struct ReactionBadge: View {
+    let emoji: String
+
+    var body: some View {
+        Text(emoji)
+            .font(.appBody(15))
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(Color.appBackground))
+            .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
+            .transition(.scale.combined(with: .opacity))
+            .accessibilityLabel("Reacted \(emoji)")
     }
 }

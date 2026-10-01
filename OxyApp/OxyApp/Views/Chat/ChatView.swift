@@ -60,7 +60,11 @@ struct ChatView: View {
     /// Reactions sent to Adam, and replies Adam chose not to make, are not shown as messages.
     private func isHiddenInThread(_ message: Message) -> Bool {
         if message.role == .user { return ReactionText.isReaction(message.content) }
-        return ReactionText.isQuiet(message.content) && message.turnError == nil
+        if ReactionText.isQuiet(message.content) { return true }
+        // A reply to a reaction that failed or never came isn't worth an error.
+        guard message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let index = viewModel.messages.firstIndex(where: { $0.id == message.id }), index > 0 else { return false }
+        return ReactionText.isReaction(viewModel.messages[index - 1].content)
     }
 
     @ViewBuilder
@@ -105,7 +109,8 @@ struct ChatView: View {
                 },
                 onRetryFailedTurn: {
                     viewModel.retryLastFailedMessage(userId: appState.userId)
-                }
+                },
+                reaction: ReactionStore.shared.reaction(for: message)
             )
         }
         .id(message.id)

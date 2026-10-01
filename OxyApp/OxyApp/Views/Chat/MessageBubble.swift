@@ -13,6 +13,7 @@ struct MessageBubble: View {
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
     var onRetryFailedTurn: (() -> Void)? = nil
+    var reaction: String? = nil
 
     @State private var showReauthSheet = false
     @State private var showMissingInformationSheet = false
@@ -139,6 +140,9 @@ struct MessageBubble: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 10)
                                 .background(bubbleShape.fill(Color.appUserBubble))
+                                .overlay(alignment: .topLeading) {
+                                    if let reaction { ReactionBadge(emoji: reaction).offset(x: -10, y: -14) }
+                                }
                         }
                         if message.queuedForActiveTask {
                             Text("Waiting its turn")
@@ -153,6 +157,9 @@ struct MessageBubble: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(bubbleShape.fill(Color.appReceivedBubble))
+                            .overlay(alignment: .topTrailing) {
+                                if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
+                            }
                         Spacer(minLength: 40)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
