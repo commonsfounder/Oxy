@@ -155,6 +155,8 @@ const agentWorkspace = require('./services/agent-workspace');
 const agentRuntime = require('./services/agent-runtime');
 const agentApprovals = require('./services/agent-approval-runtime');
 const reactions = require('./services/reactions');
+const activityFeed = require('./services/activity-feed');
+const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
 const dailyDigest = require('./services/daily-digest');
@@ -7646,6 +7648,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               modelRoute: { provider: chatProvider, model: chatModel },
               useSearch: Boolean(isBroadMoneyGoal || useSearch),
               deviceType: req.body?.deviceType || 'ambient_home',
+              origin: 'chat_turn',
               ...(trace.channel ? { channel: trace.channel } : {})
             },
             runtime: {
@@ -9003,31 +9006,61 @@ app.post('/agent/displays/pairing', requireSessionAuth, async (req, res) => {
   }
 });
 
-// What Adam can truthfully say about the household right now, for the app's home view. Nothing
-// here is inferred beyond what household-state.js already normalises: unknown stays unknown.
-app.get('/agent/household', requireSessionAuth, async (req, res) => {
+// Home is the current state of the world as Adam can know it: devices, rooms, watches, sensed
+// events. Conversation never appears here; see api/services/home-model.js.
+app.get('/agent/home', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const [nativeContext, people, commitments, plans] = await Promise.all([
+    const pairedDisplays = require('./services/paired-displays');
+    const [nativeContext, displays, schedules] = await Promise.all([
       supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle(),
-      supabase.from('participants').select('display_name, relationship').eq('user_id', userId)
-        .order('updated_at', { ascending: false, nullsFirst: false }).limit(12),
-      supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId)
-        .eq('status', 'open').order('due_at', { ascending: true }).limit(12),
-      supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event')
-        .eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12)
+      pairedDisplays.listDisplays(supabase, userId),
+      supabase.from('scheduled_tasks').select('id, title, recurrence, next_run_at, condition, active, watch_state, context_event')
+        .eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(24)
     ]);
-    res.json(normalizeHouseholdState({
-      nativeContext: nativeContext.data || {},
-      people: people.data || [],
-      commitments: commitments.data || [],
-      scheduledTasks: plans.data || [],
+    const now = new Date();
+    res.json(homeModel.buildHomeModel({
+      displays,
+      presence: normalizeHouseholdState({ nativeContext: nativeContext.data || {}, now }).presence,
+      scheduledRows: schedules.data || [],
+      // No hardware reports observations yet. When it does, they arrive from their own store, never from chat.
+      observations: [],
+      now
+    }));
+  } catch (e) {
+    log('warn', 'home.load.failed', { userId, error: e.message });
+    res.status(503).json({ error: 'Home details are unavailable right now.' });
+  }
+});
+
+// Adam's record of what it noticed, did, asked and scheduled. Built from where those are recorded
+// (action log, schedules, approvals, notices, finished durable work), never from the chat transcript.
+app.get('/agent/activity', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const [actions, notices, schedules, approvals, board] = await Promise.all([
+      supabase.from('action_log').select('id, action, status, error, created_at').eq('user_id', userId)
+        .order('created_at', { ascending: false }).limit(120),
+      supabase.from('notification_events').select('id, category, title, body, created_at').eq('user_id', userId)
+        .order('created_at', { ascending: false }).limit(40),
+      supabase.from('scheduled_tasks').select('id, title, recurrence, next_run_at, active')
+        .eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(24),
+      approvalRuntime.list(userId).then(list => list.map(agentApprovals.approvalSummary)).catch(() => []),
+      require('./services/home-state').getHomeState(supabase, userId).catch(() => ({ completed: [], needsYou: [] }))
+    ]);
+    res.json(activityFeed.buildActivityFeed({
+      actionRows: actions.data || [],
+      noticeRows: notices.data || [],
+      scheduledRows: schedules.data || [],
+      approvals,
+      board,
       now: new Date()
     }));
   } catch (e) {
-    log('warn', 'household.load.failed', { userId, error: e.message });
-    res.status(503).json({ error: 'Home details are unavailable right now.' });
+    log('warn', 'activity.load.failed', { userId, error: e.message });
+    res.status(503).json({ error: 'Activity is unavailable right now.' });
   }
 });
 

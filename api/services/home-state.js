@@ -41,6 +41,32 @@ function isConversationalTask(task) {
   );
 }
 
+// Every chat turn gets a task row so its tool calls have somewhere durable to live. A turn that only
+// talked (a question, a reaction, small talk) is conversation, not work, and must never appear as
+// something Adam did. A turn counts as work only if it carried a plan or changed something in the world.
+const READ_ONLY_ACTION = /^(get_|search_|find_|check_|list_|read_|lookup_)|^(web_search|browser_observe|browser_open|browser_close|transaction_status|workspace_read|workspace_list|workspace_write)$/;
+
+function executedActionTypes(task) {
+  const results = Array.isArray(task?.results) ? task.results : [];
+  return results
+    .map(entry => entry?.action || entry?.type || entry?.result?.action || entry?.result?.type)
+    .filter(type => typeof type === 'string' && type);
+}
+
+// Chat turns are created with a model route, guard mode and search flag together (and, from now on,
+// an explicit origin). Delegated goals made on purpose carry a plan instead.
+function isChatTurnTask(task) {
+  const meta = task?.metadata || {};
+  if (meta.origin === 'chat_turn') return true;
+  return Boolean(meta.modelRoute) && meta.guardMode !== undefined && meta.useSearch !== undefined;
+}
+
+function isRoutineChatTurn(task) {
+  if (!isChatTurnTask(task)) return false;
+  if (Array.isArray(task?.plan) && task.plan.length) return false;
+  return !executedActionTypes(task).some(type => !READ_ONLY_ACTION.test(type));
+}
+
 // --- Watermark ---------------------------------------------------------------------
 
 async function getLastSeen(supabase, userId) {
@@ -214,6 +240,7 @@ async function buildFromTasks(supabase, userId, { since, now }) {
   for (const task of rows || []) {
     if (task.workflow_id) continue;
     if (isConversationalTask(task)) continue;
+    if (isRoutineChatTurn(task)) continue;
     const status = String(task.status || '').toLowerCase();
     if (status === 'recipe') continue;
 
@@ -349,6 +376,7 @@ module.exports = {
   MAX_PER_LANE,
   activityTitle,
   isConversationalTask,
+  isRoutineChatTurn,
   getLastSeen,
   markSeen,
   getHomeState
