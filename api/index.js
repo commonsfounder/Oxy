@@ -794,7 +794,7 @@ app.use((req, res, next) => {
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
     (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path)));
+    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
@@ -1148,6 +1148,7 @@ async function refreshBriefingSourceData(userId, todayKey, snapshot) {
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
 const { buildChatChannelContext, buildTelegramChatRequest, buildDisplayChatRequest, normalizeChatChannel } = require('./services/chat-channel');
+const urgentScreens = require('./services/urgent-screens');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -3322,6 +3323,12 @@ async function evaluateAndSurfaceHouseholdEvents(userId, observations, now = new
         }
       });
       if (queued?.ok) raised += 1;
+      // A fixed urgent screen goes only to displays that were opted in, and only the first time.
+      if (queued?.created && urgentScreens.showsOnScreen(event.type)) {
+        await require('./services/paired-displays').queueUrgent(supabase, userId, {
+          type: event.type, room: event.room, occurredAt: event.occurredAt, now
+        }).catch(error => logger.warn?.(`[household-event] urgent screen failed for ${event.id}: ${error.message}`));
+      }
     } catch (error) {
       logger.warn?.(`[household-event] notification failed for ${event.id}: ${error.message}`);
     }
@@ -8930,6 +8937,10 @@ function displayPageHtml() {
     'input{background:#1d1b1a;color:#fff;width:100%;box-sizing:border-box;margin:8px 0}',
     'button{background:#e97961;color:#111;border:0;font-weight:700;cursor:pointer}',
     '#content{white-space:pre-wrap;font-size:clamp(20px,4vw,42px);line-height:1.35;color:#f5f1ec}',
+    '.urgent{text-align:center}.urgent .ring{width:160px;height:160px;border-radius:50%;border:6px solid #F0A23A;margin:0 auto 36px;animation:urgentpulse 2s ease-in-out infinite}',
+    '.urgent .big{font-size:clamp(22px,4.4vw,44px);color:#f5f1ec;margin:0 0 14px}.urgent .muted{font-size:20px;margin:0 0 40px}',
+    '.urgent .row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}.urgent button{border-radius:99px;padding:16px 30px;font-size:22px;background:transparent;color:#f5f1ec;border:1.5px solid #8f8781;font-weight:600}.urgent button.main{background:#f5f1ec;color:#111;border-color:#f5f1ec}',
+    '@keyframes urgentpulse{50%{transform:scale(1.08);border-color:#FFC15E}}@media (prefers-reduced-motion:reduce){.urgent .ring{animation:none}}',
     'body.scene main{padding:0;display:block}body.scene section{width:100%;height:100vh}iframe{border:0;width:100%;height:100vh;display:block}',
     '.muted{font-size:13px;color:#8f8781}</style></head><body><main><section id="app"></section></main>',
     '<script>',
@@ -8940,7 +8951,8 @@ function displayPageHtml() {
     'const savedId=localStorage.getItem("milgrain_display_id");',
     'const savedToken=localStorage.getItem("milgrain_display_token");',
     'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Adam.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
-    'function renderEvent(event){if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);window.sceneFrame=frame;return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'function renderUrgent(event){document.body.classList.remove("scene");app.textContent="";const box=document.createElement("div");box.className="urgent";const ring=document.createElement("div");ring.className="ring";const h=document.createElement("h1");h.textContent=event.title;const p=document.createElement("p");p.className="big";p.textContent=event.body;const meta=document.createElement("p");meta.className="muted";const when=new Date(event.urgent.at);meta.textContent=(event.urgent.room?event.urgent.room+" · ":"")+(isNaN(when)?"":when.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));const row=document.createElement("div");row.className="row";[["got_it","I\u2019ve got it"],["false_alarm","False alarm"]].forEach(a=>{const b=document.createElement("button");b.textContent=a[1];b.className=a[0]==="got_it"?"main":"";b.onclick=async()=>{b.disabled=true;const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");try{await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(event.id)+"/respond",{method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({response:a[0]})})}catch(e){}app.textContent="";const done=document.createElement("p");done.className="muted";done.textContent="Noted";app.appendChild(done)};row.appendChild(b)});box.append(ring,h,p,meta,row);app.appendChild(box)}',
+    'function renderEvent(event){if(event.urgent){renderUrgent(event);return}if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);window.sceneFrame=frame;return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
     'window.addEventListener("message",e=>{const f=window.sceneFrame;if(!f||e.source!==f.contentWindow||!e.data)return;if(typeof e.data.adamSay==="string"){if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(e.data.adamSay.slice(0,400));u.lang="en-GB";window.speechSynthesis.speak(u)}return}if(typeof e.data.adamAsk!=="string")return;const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token)return;fetch("/display/"+encodeURIComponent(id)+"/ask",{method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({text:e.data.adamAsk})})});',
     'document.addEventListener("click",event=>{if(event.target?.id==="pair")localStorage.setItem("milgrain_display_mode",voiceMode?"voice":"text")});',
     'const renderTextEvent=renderEvent;renderEvent=event=>{renderTextEvent(event);if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(event.title+". "+event.body);utterance.lang="en-GB";window.speechSynthesis.speak(utterance)}};',
@@ -9025,6 +9037,34 @@ app.post('/display/:id/ask', async (req, res) => {
     if (e?.code === 'too_fast') return res.status(429).json({ error: e.message });
     log('warn', 'display.ask.rejected', { error: e.message });
     if (!res.headersSent) res.status(503).json({ error: 'Display requests are unavailable.' });
+  }
+});
+
+// "I've got it" / "False alarm" on an urgent screen. It records the answer and does nothing else.
+app.post('/display/:id/events/:eventId/respond', async (req, res) => {
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const result = await pairedDisplays.respondToUrgent(supabase, req.params.id, displayBearerToken(req), req.params.eventId, req.body?.response);
+    if (!result.authorized) return res.status(401).json({ error: 'Display authorization is invalid.' });
+    if (!result.found) return res.status(404).json({ error: 'That alert was not found.' });
+    res.json({ recorded: true, response: result.response });
+  } catch (e) {
+    if (e?.code === 'invalid_response') return res.status(400).json({ error: e.message });
+    res.status(503).json({ error: 'Could not record that.' });
+  }
+});
+
+// Turn urgent screens on or off for one display. Pairing a screen is not consent to put an alarm on it.
+app.put('/agent/displays/:id/urgent', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false.' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    res.json(await pairedDisplays.setUrgentOptIn(supabase, userId, req.params.id, req.body.enabled));
+  } catch (e) {
+    if (e?.code === 'not_paired') return res.status(404).json({ error: e.message });
+    res.status(500).json({ error: 'Could not change that.' });
   }
 });
 

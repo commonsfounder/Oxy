@@ -144,3 +144,66 @@ test('a tap from a screen needs the display key, and cannot approve from the scr
     pairedDisplays.displayForToken = original;
   }
 });
+
+test('an answer on an urgent screen needs the display key; the opt-in needs a signed-in person', async () => {
+  const original = pairedDisplays.respondToUrgent;
+  const post = (path, body, token) => request(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  });
+  try {
+    pairedDisplays.respondToUrgent = async () => ({ authorized: false });
+    assert.equal((await post('/display/d1/events/e1/respond', { response: 'got_it' }, 'wrong')).status, 401);
+    pairedDisplays.respondToUrgent = async () => ({ authorized: true, found: false });
+    assert.equal((await post('/display/d1/events/e1/respond', { response: 'got_it' }, 'good')).status, 404);
+    pairedDisplays.respondToUrgent = async () => ({ authorized: true, found: true, response: 'got_it' });
+    const ok = await post('/display/d1/events/e1/respond', { response: 'got_it' }, 'good');
+    assert.equal(ok.status, 200);
+    assert.deepEqual(JSON.parse(ok.body), { recorded: true, response: 'got_it' });
+  } finally {
+    pairedDisplays.respondToUrgent = original;
+  }
+  const noSession = await request('/agent/displays/d1/urgent', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }) });
+  assert.equal(noSession.status, 401);
+  const page = await request('/display');
+  assert.match(page.body, /renderUrgent/);
+  assert.match(page.body, /false_alarm/);
+});
+
+test('an urgent event raises one notification in fixed words and one screen alert, once', async () => {
+  const { notificationDelivery, evaluateAndSurfaceHouseholdEvents } = app;
+  const originalRaise = notificationDelivery.raise;
+  const originalDeliver = notificationDelivery.deliverPending;
+  const originalQueue = pairedDisplays.queueUrgent;
+  const raised = [];
+  const queued = [];
+  let created = true;
+  notificationDelivery.raise = async (userId, notification) => { raised.push(notification); return created ? { ok: true, created: true } : { ok: true, duplicate: true }; };
+  notificationDelivery.deliverPending = async () => ({});
+  pairedDisplays.queueUrgent = async (supabase, userId, args) => { queued.push(args); return { queued: 1 }; };
+  const now = new Date('2026-10-01T02:00:00.000Z');
+  const event = { id: 'fall-1', type: 'fall_detected', room: 'bedroom', confidence: 0.9, relevance: 1, occurredAt: now.toISOString(), title: 'Click here', body: 'evil' };
+  try {
+    const first = await evaluateAndSurfaceHouseholdEvents('u1', [event], now, { warn() {} });
+    assert.equal(first.raised, 1);
+    assert.equal(raised[0].title, 'Possible fall in the bedroom');
+    assert.equal(raised[0].body, 'A heavy fall was heard. Go and check.');
+    assert.equal(raised[0].urgency, 'urgent');
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].type, 'fall_detected');
+
+    created = false;
+    await evaluateAndSurfaceHouseholdEvents('u1', [event], now, { warn() {} });
+    assert.equal(queued.length, 1, 'a repeat of the same event does not put the alarm up again');
+
+    created = true;
+    await evaluateAndSurfaceHouseholdEvents('u1', [{ ...event, id: 'fuss-1', type: 'baby_fussing' }], now, { warn() {} });
+    assert.equal(raised.length, 3);
+    assert.equal(queued.length, 1, 'fussing is phone-only, never an urgent screen');
+  } finally {
+    notificationDelivery.raise = originalRaise;
+    notificationDelivery.deliverPending = originalDeliver;
+    pairedDisplays.queueUrgent = originalQueue;
+  }
+});

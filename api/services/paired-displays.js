@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const sceneSpec = require('./scene-spec');
+const urgentScreens = require('./urgent-screens');
 const sceneRuntime = require('./scene-runtime');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -11,7 +12,7 @@ const MAX_DISPLAY_NAME = 80;
 const MAX_TITLE = 160;
 const MAX_BODY = 2000;
 const MAX_KIND = 40;
-const DISPLAY_KINDS = new Set(['agent_update', 'reminder', 'approval', 'status', 'scene']);
+const DISPLAY_KINDS = new Set(['agent_update', 'reminder', 'approval', 'status', 'scene', 'urgent']);
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SECRET_CONTENT_PATTERN = /(?:\bauthorization\s*:\s*bearer\b|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(?:password|passwd|passphrase|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|cookie|set-cookie|session[_-]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 
@@ -110,6 +111,7 @@ function summarizeDisplay(row) {
     name: cleanText(row.display_name, 'Display', MAX_DISPLAY_NAME),
     type: row.display_type || 'browser_display',
     capabilities: row.capabilities && typeof row.capabilities === 'object' ? row.capabilities : { text: true },
+    urgent: row.capabilities?.urgent === true,
     pairedAt: row.paired_at || null,
     lastSeenAt: row.last_seen_at || null
   };
@@ -249,6 +251,62 @@ async function currentScene(supabase, userId, displayId) {
   return { title: row.title, body: row.body, scene: row.payload.scene.spec, at: row.created_at };
 }
 
+const URGENT_TTL_MS = 15 * 60 * 1000;
+
+// Turning urgent screens on for a display is the person's choice, made per screen. Pairing a screen is
+// not consent to put an alarm on it, or private household news on a shared one.
+async function setUrgentOptIn(supabase, userId, displayId, enabled) {
+  assertUser(userId);
+  const { data: row, error } = await supabase.from('paired_displays').select('id, capabilities')
+    .eq('id', displayId).eq('user_id', userId).is('revoked_at', null).maybeSingle();
+  if (error) throw error;
+  if (!row) throw displayDomainError('not_paired', 'That display is not paired.');
+  const capabilities = { ...(row.capabilities && typeof row.capabilities === 'object' ? row.capabilities : { text: true }), urgent: enabled === true };
+  const { error: updateError } = await supabase.from('paired_displays').update({ capabilities }).eq('id', displayId).eq('user_id', userId);
+  if (updateError) throw updateError;
+  return { id: displayId, urgent: capabilities.urgent };
+}
+
+// Shows a fixed urgent screen on every display that has opted in. Nothing here is model output.
+async function queueUrgent(supabase, userId, { type, room, occurredAt, now = new Date() } = {}) {
+  assertUser(userId);
+  if (!urgentScreens.showsOnScreen(type)) return { queued: 0 };
+  const text = urgentScreens.describeUrgent(type, { room });
+  const displays = (await listDisplays(supabase, userId)).filter(display => display.urgent);
+  const expiresAt = new Date(new Date(now).getTime() + URGENT_TTL_MS).toISOString();
+  let queued = 0;
+  for (const display of displays) {
+    const { error } = await supabase.from('display_render_events').insert({
+      user_id: userId,
+      display_id: display.id,
+      kind: 'urgent',
+      title: text.title,
+      body: text.body,
+      payload: { text: true, urgent: { type, room: room ? String(room).slice(0, 40) : null, at: occurredAt || new Date(now).toISOString() } },
+      expires_at: expiresAt
+    });
+    if (error) throw error;
+    queued += 1;
+  }
+  return { queued };
+}
+
+// A tap on "I've got it" or "False alarm". It records what the person said and nothing else: it cannot
+// approve, cancel, call or message anyone.
+async function respondToUrgent(supabase, displayId, token, eventId, response, now = new Date()) {
+  const display = await displayForToken(supabase, displayId, token);
+  if (!display) return { authorized: false };
+  if (!urgentScreens.RESPONSES.includes(response)) throw displayDomainError('invalid_response', 'That is not a response this screen takes.');
+  const { data: event, error } = await supabase.from('display_render_events').select('id, kind, payload')
+    .eq('id', eventId).eq('display_id', displayId).maybeSingle();
+  if (error) throw error;
+  if (!event || event.kind !== 'urgent') return { authorized: true, found: false };
+  const payload = { ...(event.payload || {}), urgent: { ...(event.payload?.urgent || {}), response, respondedAt: new Date(now).toISOString() } };
+  const { error: updateError } = await supabase.from('display_render_events').update({ payload }).eq('id', eventId).eq('display_id', displayId);
+  if (updateError) throw updateError;
+  return { authorized: true, found: true, response };
+}
+
 async function pollNextRender(supabase, displayId, token, now = new Date()) {
   const display = await displayForToken(supabase, displayId, token);
   if (!display) return null;
@@ -260,6 +318,9 @@ async function pollNextRender(supabase, displayId, token, now = new Date()) {
   if (!data?.[0]) return { display: summarizeDisplay(display), event: null };
   const event = data[0];
   const out = { id: event.id, kind: event.kind, title: event.title, body: event.body, createdAt: event.created_at, expiresAt: event.expires_at };
+  if (event.kind === 'urgent' && event.payload?.urgent) {
+    out.urgent = { type: event.payload.urgent.type, room: event.payload.urgent.room || null, at: event.payload.urgent.at || event.created_at };
+  }
   const storedSpec = event.payload?.scene?.spec;
   if (storedSpec && typeof storedSpec === 'object') {
     try {
@@ -295,6 +356,7 @@ module.exports = {
   PAIRING_TTL_MS,
   EVENT_TTL_MS,
   SCENE_TTL_MS,
+  URGENT_TTL_MS,
   MAX_DISPLAY_NAME,
   MAX_TITLE,
   MAX_BODY,
@@ -308,6 +370,9 @@ module.exports = {
   revokeDisplay,
   displayForToken,
   queueRender,
+  queueUrgent,
+  respondToUrgent,
+  setUrgentOptIn,
   currentScene,
   pollNextRender,
   acknowledgeRender

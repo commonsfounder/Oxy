@@ -16,6 +16,8 @@ struct HomeModel: Codable, Equatable {
         let room: String?
         let online: Bool
         let lastSeenAt: String?
+        var capabilities: [String]? = nil
+        var showsUrgent: Bool { capabilities?.contains("urgent") == true }
     }
     struct Room: Codable, Equatable, Hashable, Identifiable {
         let name: String
@@ -79,6 +81,8 @@ struct YourHomeView: View {
     @State private var failed = false
     @State private var showsDeviceSetup = false
     @State private var showsSettings = false
+    @State private var urgentChoice: [String: Bool] = [:]
+    @State private var urgentFailed = false
 
     private var hasDevices: Bool { !home.devices.isEmpty }
     private var onlineCount: Int { home.devices.filter(\.online).count }
@@ -105,6 +109,7 @@ struct YourHomeView: View {
                     }
 
                     watchingSection
+                    if hasDevices { urgentSection }
                     if hasDevices { noticedSection }
                     addressSection
                 }
@@ -236,6 +241,60 @@ struct YourHomeView: View {
                     row(title: watch.title, detail: watch.detail ?? nextCheck(watch), dot: .appWorking) {
                         AskAdam.draft("What's happening with: \(watch.title)?")
                     }
+                }
+            }
+        }
+    }
+
+    /// Urgent alerts are a choice made per screen: pairing a screen is not consent to put an alarm on it.
+    @ViewBuilder
+    private var urgentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Urgent alerts")
+            VStack(spacing: 0) {
+                ForEach(Array(home.devices.enumerated()), id: \.element.id) { index, device in
+                    if index > 0 { divider }
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(device.name)
+                                .font(.appBody(15, weight: .medium))
+                                .foregroundStyle(Color.appInk)
+                            Text("Show crying, falls and choking on this screen")
+                                .font(.appBody(13))
+                                .foregroundStyle(Color.appMuted)
+                        }
+                        Spacer(minLength: 8)
+                        SettingsToggle(isOn: Binding(
+                            get: { urgentChoice[device.id] ?? device.showsUrgent },
+                            set: { setUrgent(device, $0) }
+                        ))
+                    }
+                    .padding(.vertical, 14)
+                    .frame(minHeight: 44)
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+            if urgentFailed {
+                Text("Couldn't change that. Try again.")
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.appMuted)
+            }
+        }
+    }
+
+    private func setUrgent(_ device: HomeModel.Device, _ enabled: Bool) {
+        let before = urgentChoice[device.id] ?? device.showsUrgent
+        urgentChoice[device.id] = enabled
+        urgentFailed = false
+        HapticManager.shared.impact(.light)
+        Task {
+            do {
+                _ = try await APIClient.shared.request(path: "/agent/displays/\(device.id)/urgent", method: "PUT", body: ["enabled": enabled])
+            } catch {
+                await MainActor.run {
+                    urgentChoice[device.id] = before
+                    urgentFailed = true
                 }
             }
         }

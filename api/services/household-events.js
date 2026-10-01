@@ -3,6 +3,8 @@
 // Generic environmental events and the small deterministic decision made before Adam
 // interrupts someone. Producers supply observations; this module does not invent them.
 
+const urgentScreens = require('./urgent-screens');
+
 const EVENT_TYPES = Object.freeze([
   'person_arrived',
   'person_left',
@@ -15,7 +17,8 @@ const EVENT_TYPES = Object.freeze([
   'calendar_event_approaching',
   'item_running_low',
   'commitment_due',
-  'household_state_changed'
+  'household_state_changed',
+  ...urgentScreens.URGENT_TYPES
 ]);
 
 const INTERRUPTION_COSTS = Object.freeze(['low', 'normal', 'high']);
@@ -57,24 +60,29 @@ function normalizeHouseholdEvent(input = {}, now = new Date()) {
     ? input.interruptionCost
     : 'normal';
 
+  // For the few situations that must read the same every time, the wording is fixed and a sensor
+  // cannot supply its own: see urgent-screens.js.
+  const fixed = urgentScreens.describeUrgent(type, { room: input.room });
+  const fixedExpiry = fixed && !expiresAt ? new Date(new Date(occurredAt).getTime() + 15 * 60 * 1000).toISOString() : null;
+
   return {
     id: clean(input.id, MAX_ID) || `${type}:${occurredAt}`,
     type,
-    subject,
-    title: clean(input.title || subject, MAX_TITLE),
-    body: clean(input.body || subject, MAX_BODY),
+    subject: fixed ? fixed.title : subject,
+    title: fixed ? fixed.title : clean(input.title || subject, MAX_TITLE),
+    body: fixed ? fixed.body : clean(input.body || subject, MAX_BODY),
     personName: clean(input.personName || input.person_name, MAX_PERSON) || null,
     room: clean(input.room, MAX_ROOM) || null,
     occurredAt,
-    expiresAt,
+    expiresAt: expiresAt || fixedExpiry,
     source: clean(input.source, MAX_SOURCE) || 'environment',
     confidence: boundedScore(input.confidence),
     relevance: boundedScore(input.relevance),
-    actionable: input.actionable !== false,
-    urgent: input.urgent === true,
-    requiresNow: input.requiresNow === true,
-    solveSilently: input.solveSilently === true,
-    interruptionCost
+    actionable: fixed ? true : input.actionable !== false,
+    urgent: fixed ? fixed.severity === 'urgent' : input.urgent === true,
+    requiresNow: fixed ? fixed.severity === 'urgent' : input.requiresNow === true,
+    solveSilently: fixed ? false : input.solveSilently === true,
+    interruptionCost: fixed ? 'low' : interruptionCost
   };
 }
 

@@ -17,7 +17,7 @@ const NOT_ACTIVITY = new Set([
   'browser_fill_known_details', 'browser_upload', 'browser_download', 'set_notification_preference'
 ]);
 
-const NOTICE_CATEGORIES = new Set(['watch', 'delivery', 'reply_needed', 'occasion']);
+const NOTICE_CATEGORIES = new Set(['watch', 'delivery', 'reply_needed', 'occasion', 'other']);
 
 const STALE_AFTER_MS = 5 * 60 * 1000;
 const COLLAPSE_WINDOW_MS = 10 * 60 * 1000;
