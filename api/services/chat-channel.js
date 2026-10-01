@@ -29,6 +29,10 @@ function buildTelegramChatRequest(userId, message) {
   return { userId, message, channel: TELEGRAM_BOT_CHANNEL };
 }
 
+function buildDisplayChatRequest(userId, message) {
+  return { userId, message, channel: 'display' };
+}
+
 function buildChatChannelContext(channel) {
   if (normalizeChatChannel(channel) !== TELEGRAM_BOT_CHANNEL) return '';
   return `CURRENT CONVERSATION CHANNEL: Telegram.
@@ -40,6 +44,7 @@ module.exports = {
   normalizeChatChannel,
   adaptActionForChannel,
   buildTelegramChatRequest,
+  buildDisplayChatRequest,
   buildChatChannelContext,
   _private: { EXPLICIT_NATIVE_MESSAGE_CHANNEL }
 };

@@ -635,14 +635,14 @@ app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
 
 // Calls this instance's own /chat over loopback. PORT is required in production — behind
 // Fly's proxy req.socket.localPort is undefined, so it is only a test fallback.
-async function bridgeToChatPipeline(userId, message, req) {
+async function bridgeToChatPipeline(userId, message, req, buildRequest = buildTelegramChatRequest) {
   const { data: userRow } = await supabase.from('users').select('token_version').eq('user_id', userId).maybeSingle();
   const sessionToken = createSessionToken(userId, userRow?.token_version || 1);
   const baseUrl = `http://127.0.0.1:${process.env.PORT || req.socket.localPort || 3000}`;
   const chatRes = await fetch(`${baseUrl}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
-    body: JSON.stringify(buildTelegramChatRequest(userId, message))
+    body: JSON.stringify(buildRequest(userId, message))
   });
   if (!chatRes.ok) throw new Error(`chat bridge returned ${chatRes.status}`);
   return chatRes.json();
@@ -794,7 +794,7 @@ app.use((req, res, next) => {
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
     (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path)));
+    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
@@ -1147,7 +1147,7 @@ async function refreshBriefingSourceData(userId, todayKey, snapshot) {
 }
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
-const { buildChatChannelContext, buildTelegramChatRequest, normalizeChatChannel } = require('./services/chat-channel');
+const { buildChatChannelContext, buildTelegramChatRequest, buildDisplayChatRequest, normalizeChatChannel } = require('./services/chat-channel');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -8940,7 +8940,8 @@ function displayPageHtml() {
     'const savedId=localStorage.getItem("milgrain_display_id");',
     'const savedToken=localStorage.getItem("milgrain_display_token");',
     'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Adam.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
-    'function renderEvent(event){if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'function renderEvent(event){if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);window.sceneFrame=frame;return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'window.addEventListener("message",e=>{const f=window.sceneFrame;if(!f||e.source!==f.contentWindow||!e.data||typeof e.data.adamAsk!=="string")return;const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token)return;fetch("/display/"+encodeURIComponent(id)+"/ask",{method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({text:e.data.adamAsk})})});',
     'document.addEventListener("click",event=>{if(event.target?.id==="pair")localStorage.setItem("milgrain_display_mode",voiceMode?"voice":"text")});',
     'const renderTextEvent=renderEvent;renderEvent=event=>{renderTextEvent(event);if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(event.title+". "+event.body);utterance.lang="en-GB";window.speechSynthesis.speak(utterance)}};',
     'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){renderPair();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");renderPair();return}if(!response.ok)return;const data=await response.json();if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
@@ -8992,6 +8993,38 @@ app.post('/display/:id/events/:eventId/ack', async (req, res) => {
     res.json({ acknowledged: true, alreadyAcknowledged: result.alreadyAcknowledged === true });
   } catch (e) {
     res.status(503).json({ error: 'Display acknowledgement failed.' });
+  }
+});
+
+// A tap on a scene button: the same as typing that request on the screen. The screen can never
+// approve or cancel (display-ask refuses those words), and a waiting approval is sent back to the
+// phone instead of being answered here.
+app.post('/display/:id/ask', async (req, res) => {
+  const displayAsk = require('./services/display-ask');
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const display = await pairedDisplays.displayForToken(supabase, req.params.id, displayBearerToken(req));
+    if (!display) return res.status(401).json({ error: 'Display authorization is invalid.' });
+    const text = displayAsk.validateDisplayAsk(req.body?.text);
+    displayAsk.checkAskRate(display.id);
+    res.status(202).json({ accepted: true });
+    try {
+      const result = await bridgeToChatPipeline(display.user_id, text, req, buildDisplayChatRequest);
+      const waiting = telegramBot.findPendingAction(result?.actions || []);
+      const reply = waiting
+        ? { title: 'Needs your yes', body: 'Open Adam on your phone to approve this.', kind: 'approval' }
+        : reactions.isQuietReply(result?.text)
+          ? null
+          : { title: 'Adam', body: reactions.plainReply(result?.text || 'Done.').slice(0, 1800), kind: 'agent_update' };
+      if (reply) await pairedDisplays.queueRender(supabase, display.user_id, { displayId: display.id, ...reply });
+    } catch (e) {
+      log('warn', 'display.ask.failed', { displayId: display.id, error: e.message });
+    }
+  } catch (e) {
+    if (e?.code === 'invalid_ask' || e?.code === 'needs_phone') return res.status(400).json({ error: e.message, code: e.code });
+    if (e?.code === 'too_fast') return res.status(429).json({ error: e.message });
+    log('warn', 'display.ask.rejected', { error: e.message });
+    if (!res.headersSent) res.status(503).json({ error: 'Display requests are unavailable.' });
   }
 });
 

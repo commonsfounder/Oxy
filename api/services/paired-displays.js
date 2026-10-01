@@ -5,6 +5,7 @@ const displayScene = require('./display-scene');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const EVENT_TTL_MS = 15 * 60 * 1000;
+const SCENE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_DISPLAY_NAME = 80;
 const MAX_TITLE = 160;
 const MAX_BODY = 2000;
@@ -217,7 +218,7 @@ async function queueRender(supabase, userId, { displayId, title, body, kind, sce
   // The scene is checked here and again when it is wrapped for the screen. Its title and body stay
   // plain text: they are what a text-only screen shows and what voice mode reads aloud.
   const scene = hasScene ? displayScene.validateSceneHtml(sceneHtml) : null;
-  const expiresAt = new Date(new Date(now).getTime() + EVENT_TTL_MS).toISOString();
+  const expiresAt = new Date(new Date(now).getTime() + (scene ? SCENE_TTL_MS : EVENT_TTL_MS)).toISOString();
   const { data, error } = await supabase.from('display_render_events').insert({
     user_id: userId,
     display_id: displayId,
@@ -229,6 +230,22 @@ async function queueRender(supabase, userId, { displayId, title, body, kind, sce
   }).select().single();
   if (error) throw error;
   return { id: data.id, displayId, kind: content.kind, title: content.title, body: content.body, scene: Boolean(scene), expiresAt: data.expires_at || expiresAt };
+}
+
+// What a screen is showing now, so Adam can change it instead of starting over. The latest scene
+// the screen has taken in, whether or not it has expired from the queue.
+async function currentScene(supabase, userId, displayId) {
+  assertUser(userId);
+  const { data: display, error: displayError } = await supabase.from('paired_displays').select('id')
+    .eq('id', displayId).eq('user_id', userId).is('revoked_at', null).maybeSingle();
+  if (displayError) throw displayError;
+  if (!display) throw displayDomainError('not_paired', 'That display is not paired.');
+  const { data, error } = await supabase.from('display_render_events').select('id, title, body, payload, created_at')
+    .eq('display_id', displayId).eq('kind', 'scene').order('created_at', { ascending: false }).limit(5);
+  if (error) throw error;
+  const row = (data || []).find(item => typeof item.payload?.scene?.html === 'string');
+  if (!row) return null;
+  return { title: row.title, body: row.body, sceneHtml: row.payload.scene.html, at: row.created_at };
 }
 
 async function pollNextRender(supabase, displayId, token, now = new Date()) {
@@ -276,6 +293,7 @@ module.exports = {
   DisplayDomainError,
   PAIRING_TTL_MS,
   EVENT_TTL_MS,
+  SCENE_TTL_MS,
   MAX_DISPLAY_NAME,
   MAX_TITLE,
   MAX_BODY,
@@ -289,6 +307,7 @@ module.exports = {
   revokeDisplay,
   displayForToken,
   queueRender,
+  currentScene,
   pollNextRender,
   acknowledgeRender
 };

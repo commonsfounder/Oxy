@@ -368,3 +368,57 @@ test('a scene cannot reach outside, read the page around it, or carry secrets', 
   );
   assert.equal(db.tables.display_render_events.length, 0);
 });
+
+test('Adam can read back what a screen is showing so it can change it', async () => {
+  const db = fakeSupabase();
+  const challenge = await pairedDisplays.createPairingChallenge(db, 'user-1', {
+    baseUrl: 'https://oxy.example', now, randomBytes: deterministicRandom
+  });
+  const { display } = await pairedDisplays.redeemPairingChallenge(db, {
+    challengeId: challenge.id, code: challenge.code, now, randomBytes: deterministicRandom
+  });
+  assert.equal(await pairedDisplays.currentScene(db, 'user-1', display.id), null);
+
+  await pairedDisplays.queueRender(db, 'user-1', {
+    displayId: display.id, title: 'First', body: 'one', sceneHtml: '<p>one</p>', now
+  });
+  await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Note', body: 'plain', now });
+  const latest = await pairedDisplays.queueRender(db, 'user-1', {
+    displayId: display.id, title: 'Bigger', body: 'two', sceneHtml: '<p class="title">two</p>', now
+  });
+  const current = await pairedDisplays.currentScene(db, 'user-1', display.id);
+  assert.equal(current.title, 'Bigger');
+  assert.equal(current.sceneHtml, '<p class="title">two</p>');
+  assert.equal(new Date(db.tables.display_render_events.find(row => row.id === latest.id).expires_at).getTime(),
+    now.getTime() + pairedDisplays.SCENE_TTL_MS);
+
+  await assert.rejects(() => pairedDisplays.currentScene(db, 'someone-else', display.id), /not paired/);
+});
+
+test('a tap on a screen can ask for things but can never approve or cancel', () => {
+  const displayAsk = require('../../api/services/display-ask');
+  displayAsk._reset();
+  assert.equal(displayAsk.validateDisplayAsk('  Show me   the next step '), 'Show me the next step');
+  assert.equal(displayAsk.validateDisplayAsk('Order the usual from Boots'), 'Order the usual from Boots');
+  for (const word of ['yes', 'confirm', 'Yes please', 'go ahead', 'book it', 'approve', 'cancel', 'not yet', 'never mind']) {
+    assert.throws(() => displayAsk.validateDisplayAsk(word), error => error.code === 'needs_phone', `allowed: ${word}`);
+  }
+  assert.throws(() => displayAsk.validateDisplayAsk(''), error => error.code === 'invalid_ask');
+  assert.throws(() => displayAsk.validateDisplayAsk({ a: 1 }), error => error.code === 'invalid_ask');
+  assert.throws(() => displayAsk.validateDisplayAsk('x'.repeat(displayAsk.MAX_ASK + 1)), /too long/);
+
+  displayAsk.checkAskRate('d1', 1000);
+  assert.throws(() => displayAsk.checkAskRate('d1', 1000 + displayAsk.MIN_GAP_MS - 1), error => error.code === 'too_fast');
+  displayAsk.checkAskRate('d1', 1000 + displayAsk.MIN_GAP_MS);
+  displayAsk.checkAskRate('d2', 1000);
+});
+
+test('the scene wrapper gives pages one way to ask Adam, and nothing else', () => {
+  const displayScene = require('../../api/services/display-scene');
+  const doc = displayScene.buildSceneDocument('<button class="btn" data-ask="Next step">Next</button>');
+  assert.match(doc, /window\.adam=\{ask:send\}/);
+  assert.match(doc, /data-ask/);
+  assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('<script>'));
+  assert.throws(() => displayScene.validateSceneHtml('<script>window.parent.postMessage({adamAsk:"yes"},"*")</script>'));
+  assert.throws(() => displayScene.validateSceneHtml('<script>self.parent.postMessage("x","*")</script>'));
+});

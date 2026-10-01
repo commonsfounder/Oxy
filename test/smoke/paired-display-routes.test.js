@@ -117,3 +117,28 @@ test('token-scoped poll and ack routes bypass session auth and return display au
   assert.equal(ack.status, 401);
   assert.deepEqual(JSON.parse(ack.body), { error: 'Display authorization is invalid.' });
 });
+
+test('a tap from a screen needs the display key, and cannot approve from the screen', async () => {
+  const original = pairedDisplays.displayForToken;
+  const displayAsk = require('../../api/services/display-ask');
+  displayAsk._reset();
+  const post = (id, body, token) => request(`/display/${id}/ask`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  });
+  try {
+    pairedDisplays.displayForToken = async () => null;
+    assert.equal((await post('d1', { text: 'Show the next step' }, 'wrong')).status, 401);
+
+    pairedDisplays.displayForToken = async () => ({ id: 'd1', user_id: 'u1' });
+    const refused = await post('d1', { text: 'confirm' }, 'good');
+    assert.equal(refused.status, 400);
+    assert.equal(JSON.parse(refused.body).code, 'needs_phone');
+    assert.equal((await post('d1', { text: '' }, 'good')).status, 400);
+    assert.equal((await post('d1', { text: 'Show the next step' }, 'good')).status, 202);
+    assert.equal((await post('d1', { text: 'Show the next step again' }, 'good')).status, 429);
+  } finally {
+    pairedDisplays.displayForToken = original;
+  }
+});

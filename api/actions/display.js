@@ -42,6 +42,21 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
   };
 }
 
+async function getDisplayScene({ userId, params, deps }) {
+  const { supabase } = deps;
+  const pairedDisplays = require('../services/paired-displays');
+  const scene = await pairedDisplays.currentScene(supabase, userId, params?.display_id || params?.displayId);
+  if (!scene) return { success: true, found: false, text: 'That screen is not showing a page.' };
+  return {
+    success: true,
+    found: true,
+    title: scene.title,
+    body: scene.body,
+    sceneHtml: scene.sceneHtml,
+    text: 'The screen is showing: ' + scene.title
+  };
+}
+
 async function generateVisual({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, generateImage } = deps;
   const brief = params?.brief || params?.prompt || params?.topic;
@@ -78,6 +93,7 @@ module.exports = {
     create_presentation: createPresentation,
     list_paired_displays: listPairedDisplays,
     render_to_display: renderToDisplay,
+    get_display_scene: getDisplayScene,
     generate_visual: generateVisual
   }
 };

@@ -89,18 +89,23 @@ body{background:var(--bg);color:var(--ink);font:400 clamp(18px,3.1vmin,34px)/1.4
 svg{max-width:100%;height:auto}
 `;
 
+// The only way a scene reaches Adam: a tap asks a question or makes a request, exactly as if it
+// were typed. It carries no authority; approvals still happen where the person can see them.
+const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim().slice(0,200);if(!t)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}window.adam={ask:send};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
+
 // The frame the display page shows. The CSP comes first so nothing the scene contains can
 // loosen it (extra policies only tighten).
 function buildSceneDocument(html, { title = '' } = {}) {
   const safe = validateSceneHtml(html);
   const label = String(title || 'Adam').replace(/[<>&"]/g, '').slice(0, 120);
-  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}</title><style>${KIT_CSS}</style></head><body>${safe}</body></html>`;
+  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}</title><style>${KIT_CSS}</style></head><body>${safe}<script>${BRIDGE_JS}</script></body></html>`;
 }
 
 module.exports = {
   MAX_SCENE_HTML,
   CSP,
   KIT_CSS,
+  BRIDGE_JS,
   validateSceneHtml,
   buildSceneDocument
 };

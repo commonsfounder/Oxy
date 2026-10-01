@@ -522,6 +522,19 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  get_display_scene: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['display_id'],
+    optional: [],
+    inputExample: { display_id: 'id from list_paired_displays' },
+    paramHints: { display_id: 'the id of a display returned by list_paired_displays' },
+    guidance: 'Use before changing what is already on a screen ("make it bigger", "add the next step", "now show the other option"). It returns the page and text currently shown; then send the full changed page with render_to_display scene_html. If nothing is returned, say the screen is not showing a page.',
+    successSummary: 'Checked what is on the screen',
+    failureSummary: 'Could not check the screen',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   render_to_display: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -535,7 +548,7 @@ const ACTION_CONTRACTS = {
       kind: 'agent_update | reminder | approval | status',
       scene_html: 'optional: a small page for a screen across the room, as an HTML fragment (no html/head tags). Use the screen kit: .scene wrapper, .eyebrow, .title, .lede, .cards > .card, .big + .unit, ol.steps > li (li.on = current), .chip, .dot.working|needs|done, .bar > i[style=width:60%], .row, .btn. Inline SVG for charts, inline <script> for interaction. No external links, images or network. title/body stay plain text: body is read aloud and shown on text-only screens.'
     },
-    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send scene_html written for reading from across a room: one idea per screen, large short text, no clutter. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes.',
+    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send scene_html written for reading from across a room: one idea per screen, large short text, no clutter. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes. A button that asks Adam for something is <button class="btn" data-ask="what the person would say">; a tap is the same as typing that, and a screen can never approve anything.',
     successSummary: 'Queued for display',
     failureSummary: 'Could not show that on the display',
     confirmation: 'none',
