@@ -1323,22 +1323,13 @@ private struct MemoryChip: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(Color.appDone).frame(width: 6, height: 6)
-            Text(isForget ? "Forgotten" : "Remembered")
-                .font(.appBody(12, weight: .semibold))
-                .foregroundStyle(Color.appInk)
-            if let detail {
-                Text(detail)
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(Color.appReceivedBubble))
-        .fixedSize(horizontal: false, vertical: true)
+        (Text(isForget ? "Forgot" : "Remembered").fontWeight(.medium)
+            + Text(detail.map { " · \($0)" } ?? ""))
+            .font(.appBody(13))
+            .foregroundStyle(Color.appMuted)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
 }

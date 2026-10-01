@@ -61,6 +61,11 @@ enum ReactionText {
 final class ReactionStore {
     static let shared = ReactionStore()
     static let choices = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
+    static let more = [
+        "🔥", "🙏", "👏", "🎉", "😍", "🥰", "😊", "😅", "🤣", "😭", "🥲", "😮",
+        "😬", "🙄", "😴", "🤔", "🫡", "😎", "🤝", "💯", "✅", "❌", "👀", "💀",
+        "🙌", "💪", "🫶", "😤", "🤯", "🥳", "😢", "😡", "🤷", "🫠", "⭐️", "💡"
+    ]
 
     private struct Pending: Codable {
         var key: String
@@ -154,14 +159,15 @@ struct ThreadMessageRow<Content: View>: View {
 
     var body: some View {
         content
-            .overlay(alignment: isUser ? .topTrailing : .topLeading) {
+            .overlay(alignment: isUser ? .topLeading : .topTrailing) {
                 if let reaction {
                     Text(reaction)
                         .font(.appBody(15))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.appBackground))
                         .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
-                        .padding(.horizontal, isUser ? 6 : 10)
+                        .padding(.leading, isUser ? 40 : 0)
+                        .padding(.trailing, isUser ? 0 : 34)
                         .offset(y: -12)
                         .transition(.scale.combined(with: .opacity))
                 }
@@ -237,6 +243,7 @@ struct ReactionPicker: View {
     var onClose: () -> Void
 
     @State private var shown = false
+    @State private var showsMore = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isUser: Bool { message.role == .user }
@@ -270,22 +277,57 @@ struct ReactionPicker: View {
                             .buttonStyle(.appScale(0.85))
                             .accessibilityLabel("React \(emoji)")
                         }
+                        Button {
+                            HapticManager.shared.impact(.light)
+                            withAnimation(.appSpring) { showsMore.toggle() }
+                        } label: {
+                            AppIcon(showsMore ? "xmark" : "plus", size: 16)
+                                .foregroundColor(Color.appInk)
+                                .frame(width: 44, height: 44)
+                                .background(Circle().fill(Color.appReceivedBubble))
+                        }
+                        .buttonStyle(.appScale(0.85))
+                        .accessibilityLabel(showsMore ? "Fewer reactions" : "More reactions")
                     }
                     .padding(6)
                     .background(Capsule().fill(Color.appBackground))
                     .overlay(Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1))
 
-                    HStack(spacing: 8) {
-                        menuPill("Reply", action: onReply)
-                        menuPill("Copy", action: onCopy)
-                        if let onShowOnDisplay, !isUser {
-                            menuPill("Show on display", action: onShowOnDisplay)
+                    if showsMore {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 6), spacing: 2) {
+                            ForEach(ReactionStore.more, id: \.self) { emoji in
+                                Button { onReact(emoji) } label: {
+                                    Text(emoji)
+                                        .font(.system(size: 26))
+                                        .frame(width: 44, height: 44)
+                                        .background(Circle().fill(current == emoji ? Color.appReceivedBubble : Color.clear))
+                                }
+                                .buttonStyle(.appScale(0.85))
+                                .accessibilityLabel("React \(emoji)")
+                            }
                         }
+                        .padding(10)
+                        .frame(width: 300)
+                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appBackground))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
+                        .transition(.scale(scale: 0.9, anchor: isUser ? .topTrailing : .topLeading).combined(with: .opacity))
+                    }
+
+                    if !showsMore {
+                        HStack(spacing: 8) {
+                            menuPill("Reply", action: onReply)
+                            menuPill("Copy", action: onCopy)
+                            if let onShowOnDisplay, !isUser {
+                                menuPill("Show on display", action: onShowOnDisplay)
+                            }
+                        }
+                        .transition(.opacity)
                     }
                 }
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                .offset(y: top)
+                .offset(y: showsMore ? max(56, min(top, proxy.size.height - 420)) : top)
+                .animation(.appSpring, value: showsMore)
                 .scaleEffect(shown || reduceMotion ? 1 : 0.7, anchor: isUser ? .bottomTrailing : .bottomLeading)
                 .opacity(shown || reduceMotion ? 1 : 0)
             }

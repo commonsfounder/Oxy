@@ -21,3 +21,4 @@ test('only the exact quiet marker counts as no reply', () => {
   assert.equal(isQuietReply('[quiet] but also this'), false);
   assert.equal(isQuietReply(''), false);
 });
+
