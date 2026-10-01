@@ -216,7 +216,10 @@ struct ChatView: View {
             let key = "adam_private_explained"
             if isIncognito, !UserDefaults.standard.bool(forKey: key) {
                 UserDefaults.standard.set(true, forKey: key)
-                showsPrivateExplainer = true
+                Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    showsPrivateExplainer = true
+                }
             }
         } else {
             onMenuChoice?(choice)
@@ -370,7 +373,7 @@ struct ChatView: View {
                             ThreadHeader(
                                 isIncognito: isIncognito,
                                 isWorking: !boardModel.working.isEmpty,
-                                speakerOnline: boardModel.speakerOnline,
+                                deviceOnline: boardModel.deviceOnline,
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
                             )
@@ -479,10 +482,10 @@ struct ChatView: View {
                     isInputFocused = true
                 }
             }
-            .alert("Private mode", isPresented: $showsPrivateExplainer) {
-                Button("Got it", role: .cancel) {}
-            } message: {
-                Text("This chat isn't saved to your history, and Adam doesn't learn from it. Adam still searches the web and uses your connected apps to answer, and anything it does for you, like sending a message, is still recorded in Activity.")
+            .sheet(isPresented: $showsPrivateExplainer) {
+                PrivateModeSheet()
+                    .presentationDetents([.height(400)])
+                    .presentationDragIndicator(.visible)
             }
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .onChange(of: assistantReplySettled) { _, settled in
@@ -1449,5 +1452,44 @@ private struct ThreadLayers<Reaction: View, Wheel: View>: ViewModifier {
             )) {
                 DisplayRenderSheet(content: displayText ?? "")
             }
+    }
+}
+
+
+/// What Private mode does and doesn't do, at full contrast and without claiming more than Adam controls.
+private struct PrivateModeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Private mode")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+            point("Adam doesn't save this chat or learn from it.")
+            point("To answer, Adam may still use the web, your connected apps and its AI provider. They handle your data under their own rules.")
+            point("Anything Adam does for you, like sending a message, still shows in Activity.")
+            Spacer(minLength: 0)
+            Button {
+                HapticManager.shared.impact(.light)
+                dismiss()
+            } label: {
+                Text("Got it")
+                    .font(.appBody(16, weight: .semibold))
+                    .foregroundStyle(Color.appOnAction)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Capsule().fill(Color.appAction))
+            }
+            .buttonStyle(.appScale(0.98))
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appBackground.ignoresSafeArea())
+    }
+
+    private func point(_ text: String) -> some View {
+        Text(text)
+            .font(.appBody(16))
+            .foregroundStyle(Color.appInk)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

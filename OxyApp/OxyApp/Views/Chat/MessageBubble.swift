@@ -43,6 +43,12 @@ struct MessageBubble: View {
         }
     }
 
+    /// Research-length answers read as content on the page, not as a chat bubble. Short replies stay bubbles.
+    private var isLongForm: Bool {
+        let text = message.content
+        return text.count > 520 || text.filter { $0 == "\n" }.count >= 6
+    }
+
     private var richActions: [ActionResult] { completedActions.filter(Self.isRichAction) }
     private static let memoryActionNames: Set<String> = [
         "remember_person",
@@ -164,13 +170,14 @@ struct MessageBubble: View {
                                 }
                             }
                         }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(bubbleShape.fill(Color.appReceivedBubble))
+                            .padding(.horizontal, isLongForm ? 2 : 12)
+                            .padding(.vertical, isLongForm ? 4 : 9)
+                            .background(bubbleShape.fill(isLongForm ? Color.clear : Color.appReceivedBubble))
                             .overlay(alignment: .topTrailing) {
                                 if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
                             }
-                        Spacer(minLength: 64)
+                            .animation(.appStandard, value: isLongForm)
+                        Spacer(minLength: isLongForm ? 8 : 64)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 

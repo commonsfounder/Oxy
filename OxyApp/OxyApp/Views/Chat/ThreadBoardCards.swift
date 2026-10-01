@@ -15,8 +15,8 @@ final class ThreadBoardModel {
     private(set) var finished: [BoardItem] = []
     private var seenFinishedIDs = Set<String>()
     var errorMessage: String?
-    /// True when a paired speaker has checked in within the last few minutes.
-    private(set) var speakerOnline = false
+    /// True when a paired Adam device has checked in within the last few minutes.
+    private(set) var deviceOnline = false
 
     private static let seenKey = "adam_thread_seen_finished"
 
@@ -41,7 +41,7 @@ final class ThreadBoardModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
             board = Self.sampleBoard
-            speakerOnline = true
+            deviceOnline = true
             absorbFinished()
             return
         }
@@ -51,7 +51,7 @@ final class ThreadBoardModel {
             absorbFinished()
         }
         if let displays = try? await PairedDisplaysService.fetchDisplays() {
-            speakerOnline = displays.contains { display in
+            deviceOnline = displays.contains { display in
                 guard let raw = display.lastSeenAt, let seen = DisplayTimestampParser.date(from: raw) else { return false }
                 return Date().timeIntervalSince(seen) < 180
             }

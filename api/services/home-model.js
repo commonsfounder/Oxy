@@ -29,8 +29,8 @@ function normalizeDevice(display, now) {
     : [];
   return {
     id: String(display?.id || ''),
-    name: clean(display?.name, 60) || 'Adam speaker',
-    kind: clean(display?.type, 30) || 'speaker',
+    name: clean(display?.name, 60) || 'Adam',
+    kind: clean(display?.type, 30) || 'device',
     room: clean(display?.room, 40) || null,
     online,
     lastSeenAt: seen ? seen.toISOString() : null,

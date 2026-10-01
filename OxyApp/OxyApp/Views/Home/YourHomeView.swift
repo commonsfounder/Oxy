@@ -77,7 +77,7 @@ struct YourHomeView: View {
     @State private var settings = OxySettings()
     @State private var loaded = false
     @State private var failed = false
-    @State private var showsSpeakerSetup = false
+    @State private var showsDeviceSetup = false
     @State private var showsSettings = false
 
     private var hasDevices: Bool { !home.devices.isEmpty }
@@ -117,7 +117,7 @@ struct YourHomeView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .task { await load() }
-        .sheet(isPresented: $showsSpeakerSetup) {
+        .sheet(isPresented: $showsDeviceSetup) {
             PendantStatusView().presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showsSettings) {
@@ -134,16 +134,16 @@ struct YourHomeView: View {
                 Text("Your home isn't connected yet")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Color.appInk)
-                Text("Add an Adam speaker to give Adam awareness of what's happening around your home.")
+                Text("Connect Adam to give it awareness of what's happening around your home.")
                     .font(.appBody(15))
                     .foregroundStyle(Color.appMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button {
                 HapticManager.shared.impact(.medium)
-                showsSpeakerSetup = true
+                showsDeviceSetup = true
             } label: {
-                Text("Set up speaker")
+                Text("Set up Adam")
                     .font(.appBody(16, weight: .semibold))
                     .foregroundStyle(Color.appOnAction)
                     .padding(.horizontal, 24)
@@ -199,8 +199,8 @@ struct YourHomeView: View {
     }
 
     private var subline: String {
-        if onlineCount == 0 { return home.devices.count == 1 ? "Your speaker is offline" : "Your speakers are offline" }
-        return onlineCount == 1 ? "1 speaker listening" : "\(onlineCount) speakers listening"
+        if onlineCount == 0 { return home.devices.count == 1 ? "Adam is offline" : "Your Adam devices are offline" }
+        return onlineCount == 1 ? "Adam is listening" : "\(onlineCount) Adam devices listening"
     }
 
     @ViewBuilder
@@ -218,7 +218,7 @@ struct YourHomeView: View {
     @ViewBuilder
     private var unassignedSection: some View {
         if !home.unassignedDevices.isEmpty {
-            section(home.rooms.isEmpty ? "Speakers" : "Not in a room yet") {
+            section(home.rooms.isEmpty ? "Adam" : "Not in a room yet") {
                 ForEach(Array(home.unassignedDevices.enumerated()), id: \.element.id) { index, device in
                     if index > 0 { divider }
                     deviceRow(device)
@@ -269,7 +269,7 @@ struct YourHomeView: View {
     private var addressSection: some View {
         if loaded && needsAddress {
             section("Set up") {
-                row(title: "Add your home address", detail: "So Adam knows when you're home or out", dot: nil, chevron: true) {
+                row(title: "Set your home location", detail: "For arrival and leaving reminders", dot: nil, chevron: true) {
                     showsSettings = true
                 }
             }
@@ -386,8 +386,8 @@ struct YourHomeView: View {
     #if DEBUG
     private static let sampleConnected: HomeModel = {
         let seen = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30))
-        let living = HomeModel.Device(id: "d1", name: "Living room speaker", kind: "speaker", room: "Living room", online: true, lastSeenAt: seen)
-        let kitchen = HomeModel.Device(id: "d2", name: "Kitchen speaker", kind: "speaker", room: "Kitchen", online: false,
+        let living = HomeModel.Device(id: "d1", name: "Living room Adam", kind: "device", room: "Living room", online: true, lastSeenAt: seen)
+        let kitchen = HomeModel.Device(id: "d2", name: "Kitchen Adam", kind: "device", room: "Kitchen", online: false,
                                        lastSeenAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)))
         return HomeModel(
             presence: .init(state: "home", homeConfigured: true),

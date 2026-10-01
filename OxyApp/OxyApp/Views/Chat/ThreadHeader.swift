@@ -5,7 +5,7 @@ import SwiftUI
 struct ThreadHeader: View {
     var isIncognito: Bool
     var isWorking: Bool
-    var speakerOnline: Bool
+    var deviceOnline: Bool
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
 
@@ -47,14 +47,14 @@ struct ThreadHeader: View {
             .allowsHitTesting(false)
         }
         .animation(.appStandard, value: isWorking)
-        .animation(.appStandard, value: speakerOnline)
+        .animation(.appStandard, value: deviceOnline)
     }
 
     @ViewBuilder
     private var statusDot: some View {
         if isWorking {
             PulsingDot(color: .appWorking)
-        } else if speakerOnline {
+        } else if deviceOnline {
             Circle().fill(Color.appDone)
                 .frame(width: 9, height: 9)
                 .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
@@ -63,7 +63,7 @@ struct ThreadHeader: View {
 
     private var statusDescription: String {
         if isWorking { return "Adam is working" }
-        if speakerOnline { return "Speaker online" }
+        if deviceOnline { return "Adam is online" }
         return ""
     }
 }
