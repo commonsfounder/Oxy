@@ -11,7 +11,7 @@ enum ThreadMenuChoice: String, CaseIterable, Identifiable {
         case .activity: return "Activity"
         case .home: return "Your home"
         case .settings: return "Settings"
-        case .privateChat: return "Private"
+        case .privateChat: return "Private mode"
         }
     }
 }
@@ -33,37 +33,29 @@ private struct WheelGlyph: View {
     }
 }
 
-/// The closed button: four tiny glyphs sharing one circle. It turns into a cross as the wheel opens.
+/// The closed button: the Adam mark in a circle. It turns into a cross as the wheel opens.
 struct WheelHub: View {
     var progress: CGFloat
     var incognito: Bool
 
-    private static let slots: [(ThreadMenuChoice, CGSize)] = [
-        (.activity, CGSize(width: -1, height: -1)), (.home, CGSize(width: 1, height: -1)),
-        (.settings, CGSize(width: -1, height: 1)), (.privateChat, CGSize(width: 1, height: 1))
-    ]
-
-    static func slotOffset(_ choice: ThreadMenuChoice) -> CGSize {
-        let unit = slots.first { $0.0 == choice }?.1 ?? .zero
-        return CGSize(width: unit.width * 6.5, height: unit.height * 6.5)
-    }
+    /// Every item grows out of the centre of the hub.
+    static func slotOffset(_ choice: ThreadMenuChoice) -> CGSize { .zero }
 
     var body: some View {
         let open = min(max(progress, 0), 1)
         ZStack {
             Circle().fill(Color.appReceivedBubble)
-            ForEach(Self.slots, id: \.0) { choice, _ in
-                WheelGlyph(choice: choice, size: 10, active: incognito)
-                    .foregroundColor(Color.appInk.opacity(0.85))
-                    .offset(Self.slotOffset(choice))
-                    .opacity(1 - open)
-            }
+            AdamMark()
+                .frame(width: 22, height: 16)
+                .scaleEffect(1 - 0.4 * open)
+                .opacity(1 - open)
             ZStack {
                 Capsule().frame(width: 16, height: 2)
                 Capsule().frame(width: 2, height: 16)
             }
             .foregroundColor(Color.appInk)
             .rotationEffect(.degrees(Double(open) * 90 - 45))
+            .scaleEffect(0.6 + 0.4 * open)
             .opacity(open)
         }
         .frame(width: 44, height: 44)
@@ -86,7 +78,8 @@ struct ThreadWheelMenu: View {
     @State private var mounted = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    static let step: Double = 26
+    /// Four items share one quarter circle: 5°, 33°, 61°, 89° from straight down.
+    static let step: Double = 28
 
     var body: some View {
         ZStack {
@@ -103,12 +96,13 @@ struct ThreadWheelMenu: View {
                 lastDetent = 0
                 mounted = true
                 if reduceMotion { progress = 1 } else {
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.74)) { progress = 1 }
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.8)) { progress = 1 }
                 }
             } else {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.92)) { progress = 0 }
+                HapticManager.shared.impact(.light)
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.95)) { progress = 0 }
                 Task {
-                    try? await Task.sleep(for: .milliseconds(380))
+                    try? await Task.sleep(for: .milliseconds(300))
                     if !isOpen { mounted = false }
                 }
             }
@@ -169,9 +163,9 @@ private struct WheelLayout: View, Animatable {
         set { progress = newValue.first; spin = newValue.second }
     }
 
-    private let radius: CGFloat = 150
-    private let firstAngle: Double = 6
-    private let swing: Double = 80
+    private let radius: CGFloat = 180
+    private let firstAngle: Double = 5
+    private let swing: Double = 70
 
     private var step: Double { ThreadWheelMenu.step }
     private var cycle: Double { step * Double(ThreadMenuChoice.allCases.count) }
@@ -211,43 +205,46 @@ private struct WheelLayout: View, Animatable {
     }
 
     private func item(_ choice: ThreadMenuChoice, index: Int) -> some View {
-        let raw = (progress - CGFloat(index) * 0.07) / 0.79
+        let raw = (progress - CGFloat(index) * 0.07) / (1 - 0.07 * CGFloat(ThreadMenuChoice.allCases.count - 1))
         let q = max(raw, 0)
         let open = Double(min(q, 1))
         let slot = slotAngle(index)
         let angle = (slot + swing * (1 - open)) * .pi / 180
         let offset = WheelHub.slotOffset(choice)
-        let x = hub.x + offset.width * CGFloat(1 - open) - CGFloat(sin(angle)) * radius * q
-        let y = hub.y + offset.height * CGFloat(1 - open) + CGFloat(cos(angle)) * radius * q
+        // Every item ends exactly `radius` from the hub; only the stagger is per item.
+        let x = hub.x + offset.width * CGFloat(1 - open) - CGFloat(sin(angle)) * radius * CGFloat(open)
+        let y = hub.y + offset.height * CGFloat(1 - open) + CGFloat(cos(angle)) * radius * CGFloat(open)
         let nearness = max(0, 1 - abs(slot - focus) / step)
         let edge = min(1, max(0, min(slot - windowStart, windowStart + cycle - slot) / 10))
         let active = choice == .privateChat && incognito
         let highlight: Double = active ? 1 : min(max((nearness - 0.4) / 0.6, 0), 1)
+        let selected = nearness > 0.5
         return ZStack {
             ZStack {
                 Circle().fill(Color.appReceivedBubble)
                 Circle().fill(Color.appAction).opacity(highlight)
-                WheelGlyph(choice: choice, size: 22, active: active)
+                WheelGlyph(choice: choice, size: 20, active: active)
                     .foregroundColor(highlight > 0.5 ? Color.appOnAction : Color.appInk)
             }
-            .frame(width: 58, height: 58)
-            .overlay(alignment: .leading) {
-                Text(active ? "Private on" : choice.title)
-                    .font(.appBody(15, weight: nearness > 0.6 || active ? .semibold : .medium))
-                    .foregroundStyle(Color.appInk)
+            .frame(width: 52, height: 52)
+            .overlay(alignment: .bottom) {
+                Text(active ? "Private · On" : choice.title)
+                    .font(.appBody(selected || active ? 13 : 12, weight: selected || active ? .semibold : .medium))
+                    .foregroundStyle(Color.appInk.opacity(0.62 + 0.38 * max(nearness, active ? 1 : 0)))
                     .lineLimit(1)
                     .fixedSize()
-                    .alignmentGuide(.leading) { d in d[.trailing] + 12 }
+                    .alignmentGuide(.bottom) { d in d[.top] - 8 }
                     .opacity(Double(min(max((q - 0.5) * 2, 0), 1)))
             }
-            .scaleEffect((0.3 + 0.7 * min(q, 1.08)) * (1 + 0.16 * CGFloat(nearness)))
+            .scaleEffect((0.4 + 0.6 * min(q, 1)) * (1 + 0.2 * CGFloat(nearness)))
             .opacity(Double(min(q * 1.8, 1)) * edge)
         }
-        .contentShape(Circle().inset(by: -6))
+        .contentShape(Circle().inset(by: -8))
         .onTapGesture { onChoose(choice) }
         .position(x: x, y: y)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(choice.title)
+        .accessibilityValue(choice == .privateChat ? (incognito ? "On" : "Off") : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onChoose(choice) }
     }
