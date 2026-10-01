@@ -6,7 +6,11 @@
 // below only turn away the obvious attempts early. Scenes can look and compute but never act:
 // anything that spends, messages or unlocks still goes through the approval step.
 
+const kit = require('./display-scene-kit');
+
 const MAX_SCENE_HTML = 48000;
+const MAX_SLIDES = 12;
+const MAX_SLIDE_WORDS = 55;
 
 const SECRET_PATTERN = /(?:\bauthorization\s*:\s*bearer\b|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}|\b(?:password|passwd|passphrase|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|cookie|set-cookie|session[_-]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 
@@ -33,6 +37,41 @@ function sceneError(message) {
   return error;
 }
 
+function plainWords(fragment) {
+  return fragment
+    .replace(/<(script|style|svg)\b[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+// A deck is one idea per slide, short enough to read from across a room. A slide that is too long is
+// turned away with the reason, so it gets rewritten shorter instead of shrinking to fit.
+function validateDeck(text) {
+  if (!/class\s*=\s*["'][^"']*\bdeck\b/i.test(text)) return;
+  const slides = text.split(/<section\b[^>]*class\s*=\s*["'][^"']*\bslide\b/i).slice(1);
+  if (!slides.length) throw sceneError('A deck needs at least one <section class="slide">.');
+  if (slides.length > MAX_SLIDES) throw sceneError(`A deck can have up to ${MAX_SLIDES} slides.`);
+  slides.forEach((slide, index) => {
+    const body = slide.split(/<\/section>/i)[0];
+    const count = plainWords(body.replace(/^[^>]*>/, ''));
+    const spoken = /data-say\s*=\s*["']([^"']*)["']/i.exec(slide.split('>')[0]);
+    const spokenCount = spoken ? spoken[1].trim().split(/\s+/).filter(Boolean).length : 0;
+    if (count > MAX_SLIDE_WORDS || spokenCount > MAX_SLIDE_WORDS) {
+      throw sceneError(`Slide ${index + 1} has too many words (keep each under ${MAX_SLIDE_WORDS}); one idea per slide.`);
+    }
+  });
+}
+
+function validatePieces(text) {
+  const names = new Set(kit.PIECE_NAMES);
+  for (const match of text.matchAll(/<use\b[^>]*\bhref\s*=\s*["']#p-([^"']+)["']/gi)) {
+    if (!names.has(match[1])) {
+      throw sceneError(`There is no piece called ${match[1]}. Pieces: ${kit.PIECE_NAMES.filter(n => !['play', 'pause', 'replay'].includes(n)).join(', ')}.`);
+    }
+  }
+}
+
 function validateSceneHtml(html) {
   if (typeof html !== 'string') throw sceneError('A scene must be HTML text.');
   const text = html.trim();
@@ -42,6 +81,8 @@ function validateSceneHtml(html) {
   if (BLOCKED.some(pattern => pattern.test(text))) {
     throw sceneError('A scene cannot load outside content or reach the page around it.');
   }
+  validatePieces(text);
+  validateDeck(text);
   return text;
 }
 
@@ -71,7 +112,8 @@ body{background:var(--bg);color:var(--ink);font:400 clamp(18px,3.1vmin,34px)/1.4
 .lede{color:var(--muted);margin:0;max-width:34em}
 .muted{color:var(--muted)}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(24vmin,1fr));gap:2.4vmin}
-.card{background:var(--card);border:1px solid var(--line);border-radius:3vmin;padding:2.6vmin 3vmin}
+.card{background:var(--card);border:1px solid var(--line);border-radius:3vmin;padding:2.6vmin 3vmin;display:flex;flex-direction:column;align-items:flex-start;gap:1.4vmin}
+.card>*{margin:0}.card .bar{width:100%;flex:none}.card .btn{margin-top:.6vmin}
 .card h3{margin:0 0 .3em;font-size:1em;font-weight:600}
 .big{font-size:3.2em;font-weight:600;line-height:1;letter-spacing:-.02em}
 .unit{font-size:.5em;color:var(--muted);margin-left:.3em;font-weight:400}
@@ -91,14 +133,14 @@ svg{max-width:100%;height:auto}
 
 // The only way a scene reaches Adam: a tap asks a question or makes a request, exactly as if it
 // were typed. It carries no authority; approvals still happen where the person can see them.
-const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim().slice(0,200);if(!t)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}window.adam={ask:send};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
+const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim().slice(0,200);if(!t)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}function say(t){t=String(t||'').trim().slice(0,400);if(t&&!(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.adam))window.parent.postMessage({adamSay:t},'*')}window.adam={ask:send,say:say};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
 
 // The frame the display page shows. The CSP comes first so nothing the scene contains can
 // loosen it (extra policies only tighten).
 function buildSceneDocument(html, { title = '' } = {}) {
   const safe = validateSceneHtml(html);
   const label = String(title || 'Adam').replace(/[<>&"]/g, '').slice(0, 120);
-  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}</title><style>${KIT_CSS}</style></head><body>${safe}<script>${BRIDGE_JS}</script></body></html>`;
+  return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}</title><style>${KIT_CSS}${kit.DECK_CSS}</style></head><body>${kit.SPRITE}${safe}<script>${BRIDGE_JS}</script><script>${kit.DECK_JS}</script></body></html>`;
 }
 
 module.exports = {

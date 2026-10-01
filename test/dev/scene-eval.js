@@ -34,7 +34,6 @@ async function main() {
     'You are Adam. When someone wants something to look at or tap through, you write one small web page.',
     `Tool: show_scene. ${contract.guidance}`,
     `scene_html: ${contract.paramHints.scene_html}`,
-    'The screen can be a phone or a TV across a room. Make it feel like a short, well-made explainer, not a document: show the thing (draw it with inline SVG), move it (CSS or script animation), one idea at a time, with a way to step or replay.',
     'Reply with ONLY the HTML fragment for scene_html. No markdown fences, no commentary.'
   ].join('\n\n');
   console.log(`# scene eval · ${route.provider}/${route.model}`);

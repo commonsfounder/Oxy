@@ -14,6 +14,8 @@ const CONVERSATIONAL_MESSAGE_GUIDANCE = 'Keep the message brief, natural, and te
 // Adam's-own-identity email contracts.
 const EMAIL_TONE_GUIDANCE = 'Draft the body as 1-3 short paragraphs. Default tone is warm, clear, and human — most email is professional or corporate, so use polished business language when the thread calls for it, but avoid empty cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the thread or user specifically warrants that formality. If the user specifies a tone (casual, friendly, firm, apologetic, confident, less desperate, short, professional), make the draft visibly follow it. If the user gives no real content (e.g. only "say hello" or "introduce myself"), ask for the actual substance before sending — never send a placeholder or generic template body; it must contain specific content from the user, the conversation, memory, or tool results.';
 
+const SCENE_HTML_HINT = 'A page for a screen, as an HTML fragment (no html/head tags). For an explainer or step-by-step guide write a deck: <div class="deck"><section class="slide" data-say="the sentence spoken aloud and shown as the caption">...</section>...</div>. Up to 12 slides, under 55 words each, one idea per slide; it plays by itself with Back/Pause/Next. Draw only with the kit pieces: <svg class="pic xl"><use href="#p-NAME"/></svg>, sizes xs sm (default) xl; NAME is one of radiator valve key turn drop bubbles cloth clock pot oven person house train check alert bulb arrow-right arrow-down calendar heat bell. Do not draw your own shapes. Layout: .cols > svg + .col, .h headline, .t text, .sub quiet text, .num step number. Motion: add class in, pop (appear), rise, drip, pulse (loop), turn (quarter turn). For a comparison or something to tap through, use .scene with .cards > .card, .big + .unit, .chip, .bar, <button class="btn" data-ask="what the person would say">. No external links, images or network. Use only facts the person gave or that you know; never add labels or details you were not told.';
+
 const ACTION_CONTRACTS = {
   send_message: {
     adapter: { kind: 'inline' },
@@ -527,11 +529,11 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['title', 'scene_html'],
     optional: ['body'],
-    inputExample: { title: 'Bleed a radiator', scene_html: '<div class="scene"><h1 class="title">Bleed a radiator</h1><ol class="steps"><li class="on">Turn the heating off</li></ol></div>' },
+    inputExample: { title: 'Bleed a radiator', scene_html: '<div class="deck"><section class="slide" data-say="Turn the heating off first."><svg class="pic xl pop"><use href="#p-heat"/></svg><p class="h in">Heating off</p></section></div>' },
     paramHints: {
       title: 'a short name for the page',
       body: 'one plain sentence saying what the page shows',
-      scene_html: 'a small page to look at or tap through on the phone, as an HTML fragment (no html/head tags). Use the screen kit: .scene wrapper, .eyebrow, .title, .lede, .cards > .card, .big + .unit, ol.steps > li (li.on = current), .chip, .dot.working|needs|done, .bar > i[style=width:60%], .row, .btn, <button class="btn" data-ask="what the person would say">. Inline SVG for charts, inline <script> for interaction. No external links, images or network.'
+      scene_html: SCENE_HTML_HINT
     },
     guidance: 'Use when the person wants something to look at or tap through (a how-to, plan, comparison, checklist, chart), not when one sentence answers it. One idea per page, large short text. It can look and compute but cannot act, and a button only asks Adam for something, like typing it. If they ask to put it on a screen in the home, use render_to_display with the same page.',
     successSummary: 'Made a page',
@@ -563,7 +565,7 @@ const ACTION_CONTRACTS = {
       title: 'a short heading for the physical display',
       body: 'the useful content to show, bounded to a short readable update',
       kind: 'agent_update | reminder | approval | status',
-      scene_html: 'optional: a small page for a screen across the room, as an HTML fragment (no html/head tags). Use the screen kit: .scene wrapper, .eyebrow, .title, .lede, .cards > .card, .big + .unit, ol.steps > li (li.on = current), .chip, .dot.working|needs|done, .bar > i[style=width:60%], .row, .btn. Inline SVG for charts, inline <script> for interaction. No external links, images or network. title/body stay plain text: body is read aloud and shown on text-only screens.'
+      scene_html: SCENE_HTML_HINT + ' Optional. title/body stay plain text: body is read aloud and shown on text-only screens.'
     },
     guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body. For a how-to, plan, comparison, chart or something to tap through, send scene_html written for reading from across a room: one idea per screen, large short text, no clutter. A scene can look and compute but cannot act, so anything that spends, messages or unlocks still needs the normal yes. A button that asks Adam for something is <button class="btn" data-ask="what the person would say">; a tap is the same as typing that, and a screen can never approve anything.',
     successSummary: 'Queued for display',

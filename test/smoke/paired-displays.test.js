@@ -416,7 +416,7 @@ test('a tap on a screen can ask for things but can never approve or cancel', () 
 test('the scene wrapper gives pages one way to ask Adam, and nothing else', () => {
   const displayScene = require('../../api/services/display-scene');
   const doc = displayScene.buildSceneDocument('<button class="btn" data-ask="Next step">Next</button>');
-  assert.match(doc, /window\.adam=\{ask:send\}/);
+  assert.match(doc, /window\.adam=\{ask:send,say:say\}/);
   assert.match(doc, /data-ask/);
   assert.ok(doc.indexOf('Content-Security-Policy') < doc.indexOf('<script>'));
   assert.throws(() => displayScene.validateSceneHtml('<script>window.parent.postMessage({adamAsk:"yes"},"*")</script>'));
@@ -436,4 +436,30 @@ test('show_scene returns a locked-down page for the phone and refuses unsafe one
   assert.equal(Object.hasOwn(bad, 'scene'), false);
   const missing = await handlers.show_scene({ params: { title: 'x' } });
   assert.equal(missing.success, false);
+});
+
+test('a deck is held to one idea per slide, real pieces, and a sensible length', () => {
+  const displayScene = require('../../api/services/display-scene');
+  const kit = require('../../api/services/display-scene-kit');
+  const slide = (words, extra = '') => `<section class="slide" data-say="Say this."><p class="t">${'word '.repeat(words)}</p>${extra}</section>`;
+  const deck = inner => `<div class="deck">${inner}</div>`;
+
+  assert.ok(displayScene.validateSceneHtml(deck(slide(20, '<svg class="pic"><use href="#p-radiator"/></svg>'))));
+  assert.throws(() => displayScene.validateSceneHtml(deck(slide(20) + slide(80))), /Slide 2 has too many words/);
+  assert.throws(() => displayScene.validateSceneHtml(deck(slide(10).repeat(13))), /up to 12 slides/);
+  assert.throws(() => displayScene.validateSceneHtml('<div class="deck"><p>no slides</p></div>'), /at least one/);
+  assert.throws(
+    () => displayScene.validateSceneHtml(deck(slide(10, '<svg class="pic"><use href="#p-radiator-valve"/></svg>'))),
+    /no piece called radiator-valve/
+  );
+  assert.throws(() => displayScene.validateSceneHtml(deck(`<section class="slide" data-say="${'word '.repeat(70)}"><p>Short</p></section>`)), /too many words/);
+  for (const name of kit.PIECE_NAMES) assert.ok(kit.SPRITE.includes(`id="p-${name}"`), name);
+
+  const contract = require('../../api/action-contracts').getActionContract('show_scene');
+  for (const name of kit.PIECE_NAMES.filter(n => !['play', 'pause', 'replay'].includes(n))) {
+    assert.ok(contract.paramHints.scene_html.includes(name), `the model is not told about ${name}`);
+  }
+  const doc = displayScene.buildSceneDocument(deck(slide(10)));
+  assert.match(doc, /id="p-radiator"/);
+  assert.match(doc, /class="deck"/);
 });
