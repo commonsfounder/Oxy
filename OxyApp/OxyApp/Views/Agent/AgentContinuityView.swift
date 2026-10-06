@@ -15,7 +15,7 @@ struct AgentContinuityView: View {
 
     var body: some View {
         ZStack {
-            GlebChrome.pastelBlob.ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
             VStack(spacing: 0) {
                 ScreenHeaderView(title: "Import your chats", onBack: { dismiss() })
                 ScrollView {
@@ -26,14 +26,11 @@ struct AgentContinuityView: View {
                             importCard
                         }
                         if let successMessage {
-                            Text(successMessage)
-                                .font(.appBody(13, weight: .medium))
-                                .foregroundStyle(Color.appAccent)
+                            SettingsStatement(text: successMessage, solid: true)
+                                .padding(.horizontal, 4)
                         }
                         if let errorMessage {
-                            Text(errorMessage)
-                                .font(.appBody(13))
-                                .foregroundStyle(Color.appDestructive)
+                            ErrorBanner(message: errorMessage, onRetry: snapshot == nil ? { Task { await load() } } : nil)
                         }
                         if let snapshot {
                             history(snapshot.imports)
@@ -63,10 +60,9 @@ struct AgentContinuityView: View {
 
     private var importCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                AppIcon("dotted", size: 15).foregroundStyle(Color.appAccent)
-                AppSectionTitle("Bring your history", size: 20)
-            }
+            Text("Bring your history")
+                .font(.rowTitle)
+                .foregroundStyle(Color.appInk)
             Text("Import a .zip export. A .json includes conversations only.")
                 .font(.appBody(13))
                 .foregroundStyle(Color.appMuted)
@@ -78,26 +74,27 @@ struct AgentContinuityView: View {
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
-                .font(.appBody(14, weight: .semibold))
-                .foregroundStyle(Color.appInk)
-                .padding(.vertical, 15)
-                .padding(.horizontal, 16)
-                .background(Color.appAccent, in: Capsule())
+                .font(.appBody(15, weight: .medium))
+                .foregroundStyle(Color.appOnAction)
+                .padding(.horizontal, 20)
+                .frame(minHeight: 44)
+                .background(Capsule().fill(Color.appAction))
             }
+            .buttonStyle(.appScale(0.97))
             .disabled(isWorking)
         }
         .padding(18)
-        .background(MissionGlassPlate())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .settingsSurface(radius: 20)
     }
 
     // MARK: - Confirm
 
     private func previewCard(_ preview: AgentContinuityPreview) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                AppIcon("doc", size: 15).foregroundStyle(Color.appAccent)
-                AppSectionTitle("\(preview.source.capitalized) export", size: 20)
-            }
+            Text("\(preview.source.capitalized) export")
+                .font(.rowTitle)
+                .foregroundStyle(Color.appInk)
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(coverageRows(preview), id: \.label) { row in
@@ -105,7 +102,7 @@ struct AgentContinuityView: View {
                         AppIcon(row.found ? "bolt" : "dotted", size: 12)
                             .foregroundStyle(row.found ? Color.appAccent : Color.appMuted)
                         Text(row.label)
-                            .font(.system(size: 13, weight: row.found ? .medium : .regular))
+                            .font(.appBody(13, weight: row.found ? .medium : .regular))
                             .foregroundStyle(row.found ? Color.appInk : Color.appMuted)
                         Spacer()
                         Text(row.detail)
@@ -119,7 +116,7 @@ struct AgentContinuityView: View {
                 SettingsDivider()
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Automations")
-                        .font(.appBody(13, weight: .semibold))
+                        .font(.rowTitle)
                         .foregroundStyle(Color.appInk)
                     Text("These arrive switched off. Turn each one off in \(preview.source.capitalized) before enabling it here, or it runs twice.")
                         .font(.appBody(12))
@@ -151,11 +148,10 @@ struct AgentContinuityView: View {
                     Task { await confirmImport() }
                 } label: {
                     Text(isWorking ? "Importing…" : "Import")
-                        .font(.appBody(14, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.appAccent, in: Capsule())
+                        .font(.appBody(15, weight: .medium))
+                        .foregroundStyle(Color.appOnAction)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Capsule().fill(Color.appAction))
                 }
                 .buttonStyle(.appScale(0.98))
                 .disabled(isWorking)
@@ -167,7 +163,8 @@ struct AgentContinuityView: View {
             }
         }
         .padding(18)
-        .background(MissionGlassPlate())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .settingsSurface(radius: 20)
     }
 
     private struct CoverageRow { let label: String; let detail: String; let found: Bool }
@@ -207,7 +204,10 @@ struct AgentContinuityView: View {
 
     private func history(_ imports: [AgentContinuityImport]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            AppSectionTitle("Imported", size: 20)
+            Text("Imported")
+                .font(.sectionLabel)
+                .foregroundStyle(Color.appMuted)
+                .padding(.horizontal, 4)
             if imports.isEmpty {
                 Text("Nothing imported yet.")
                     .font(.appBody(13))
