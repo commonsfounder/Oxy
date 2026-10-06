@@ -87,9 +87,9 @@ struct AdamActivityView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Activity")
-                            .font(.title.weight(.semibold))
-                            .appHeroTracking(28)
+                            .font(.appEditorial(34, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
                             .foregroundStyle(Color.appInk)
+                            .accessibilityAddTraits(.isHeader)
                         filterBar
                     }
 
@@ -178,7 +178,9 @@ struct AdamActivityView: View {
                     Text(timeLabel(for: item))
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(Color.appMuted)
-                        .frame(width: 44, alignment: .leading)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(width: 66, alignment: .leading)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.isFailure ? "Couldn't finish" : item.type.label)
                             .font(.appBody(11, weight: .semibold))
