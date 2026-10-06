@@ -87,9 +87,9 @@ struct AdamActivityView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Activity")
-                            .font(.title.weight(.semibold))
-                            .appHeroTracking(28)
+                            .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
                             .foregroundStyle(Color.appInk)
+                            .accessibilityAddTraits(.isHeader)
                         filterBar
                     }
 

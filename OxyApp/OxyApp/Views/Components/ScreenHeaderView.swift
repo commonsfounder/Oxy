@@ -27,8 +27,10 @@ struct ScreenHeaderView: View {
             }
 
             Text(title)
-                .font(.screenTitle)
+                .font(.appEditorial(24, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
                 .foregroundStyle(Color.appInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .accessibilityAddTraits(.isHeader)
 
             Spacer()
