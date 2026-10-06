@@ -914,6 +914,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     optional: ['num_results'],
     inputExample: { query: 'best pizza near me', num_results: 5 },
+    guidance: 'For one specific thing — a tweet, TikTok, video, post, song or page — search with descriptive words plus the site name (for example the topic, "tweet", and x.com) and give the real link taken from the results. Never write a search-page or browse-page URL yourself and hand it over as the answer. If the results contain no link to the actual post, say so plainly and offer the closest real link you found.',
     successSummary: 'Search results',
     failureSummary: 'Search failed',
     confirmation: 'none'
