@@ -93,9 +93,8 @@ struct YourHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30) {
                     Text("Your home")
-                        .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                        .font(.title.weight(.semibold))
                         .foregroundStyle(Color.appInk)
-                        .accessibilityAddTraits(.isHeader)
 
                     if failed {
                         ErrorBanner(message: "Couldn't load your home.", onRetry: { Task { await load() } })

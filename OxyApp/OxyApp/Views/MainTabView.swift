@@ -142,7 +142,7 @@ private struct AdamYouView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) {
                         Text("Settings")
-                            .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                            .font(.appBody(28, weight: .bold))
                             .foregroundStyle(Color.appInk)
 
                         SettingsList {
