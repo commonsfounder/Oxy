@@ -207,6 +207,7 @@ const { resolveEntityReference, extractReferentialPhrase, hasBareEntityReference
 const { logEntityReference } = require('./services/session-events');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
+const { describeAction } = require('./services/action-summary');
 const {
   ROUTE_KEYS,
   resolveModelRoute,
@@ -9257,6 +9258,7 @@ app.get('/agent/audit', requireSessionAuth, async (req, res) => {
       const action = typeof row.action === 'string' ? safeParseJSON(row.action) : row.action;
       const type = String(action?.type || 'unknown');
       const contract = ACTION_CONTRACTS[type] || {};
+      const described = describeAction(action, contract);
       return {
         type,
         status: row.status || 'unknown',
@@ -9265,7 +9267,8 @@ app.get('/agent/audit', requireSessionAuth, async (req, res) => {
         risk: contract.risk || 'unknown',
         executionMode: contract.executionMode || 'direct',
         reviewRequired: contract.confirmation === 'review_required' || contract.executionMode === 'review',
-        undo: null
+        undo: null,
+        ...described
       };
     });
     res.json({ entries });
