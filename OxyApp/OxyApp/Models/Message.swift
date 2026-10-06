@@ -150,6 +150,31 @@ struct PlaceOption: Codable, Equatable, Hashable, Identifiable {
     }
 }
 
+/// One flight or hotel a search found. Every field is only what the source stated.
+struct TravelOption: Codable, Equatable, Hashable, Identifiable {
+    let airline: String?
+    let name: String?
+    let area: String?
+    let stops: Int?
+    let durationMinutes: Int?
+    let price: Double?
+    let pricePerNight: Double?
+    let totalPrice: Double?
+    let currency: String?
+    let priceBasis: String?
+    let rating: Double?
+    /// "exact", "adjacent" or "unknown": whether the price was quoted for the dates asked.
+    let dateMatch: String?
+    let offByDays: Int?
+    let quotedFor: String?
+    let source: String?
+    let sourceUrl: String?
+    let availabilityStated: Bool?
+
+    var title: String { airline ?? name ?? "Option" }
+    var id: String { [title, source ?? "", String(price ?? pricePerNight ?? totalPrice ?? 0), quotedFor ?? ""].joined(separator: "|") }
+}
+
 struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String
@@ -182,6 +207,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let scene: SceneContent?
     /// Every place a search found, best first. Only on place searches.
     let places: [PlaceOption]?
+    /// Flights or hotels a search found, best first. Only on travel searches.
+    let travelOptions: [TravelOption]?
 
     /// Bounded backend outcomes keep handoffs and review pauses visible without
     /// treating their legacy `success` compatibility flag as a completed effect.
@@ -201,6 +228,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
         case subject, taskId, selection, scene, places
+        case travelOptions = "options"
         // Older servers sent these at the top level; decoded into `subject` below.
         case imageUrls, productName, price, total, colorOptions
     }
@@ -231,7 +259,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         taskId: String? = nil,
         selection: ActionSelection? = nil,
         scene: SceneContent? = nil,
-        places: [PlaceOption]? = nil
+        places: [PlaceOption]? = nil,
+        travelOptions: [TravelOption]? = nil
     ) {
         self.action = action
         self.success = success
@@ -259,6 +288,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.selection = selection
         self.scene = scene
         self.places = places
+        self.travelOptions = travelOptions
     }
 
     init(native result: NativeLocalActionResult) {
@@ -308,6 +338,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             selection = try result.decodeIfPresent(ActionSelection.self, forKey: .selection)
             scene = try result.decodeIfPresent(SceneContent.self, forKey: .scene)
             places = try result.decodeIfPresent([PlaceOption].self, forKey: .places)
+            travelOptions = (try? result.decodeIfPresent([TravelOption].self, forKey: .travelOptions)) ?? nil
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
@@ -334,6 +365,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             selection = try container.decodeIfPresent(ActionSelection.self, forKey: .selection)
             scene = try container.decodeIfPresent(SceneContent.self, forKey: .scene)
             places = try container.decodeIfPresent([PlaceOption].self, forKey: .places)
+            travelOptions = (try? container.decodeIfPresent([TravelOption].self, forKey: .travelOptions)) ?? nil
         }
     }
 
@@ -365,6 +397,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(selection, forKey: .selection)
         try container.encodeIfPresent(scene, forKey: .scene)
         try container.encodeIfPresent(places, forKey: .places)
+        try container.encodeIfPresent(travelOptions, forKey: .travelOptions)
     }
 }
 

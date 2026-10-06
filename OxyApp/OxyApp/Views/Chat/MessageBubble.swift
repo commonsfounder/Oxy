@@ -220,9 +220,17 @@ struct MessageBubble: View {
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
                         } else if action.action == "search_flights" {
-                            TravelResultCard(action: action, kind: .flights)
+                            if (action.travelOptions ?? []).isEmpty {
+                                TravelResultCard(action: action, kind: .flights)
+                            } else {
+                                TravelOptionsCard(action: action, kind: .flights)
+                            }
                         } else if action.action == "search_hotels" {
-                            TravelResultCard(action: action, kind: .hotels)
+                            if (action.travelOptions ?? []).isEmpty {
+                                TravelResultCard(action: action, kind: .hotels)
+                            } else {
+                                TravelOptionsCard(action: action, kind: .hotels)
+                            }
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
                             DirectionsResultCard(action: action)
                         } else if action.action == "find_place" {
