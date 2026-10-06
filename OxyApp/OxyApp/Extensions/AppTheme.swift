@@ -78,9 +78,10 @@ extension Color {
     static let appUserBubble = appInk
 
     /// Adam's side of the conversation: message bubbles and cards.
+    /// The same raised surface as every card (Settings, board, Activity), so a thread has one grey, not two.
     static let appReceivedBubble = appDynamicColor(
-        dark: Color(red: 0.137, green: 0.149, blue: 0.172),   // #23262C
-        light: Color(red: 0.914, green: 0.925, blue: 0.945)   // #E9ECF1
+        dark: Color.white.opacity(0.07),
+        light: Color.white
     )
 
     // MARK: - Roles (thread and cards)
