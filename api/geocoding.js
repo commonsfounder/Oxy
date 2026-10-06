@@ -72,7 +72,7 @@ function distanceMeters(a, b) {
 }
 
 function googlePlaceFieldMask() {
-  return 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow';
+  return 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow,places.rating,places.userRatingCount,places.priceLevel';
 }
 
 function googlePlaceHeaders(key) {
@@ -161,7 +161,37 @@ function rankedGooglePlaceCandidates(places, location, query = '', sortByDistanc
   return meaningfulPlaceTokens(query).length ? [] : candidates;
 }
 
-function googlePlaceResult(place, query) {
+const PRICE_LEVELS = {
+  PRICE_LEVEL_FREE: 'Free',
+  PRICE_LEVEL_INEXPENSIVE: '£',
+  PRICE_LEVEL_MODERATE: '££',
+  PRICE_LEVEL_EXPENSIVE: '£££',
+  PRICE_LEVEL_VERY_EXPENSIVE: '££££'
+};
+
+/** One option for the app to show side by side: only what Google stated, null where it said nothing. */
+function placeOption(place) {
+  return {
+    name: place.displayName?.text || '',
+    address: place.formattedAddress || '',
+    lat: place.location.latitude,
+    lng: place.location.longitude,
+    distanceMeters: Number.isFinite(place.distanceMeters) ? Math.round(place.distanceMeters) : null,
+    rating: Number.isFinite(place.rating) ? place.rating : null,
+    ratingCount: Number.isFinite(place.userRatingCount) ? place.userRatingCount : null,
+    price: PRICE_LEVELS[place.priceLevel] || null,
+    openNow: typeof place.currentOpeningHours?.openNow === 'boolean' ? place.currentOpeningHours.openNow : null,
+    mapsUri: place.googleMapsUri || null
+  };
+}
+
+const MAX_PLACE_OPTIONS = 5;
+
+function placeOptions(candidates) {
+  return candidates.filter(place => place?.location).slice(0, MAX_PLACE_OPTIONS).map(placeOption);
+}
+
+function googlePlaceResult(place, query, candidates = null) {
   if (!place?.location) {
     throw new Error(`No place results found for "${query}"`);
   }
@@ -172,7 +202,8 @@ function googlePlaceResult(place, query) {
     name: place.displayName?.text || '',
     googleMapsUri: place.googleMapsUri || null,
     distanceMeters: Number.isFinite(place.distanceMeters) ? Math.round(place.distanceMeters) : null,
-    source: 'google_places'
+    source: 'google_places',
+    ...(candidates ? { places: placeOptions(candidates) } : {})
   };
 }
 
@@ -207,7 +238,7 @@ async function searchNearbyPlacesWithGoogle(query, location, key) {
   );
 
   const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query);
-  return candidates[0] ? googlePlaceResult(candidates[0], query) : null;
+  return candidates[0] ? googlePlaceResult(candidates[0], query, candidates) : null;
 }
 
 async function geocodeWithGoogle(locationString) {
@@ -301,7 +332,7 @@ async function searchPlaceWithGoogle(query, location = null) {
   // search — trust Google's own text-relevance ranking over raw distance-to-user.
   const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query, false);
   const place = candidates[0];
-  return googlePlaceResult(place, query);
+  return googlePlaceResult(place, query, candidates);
 }
 
 const geocodeLocation = async (locationString) => {

@@ -313,3 +313,70 @@ test('named place with no nearby match never resolves to the nearest unrelated p
     else process.env.GOOGLE_MAPS_API_KEY = oldMaps;
   }
 });
+
+// ── A place search keeps the other good options, with what makes them comparable ──────────
+
+function placesResponse() {
+  return {
+    data: {
+      places: [
+        { displayName: { text: 'Gail\'s Bakery' }, formattedAddress: '1 High St, London', location: { latitude: 51.52, longitude: -0.08 },
+          businessStatus: 'OPERATIONAL', types: ['cafe'], rating: 4.6, userRatingCount: 812, priceLevel: 'PRICE_LEVEL_MODERATE',
+          currentOpeningHours: { openNow: true }, googleMapsUri: 'https://maps.google.com/?cid=1' },
+        { displayName: { text: 'Pret A Manger' }, formattedAddress: '2 High St, London', location: { latitude: 51.521, longitude: -0.081 },
+          businessStatus: 'OPERATIONAL', types: ['cafe'], rating: 4.0, userRatingCount: 120, priceLevel: 'PRICE_LEVEL_INEXPENSIVE' },
+        { displayName: { text: 'Closed Forever Cafe' }, formattedAddress: '3 High St, London', location: { latitude: 51.522, longitude: -0.082 },
+          businessStatus: 'CLOSED_PERMANENTLY', types: ['cafe'], rating: 5 },
+        { displayName: { text: 'No Rating Cafe' }, formattedAddress: '4 High St, London', location: { latitude: 51.523, longitude: -0.083 },
+          businessStatus: 'OPERATIONAL', types: ['cafe'] }
+      ]
+    }
+  };
+}
+
+test('a place search keeps the other options, best match first, with rating, price and opening', async () => {
+  const oldKey = process.env.GOOGLE_PLACES_API_KEY;
+  const oldPost = mockAxios.post;
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    let mask = '';
+    mockAxios.post = async (url, body, config) => { mask = config.headers['X-Goog-FieldMask']; return placesResponse(); };
+    const result = await resolvePlaceDestination('cafe', { location: { latitude: 51.52, longitude: -0.08 } });
+    assert.match(mask, /places\.rating/);
+    assert.match(mask, /places\.userRatingCount/);
+    assert.match(mask, /places\.priceLevel/);
+    assert.equal(result.name, 'Gail\'s Bakery');
+    assert.ok(Array.isArray(result.places));
+    assert.equal(result.places[0].name, 'Gail\'s Bakery');
+    assert.equal(result.places[0].rating, 4.6);
+    assert.equal(result.places[0].ratingCount, 812);
+    assert.equal(result.places[0].price, '££');
+    assert.equal(result.places[0].openNow, true);
+    assert.equal(typeof result.places[0].lat, 'number');
+    assert.ok(!result.places.some(place => /Closed Forever/.test(place.name)), 'permanently closed places are dropped');
+    const unrated = result.places.find(place => /No Rating/.test(place.name));
+    assert.equal(unrated.rating, null);
+    assert.equal(unrated.price, null);
+  } finally {
+    mockAxios.post = oldPost;
+    if (oldKey === undefined) delete process.env.GOOGLE_PLACES_API_KEY; else process.env.GOOGLE_PLACES_API_KEY = oldKey;
+  }
+});
+
+test('a place search returns at most five options', async () => {
+  const oldKey = process.env.GOOGLE_PLACES_API_KEY;
+  const oldPost = mockAxios.post;
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    mockAxios.post = async () => ({
+      data: { places: Array.from({ length: 8 }, (_, i) => ({
+        displayName: { text: `Cafe ${i}` }, formattedAddress: `${i} High St`, location: { latitude: 51.5 + i / 1000, longitude: -0.08 },
+        businessStatus: 'OPERATIONAL', types: ['cafe'] })) }
+    });
+    const result = await resolvePlaceDestination('Cafe', { location: { latitude: 51.5, longitude: -0.08 } });
+    assert.equal(result.places.length, 5);
+  } finally {
+    mockAxios.post = oldPost;
+    if (oldKey === undefined) delete process.env.GOOGLE_PLACES_API_KEY; else process.env.GOOGLE_PLACES_API_KEY = oldKey;
+  }
+});

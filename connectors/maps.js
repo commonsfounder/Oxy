@@ -704,7 +704,12 @@ async function execute(userId, action, params) {
       distanceMeters: place.distanceMeters ?? null,
       deepLink: mapsLink(place, query),
       webLink: mapsLink(place, query),
-      cardText: detail || 'Open in Maps'
+      cardText: detail || 'Open in Maps',
+      // Everything Places found, best first, so the app can show them on a map side by side.
+      ...(Number.isFinite(place.lat) && Number.isFinite(place.lng) ? { lat: place.lat, lng: place.lng } : {}),
+      ...(Array.isArray(place.places) && place.places.length
+        ? { places: place.places.map(option => ({ ...option, link: mapsLink({ ...option, googleMapsUri: option.mapsUri }, query) })) }
+        : {})
     };
   } catch (err) {
     return { success: false, error: `Maps error: ${err.message}` };
