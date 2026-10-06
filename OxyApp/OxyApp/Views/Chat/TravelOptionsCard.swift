@@ -7,6 +7,7 @@ struct TravelOptionsCard: View {
     let action: ActionResult
     let kind: Kind
 
+    @State private var comparing = false
     private var options: [TravelOption] { action.travelOptions ?? [] }
 
     var body: some View {
@@ -19,6 +20,18 @@ struct TravelOptionsCard: View {
                 Text("Seen in search, not held")
                     .font(.fineprint)
                     .foregroundStyle(Color.appMuted)
+                if options.count >= 2 {
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        comparing = true
+                    } label: {
+                        Text("Compare")
+                            .font(.appBody(14, weight: .medium))
+                            .foregroundStyle(Color.appAccent)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 4)
 
@@ -36,6 +49,10 @@ struct TravelOptionsCard: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(kind == .flights ? "Flights found" : "Hotels found")
+        .sheet(isPresented: $comparing) {
+            CompareSheet(table: .travel(options, hotels: kind == .hotels))
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private func card(_ option: TravelOption) -> some View {

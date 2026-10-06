@@ -7,16 +7,32 @@ struct PlaceResultsCard: View {
 
     @State private var selectedID: String?
     @State private var camera: MapCameraPosition = .automatic
+    @State private var comparing = false
 
     private var places: [PlaceOption] { action.places ?? [] }
     private var chosenID: String? { selectedID ?? places.first?.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(places.count == 1 ? "1 place" : "\(places.count) places")
-                .font(.sectionLabel)
-                .foregroundStyle(Color.appMuted)
-                .padding(.horizontal, 4)
+            HStack {
+                Text(places.count == 1 ? "1 place" : "\(places.count) places")
+                    .font(.sectionLabel)
+                    .foregroundStyle(Color.appMuted)
+                Spacer(minLength: 8)
+                if places.count >= 2 {
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        comparing = true
+                    } label: {
+                        Text("Compare")
+                            .font(.appBody(14, weight: .medium))
+                            .foregroundStyle(Color.appAccent)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
                 Map(position: $camera, selection: $selectedID) {
@@ -38,6 +54,10 @@ struct PlaceResultsCard: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Places found")
+        .sheet(isPresented: $comparing) {
+            CompareSheet(table: .places(places))
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var carousel: some View {

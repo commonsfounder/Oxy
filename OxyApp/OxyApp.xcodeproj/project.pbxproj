@@ -12,6 +12,7 @@
 		A10000010000000000000F16 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F16 /* SceneView.swift */; };
 		A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F90 /* PlaceResultsCard.swift */; };
 		A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F91 /* TravelOptionsCard.swift */; };
+		A10000010000000000000F92 /* CompareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F92 /* CompareSheet.swift */; };
 		A10000010000000000000F15 /* AdamActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F15 /* AdamActivityView.swift */; };
 		A10000010000000000000F07 /* HomeBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F07 /* HomeBoardView.swift */; };
 		A10000010000000000000F06 /* HomeBoardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F06 /* HomeBoardService.swift */; };
@@ -96,6 +97,7 @@
 		A20000010000000000000F16 /* SceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F90 /* PlaceResultsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceResultsCard.swift; sourceTree = "<group>"; };
 		A20000010000000000000F91 /* TravelOptionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelOptionsCard.swift; sourceTree = "<group>"; };
+		A20000010000000000000F92 /* CompareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000F15 /* AdamActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdamActivityView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F07 /* HomeBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F06 /* HomeBoardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardService.swift; sourceTree = "<group>"; };
@@ -309,6 +311,7 @@
 				A20000010000000000000F16 /* SceneView.swift */,
 				A20000010000000000000F90 /* PlaceResultsCard.swift */,
 				A20000010000000000000F91 /* TravelOptionsCard.swift */,
+				A20000010000000000000F92 /* CompareSheet.swift */,
 				A20000010000000000000F11 /* ThreadHeader.swift */,
 				A20000010000000000000F12 /* ThreadWheelMenu.swift */,
 				A20000010000000000000F13 /* ThreadMessageRow.swift */,
@@ -612,6 +615,7 @@
 				A10000010000000000000F16 /* SceneView.swift in Sources */,
 				A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */,
 				A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */,
+				A10000010000000000000F92 /* CompareSheet.swift in Sources */,
 				A10000010000000000000F11 /* ThreadHeader.swift in Sources */,
 				A10000010000000000000F12 /* ThreadWheelMenu.swift in Sources */,
 				A10000010000000000000F13 /* ThreadMessageRow.swift in Sources */,
