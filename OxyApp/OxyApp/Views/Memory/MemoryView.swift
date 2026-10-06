@@ -42,7 +42,7 @@ struct MemoryView: View {
 
             VStack(spacing: 0) {
                 if !embedded {
-                    ScreenHeaderView(title: "Everything saved", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Memory", onBack: { dismiss() })
                 }
                 // A real List, not a hand-rolled ScrollView, so swipe-to-delete is the
                 // native, reliable gesture instead of a custom drag (which rendered a
@@ -84,7 +84,7 @@ struct MemoryView: View {
                         .padding(.bottom, composerExpanded ? 36 : 24)
 
                         HStack {
-                            SettingsSectionHeader(title: "Saved Memories")
+                            SettingsSectionHeader(title: "Saved memories")
                             Spacer()
                             if !items.isEmpty {
                                 Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
@@ -107,9 +107,7 @@ struct MemoryView: View {
                                 SettingsDivider()
                             }
                         } else if items.isEmpty {
-                            Text("Nothing saved yet.")
-                                .font(.appBody(14))
-                                .foregroundStyle(Color.appMuted)
+                            SettingsStatement(text: "Nothing saved yet", solid: false)
                                 .padding(.vertical, 20)
                         } else if groupedItems.isEmpty {
                             Text("No memories match \"\(search)\".")
@@ -378,7 +376,7 @@ private struct MemorySearchField: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background(Color.appSurface)
+        .background(Color.settingsRaised)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
     }
 }

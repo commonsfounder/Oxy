@@ -18,6 +18,7 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
     @State private var wheelOpen = false
+    @AppStorage(ThreadMenuChoice.orderKey) private var wheelOrderRaw = ""
     @State private var showsPrivateExplainer = false
     @State private var replyingTo: Message?
     @State private var displayText: String?
@@ -33,6 +34,8 @@ struct ChatView: View {
     @State private var handledMessageComposeActionIDs = Set<String>()
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
+    @State private var showCamera = false
+    @State private var attachmentError: String?
     @State private var showAttachMenu = false
     @State private var isIncognito = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -180,6 +183,14 @@ struct ChatView: View {
         }
     }
 
+    /// What the Adam button shows: you speaking, a yes being waited on, or work in progress.
+    private var hubActivity: AdamActivityState? {
+        if voiceInput.isRecording { return .listening }
+        if boardModel.needsYou.contains(where: { boardModel.acknowledged[$0.id] == nil }) { return .waiting }
+        if !boardModel.working.isEmpty || viewModel.isSending { return .working }
+        return nil
+    }
+
     private var wheelOverlay: some View {
         GeometryReader { proxy in
             let origin = proxy.frame(in: .global).origin
@@ -187,6 +198,7 @@ struct ChatView: View {
                 hub: CGPoint(x: hubCenter.x - origin.x, y: hubCenter.y - origin.y),
                 isOpen: $wheelOpen,
                 incognito: isIncognito,
+                orderRaw: $wheelOrderRaw,
                 onChoose: handleMenuChoice
             )
         }
@@ -373,6 +385,7 @@ struct ChatView: View {
                             ThreadHeader(
                                 isIncognito: isIncognito,
                                 isWorking: !boardModel.working.isEmpty,
+                                activity: hubActivity,
                                 deviceOnline: boardModel.deviceOnline,
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
@@ -468,6 +481,10 @@ struct ChatView: View {
             .toolbar(.hidden, for: .navigationBar)
             #if DEBUG
             .onAppear {
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_REVIEW"] == "1" {
+                    let json = #"{"action":"transaction_authorize","success":false,"outcome":"awaiting_user","pending":true,"text":"Waiting for your yes","cardText":"Pay £54.20 to johnlewis.com with your Visa ending 4242.","actionSummary":"Place the order","subject":{"amount":"£54.20","merchant":"johnlewis.com","card":"Visa ending 4242"}}"#
+                    pendingReviewAction = try? JSONDecoder().decode(ActionResult.self, from: Data(json.utf8))
+                }
                 if ProcessInfo.processInfo.environment["OXY_DEBUG_RECORDING"] == "1" {
                     voiceInput.isRecording = true
                     voiceInput.transcript = "Remind me to call the dentist tomorrow morning and"
@@ -544,30 +561,53 @@ struct ChatView: View {
             } message: {
                 Text(messageComposerAlert ?? "")
             }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .any(of: [.images, .videos]))
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPicker(
+                    onPhoto: { data in
+                        showCamera = false
+                        stageAttachment(data: data, name: "Photo", mime: "image/jpeg")
+                    },
+                    onVideo: { url in
+                        showCamera = false
+                        stageFile(at: url, name: "Video.mov", mime: "video/quicktime", deleteAfter: true)
+                    },
+                    onCancel: { showCamera = false }
+                )
+                .ignoresSafeArea()
+            }
+            .alert("Can't attach that", isPresented: Binding(
+                get: { attachmentError != nil },
+                set: { if !$0 { attachmentError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(attachmentError ?? "")
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.pdf, .plainText, .commaSeparatedText, .json, .image, .data],
+                allowedContentTypes: [.pdf, .plainText, .commaSeparatedText, .json, .image, .audio, .data],
                 allowsMultipleSelection: false
             ) { result in
                 guard let url = try? result.get().first else { return }
                 let didAccess = url.startAccessingSecurityScopedResource()
                 defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-                guard let data = try? Data(contentsOf: url) else { return }
-                pendingImageData = data
-                pendingImageName = url.lastPathComponent
-                pendingImageMimeType = mimeType(for: url)
-                pendingIsImage = pendingImageMimeType.hasPrefix("image/")
+                stageFile(at: url, name: url.lastPathComponent, mime: mimeType(for: url))
             }
             .onChange(of: selectedPhotoItem) { _, item in
                 guard let item else { return }
                 Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
+                    if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
+                        if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
+                            await MainActor.run {
+                                stageFile(at: movie.url, name: "Video.\(movie.url.pathExtension.isEmpty ? "mov" : movie.url.pathExtension)",
+                                          mime: mimeType(for: movie.url), deleteAfter: true)
+                            }
+                        }
+                    } else if let data = try? await item.loadTransferable(type: Data.self) {
                         await MainActor.run {
-                            pendingImageData = data
-                            pendingImageName = "Photo"
-                            pendingImageMimeType = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
-                            pendingIsImage = true
+                            stageAttachment(data: data, name: "Photo",
+                                            mime: data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg")
                         }
                     }
                 }
@@ -669,7 +709,12 @@ struct ChatView: View {
                     .onTapGesture { dismissAttachMenu() }
 
                 VStack(spacing: 0) {
-                    attachSheetRow("Photo Library", icon: "photo") {
+                    attachSheetRow("Camera", icon: "camera") {
+                        dismissAttachMenu()
+                        openCamera()
+                    }
+                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
+                    attachSheetRow("Photos & Videos", icon: "photo") {
                         dismissAttachMenu()
                         showPhotoPicker = true
                     }
@@ -808,6 +853,41 @@ struct ChatView: View {
         }
     }
 
+    private static let attachmentLimit = 25 * 1024 * 1024
+
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            attachmentError = "The camera isn't available on this device."
+            return
+        }
+        showCamera = true
+    }
+
+    private func stageAttachment(data: Data, name: String, mime: String) {
+        guard data.count <= Self.attachmentLimit else {
+            HapticManager.shared.error()
+            attachmentError = "That's over the 25 MB limit."
+            return
+        }
+        pendingImageData = data
+        pendingImageName = name
+        pendingImageMimeType = mime
+        pendingIsImage = mime.hasPrefix("image/")
+    }
+
+    /// Reads a file for sending, checking its size first so a large video never gets loaded into memory.
+    private func stageFile(at url: URL, name: String, mime: String, deleteAfter: Bool = false) {
+        defer { if deleteAfter { try? FileManager.default.removeItem(at: url) } }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= Self.attachmentLimit else {
+            HapticManager.shared.error()
+            attachmentError = "That's over the 25 MB limit."
+            return
+        }
+        guard let data = try? Data(contentsOf: url) else { return }
+        stageAttachment(data: data, name: name, mime: mime)
+    }
+
     private func mimeType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "pdf": return "application/pdf"
@@ -823,6 +903,13 @@ struct ChatView: View {
         case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         case "xls": return "application/vnd.ms-excel"
         case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "heif": return "image/heif"
+        case "mov": return "video/quicktime"
+        case "mp4", "m4v": return "video/mp4"
+        case "mp3": return "audio/mpeg"
+        case "m4a": return "audio/mp4"
+        case "wav": return "audio/wav"
+        case "aac": return "audio/aac"
         default: return "application/octet-stream"
         }
     }
@@ -995,12 +1082,67 @@ private struct MessageComposeSheet: UIViewControllerRepresentable {
     }
 }
 
+/// The system camera, for a photo or a short video.
+private struct CameraPicker: UIViewControllerRepresentable {
+    let onPhoto: (Data) -> Void
+    let onVideo: (URL) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
+        picker.videoMaximumDuration = 30
+        picker.videoQuality = .typeMedium
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPicker
+        init(parent: CameraPicker) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let url = info[.mediaURL] as? URL {
+                parent.onVideo(url)
+            } else if let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.85) {
+                parent.onPhoto(data)
+            } else {
+                parent.onCancel()
+            }
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.onCancel() }
+    }
+}
+
+/// A video picked from Photos, copied to a temporary file so its size can be checked before it is read.
+private struct PickedMovie: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let ext = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return PickedMovie(url: copy)
+        }
+    }
+}
+
 private struct ActionReviewSheet: View {
     let action: ActionResult
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
     private var isPayment: Bool {
+        action.action == "transaction_authorize" ||
         (action.actionSummary ?? "").localizedCaseInsensitiveContains("payment") ||
         (action.actionSummary ?? "").localizedCaseInsensitiveContains("order") ||
         (action.text ?? "").localizedCaseInsensitiveContains("charge") ||
@@ -1023,7 +1165,14 @@ private struct ActionReviewSheet: View {
         }()
     }
 
+    /// The figures the payment page and saved card stated, when the server sent them.
+    private var purchase: ResultSubject? {
+        guard isPayment, let subject = action.subject, subject.amount != nil else { return nil }
+        return subject
+    }
+
     private var confirmLabel: String {
+        if let amount = purchase?.amount { return "Pay \(amount)" }
         if isPayment { return "Confirm & Place Order" }
         switch action.action {
         case "send_email", "send_outlook_email": return "Send"
@@ -1066,11 +1215,15 @@ private struct ActionReviewSheet: View {
                 Text("Needs your OK")
                     .appEyebrow()
                     .foregroundStyle(isPayment ? Color.appAccent.opacity(0.9) : Color.appMuted)
-                Text(detail)
-                    .font(.appBody(15))
-                    .foregroundStyle(Color.appInk)
-                    .lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let purchase {
+                    purchaseReceipt(purchase)
+                } else {
+                    Text(detail)
+                        .font(.appBody(15))
+                        .foregroundStyle(Color.appInk)
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(16)
             .background(Color.appSurface.opacity(0.82))
@@ -1116,6 +1269,37 @@ private struct ActionReviewSheet: View {
         .padding(.bottom, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.appBackground)
+    }
+
+    /// The amount large, then the shop and the card, so the person sees exactly what they are approving.
+    private func purchaseReceipt(_ purchase: ResultSubject) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let amount = purchase.amount {
+                Text(amount)
+                    .font(.appEditorial(44, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                    .foregroundStyle(Color.appInk)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
+            if let merchant = purchase.merchant {
+                HStack(spacing: 8) {
+                    AppIcon("cube", size: 15).foregroundStyle(Color.appMuted)
+                    Text(merchant)
+                        .font(.appBody(15, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                }
+            }
+            if let card = purchase.card {
+                HStack(spacing: 8) {
+                    AppIcon("card", size: 15).foregroundStyle(Color.appMuted)
+                    Text(card)
+                        .font(.appBody(15, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     private func cleanDetail(_ raw: String) -> String {
@@ -1283,7 +1467,7 @@ private struct ChatInputBar: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
                 }
-                .accessibilityLabel("Add a photo or file")
+                .accessibilityLabel("Add a photo, video or file")
                 .buttonStyle(.appScale)
                 .disabled(isSending || isVoiceActive)
 

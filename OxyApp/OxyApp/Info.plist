@@ -48,6 +48,8 @@
 	<string>Adam reads heart rate, sleep, and steps to answer your requests and run health watches you create.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Adam uses background location for useful reminders such as arriving near home.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Adam lets you take a photo or video to share in chat when you choose to.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Adam uses your location to help with ride booking, directions, and local recommendations.</string>
 	<key>NSMicrophoneUsageDescription</key>

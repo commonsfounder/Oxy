@@ -343,16 +343,24 @@ struct ResultSubject: Codable, Equatable {
     /// Distinct selectable choices the page genuinely offered (sizes, colours, time slots,
     /// delivery options). Never a fabricated default set.
     let options: [String]?
+    /// The shop the money is going to, as its address ("johnlewis.com"). Only on a purchase approval.
+    let merchant: String?
+    /// The saved card that will be used, already masked ("Visa ending 4242"). Only on a purchase approval.
+    let card: String?
 
     var isEmpty: Bool {
-        name == nil && amount == nil && (imageUrls?.isEmpty ?? true) && (options?.isEmpty ?? true)
+        name == nil && amount == nil && merchant == nil && card == nil
+            && (imageUrls?.isEmpty ?? true) && (options?.isEmpty ?? true)
     }
 
-    init(name: String? = nil, amount: String? = nil, imageUrls: [String]? = nil, options: [String]? = nil) {
+    init(name: String? = nil, amount: String? = nil, imageUrls: [String]? = nil, options: [String]? = nil,
+         merchant: String? = nil, card: String? = nil) {
         self.name = name
         self.amount = amount
         self.imageUrls = imageUrls
         self.options = options
+        self.merchant = merchant
+        self.card = card
     }
 
     /// Reads the nested `subject` object, falling back to the flat commerce keys an older

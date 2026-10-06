@@ -10,6 +10,7 @@ struct PaymentsView: View {
     @State private var showAgentCardSheet = false
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var confirmRemove = false
 
     var body: some View {
         NavigationStack {
@@ -30,21 +31,27 @@ struct PaymentsView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
                                 if let errorMessage {
-                                    ErrorBanner(message: errorMessage)
+                                    ErrorBanner(message: errorMessage, onRetry: { Task { await loadPayments() } })
                                 }
-                                balanceSection
-                                cardSection
                                 agentCardSection
+                                if card != nil || balance != nil { otherSection }
                             }
                             .padding(.horizontal, AppSpacing.margin)
                             .padding(.vertical, 16)
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
             .task { await loadPayments() }
             .refreshable { await loadPayments() }
+            .confirmationDialog("Remove this card?", isPresented: $confirmRemove, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) { Task { await removeAgentCard() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Adam won't be able to check out until you add another.")
+            }
             .sheet(isPresented: $showAgentCardSheet) {
                 AgentCardEntrySheet { saved in
                     agentCard = saved
@@ -55,59 +62,47 @@ struct PaymentsView: View {
 
     // MARK: - Sections
 
-    private var balanceSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Balance").padding(.bottom, 12)
-            Text(formattedBalance)
-                .font(.rowTitle)
-                .foregroundStyle(Color.appInk)
-        }
-    }
-
-    private var cardSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Linked card").padding(.bottom, 12)
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(cardTitle)
-                        .font(.rowTitle)
-                        .foregroundStyle(Color.appInk)
-                    Text(cardSubtitle)
-                        .font(.rowSecondary)
-                        .foregroundStyle(Color.appMuted)
-                }
-                Spacer(minLength: 8)
-            }
-            .padding(.vertical, 14)
-            .frame(minHeight: 44)
-        }
-    }
-
     private var agentCardSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Card for checkout").padding(.bottom, 12)
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agentCardTitle)
-                        .font(.rowTitle)
-                        .foregroundStyle(Color.appInk)
-                    Text(agentCardSubtitle)
-                        .font(.rowSecondary)
-                        .foregroundStyle(Color.appMuted)
-                }
-                Spacer(minLength: 8)
-                if agentCard == nil {
-                    Button("Add") { showAgentCardSheet = true }
-                        .font(.rowSecondary)
-                } else {
-                    Button("Remove", role: .destructive) {
-                        Task { await removeAgentCard() }
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsGroup(title: "Card for checkout") {
+                SettingsList {
+                    SettingsRow(title: agentCardTitle, subtitle: agentCardSubtitle) {
+                        cardButton
                     }
-                    .font(.rowSecondary)
                 }
             }
-            .padding(.vertical, 14)
-            .frame(minHeight: 44)
+            SettingsStatement(text: "Adam asks before every payment.", solid: false)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var cardButton: some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            if agentCard == nil { showAgentCardSheet = true } else { confirmRemove = true }
+        } label: {
+            Text(agentCard == nil ? "Add" : "Remove")
+                .font(.appBody(14, weight: .medium))
+                .foregroundStyle(agentCard == nil ? Color.appOnAction : Color.appInk)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Capsule().fill(agentCard == nil ? Color.appAction : Color.appInk.opacity(0.10)))
+        }
+        .buttonStyle(.appScale(0.96))
+        .accessibilityLabel(agentCard == nil ? "Add a checkout card" : "Remove checkout card")
+    }
+
+    private var otherSection: some View {
+        SettingsGroup(title: "Other") {
+            SettingsList {
+                if card != nil {
+                    SettingsRow(title: cardTitle, subtitle: "Linked card")
+                }
+                if card != nil, balance != nil { SettingsRule() }
+                if balance != nil {
+                    SettingsRow(title: formattedBalance, subtitle: "Balance")
+                }
+            }
         }
     }
 

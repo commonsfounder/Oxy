@@ -326,6 +326,7 @@ final class HouseholdSoundMonitor {
 
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: [.mixWithOthers])
+            try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             engine.prepare()
             try engine.start()

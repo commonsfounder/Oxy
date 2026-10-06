@@ -26,7 +26,7 @@ struct ConnectorsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Connections", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Apps", onBack: { dismiss() })
 
                     if isLoading {
                         VStack(spacing: 12) {
@@ -40,7 +40,7 @@ struct ConnectorsView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
                                 if let errorMessage {
-                                    ErrorBanner(message: errorMessage)
+                                    ErrorBanner(message: errorMessage, onRetry: { Task { await loadConnectors() } })
                                 }
 
                                 // Every remaining connector is a genuine account connection
@@ -66,6 +66,7 @@ struct ConnectorsView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
             .task {
@@ -116,9 +117,7 @@ struct ConnectorsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.appHairline, lineWidth: 0.7))
+            .settingsSurface(radius: 18)
         }
     }
 

@@ -49,7 +49,7 @@ struct YouPage: View {
             hero
 
             if model.failed {
-                ErrorBanner(message: "Couldn't load what Adam knows.", onRetry: { Task { await model.load(isDemo: appState.isDemoSession) } })
+                ErrorBanner(message: "Couldn't load your details.", onRetry: { Task { await model.load(isDemo: appState.isDemoSession) } })
             }
 
             let known = areas.filter { !$0.lines.isEmpty && $0.id != "places" }
@@ -92,7 +92,7 @@ struct YouPage: View {
             }
 
             SettingsList {
-                SettingsNavRow(title: "Everything Adam remembers", subtitle: "See, correct or delete any of it") { destination = .saved }
+                SettingsNavRow(title: "Memory", subtitle: "See, correct or delete anything") { destination = .saved }
             }
         }
         .task { await model.load(isDemo: appState.isDemoSession) }
@@ -253,7 +253,7 @@ struct ConnectionsPage: View {
     @State private var destination: Destination?
 
     private enum Destination: Identifiable {
-        case apps, displays, payments, logins
+        case apps, displays, payments, logins, permissions
         var id: String { "\(self)" }
     }
 
@@ -293,6 +293,10 @@ struct ConnectionsPage: View {
                 SettingsRule(inset: 34)
                 SettingsNavRow(title: "Saved logins", lead: .icon("person-check")) { destination = .logins }
             }
+
+            SettingsList {
+                SettingsNavRow(title: "Permissions", subtitle: "What Adam does on its own", lead: .icon("shield-check")) { destination = .permissions }
+            }
         }
         .task { await model.load(isDemo: appState.isDemoSession) }
         .fullScreenCover(item: $destination) { dest in
@@ -302,6 +306,7 @@ struct ConnectionsPage: View {
                 case .displays: PairedDisplaysView()
                 case .payments: PaymentsView()
                 case .logins: VaultView()
+                case .permissions: PermissionsPage()
                 }
             }
             .swipeToDismiss()
@@ -315,10 +320,18 @@ struct PreferencesPage: View {
     @Environment(AppState.self) private var appState
     @AppStorage(HouseholdSoundMonitor.preferenceKey) private var soundAwarenessEnabled = false
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
+    @AppStorage(ThreadMenuChoice.orderKey) private var wheelOrderRaw = ""
     @State private var settings = SettingsStore.load()
+    @State private var showsWheelEditor = false
 
     var body: some View {
         SettingsPage(title: "Preferences") {
+            AutonomyDial()
+
+            SettingsList {
+                SettingsNavRow(title: "Your wheel", subtitle: "Choose what's in reach") { showsWheelEditor = true }
+            }
+
             SettingsGroup(title: "Appearance") {
                 HStack(spacing: 0) {
                     ForEach(ThreadBackground.allCases) { option in
@@ -371,6 +384,11 @@ struct PreferencesPage: View {
                     )
                 }
             }
+        }
+        .sheet(isPresented: $showsWheelEditor) {
+            WheelEditorSheet(orderRaw: $wheelOrderRaw)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .onChange(of: settings.preferredMapsApp) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.locationReminders) { _, _ in SettingsStore.save(settings, userId: appState.userId) }

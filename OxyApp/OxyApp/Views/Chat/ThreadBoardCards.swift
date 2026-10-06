@@ -99,7 +99,7 @@ final class ThreadBoardModel {
     #if DEBUG
     static let sampleBoard: HomeBoard = {
         let json = """
-        {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242","workflowId":"w1","checkpointId":"c1"}],
+        {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242 · Arrives Thursday","workflowId":"w1","checkpointId":"c1"}],
          "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","taskId":"t3","progress":{"done":2,"total":3}}],
          "changed":[],"completed":[{"id":"workflow-x","workflowId":"w9","kind":"purchase","title":"Ordered the headphones","detail":"£54.20 · arrives Thursday","at":"2026-09-29T17:00:00Z"}],"counts":{"needsYou":1,"handling":2,"changed":0,"completed":1}}
         """
@@ -152,11 +152,61 @@ final class ThreadBoardModel {
     }
 }
 
+/// What an approval is about, pulled from the one-line detail the server sends ("Up to £60 · Card ending 4242").
+struct ApprovalFacts: Equatable {
+    var qualifier: String?
+    var amount: String?
+    var card: String?
+    var others: [String] = []
+
+    var isEmpty: Bool { amount == nil && card == nil && others.isEmpty }
+
+    init(detail: String?) {
+        guard let detail else { return }
+        let parts = detail.components(separatedBy: " · ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        for part in parts {
+            if amount == nil, let found = Self.money(in: part) {
+                qualifier = found.qualifier
+                amount = found.amount
+            } else if card == nil, let digits = Self.cardDigits(in: part) {
+                card = digits
+            } else {
+                others.append(part)
+            }
+        }
+    }
+
+    private static func money(in text: String) -> (qualifier: String?, amount: String)? {
+        let pattern = #"^(up to|about|total|around)?\s*([£$€]\s?\d[\d,]*(?:\.\d{1,2})?)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let amountRange = Range(match.range(at: 2), in: text) else { return nil }
+        let qualifier = Range(match.range(at: 1), in: text).map { String(text[$0]).lowercased() }
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        return (qualifier, String(text[amountRange]).replacingOccurrences(of: " ", with: ""))
+    }
+
+    private static func cardDigits(in text: String) -> String? {
+        let lower = text.lowercased()
+        guard lower.contains("card") || text.contains("••••") else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: #"(\d{4})\s*$"#),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range])
+    }
+}
+
 /// Approval and progress cards that sit at the end of the thread.
 struct ThreadBoardCards: View {
     var model: ThreadBoardModel
     var askedInThread: [String] = []
     @State private var openWorkflow: OpenWorkflow?
+    @Namespace private var handoff
+
+    /// The same piece of work keeps one identity while it is being done and while it waits for a yes.
+    private func handoffID(_ item: BoardItem) -> String { item.workflowId ?? item.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -166,10 +216,12 @@ struct ThreadBoardCards: View {
             }
             ForEach(model.working.prefix(3)) { item in
                 workingChip(item)
+                    .matchedGeometryEffect(id: handoffID(item), in: handoff)
                     .transition(.opacity)
             }
             ForEach(model.needsYou.prefix(3)) { item in
                 needsYouCard(item)
+                    .matchedGeometryEffect(id: handoffID(item), in: handoff)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             if let message = model.errorMessage {
@@ -209,12 +261,15 @@ struct ThreadBoardCards: View {
         HStack(spacing: 12) {
             if approved {
                 CheckBadge()
+            } else {
+                AdamDot(solid: false, size: 14)
+                    .frame(width: 32, height: 32)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(approved ? "Approved" : "Not now")
                     .font(.appBody(16, weight: .medium))
                     .foregroundStyle(Color.appInk)
-                Text(title(for: item))
+                Text(acknowledgedLine(item))
                     .font(.appBody(13))
                     .foregroundStyle(Color.appMuted)
                     .lineLimit(1)
@@ -227,33 +282,85 @@ struct ThreadBoardCards: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func acknowledgedLine(_ item: BoardItem) -> String {
+        let facts = ApprovalFacts(detail: item.detail)
+        guard let amount = facts.amount else { return title(for: item) }
+        return "\(amount) · \(title(for: item))"
+    }
+
     private func openCard(_ item: BoardItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let facts = ApprovalFacts(detail: item.detail == title(for: item) ? nil : item.detail)
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Needs a yes")
                         .font(.appBody(12, weight: .semibold))
                         .foregroundStyle(Color.appNeedsYou)
                     Text(title(for: item))
-                        .font(.appBody(16, weight: .medium))
+                        .font(.appBody(17, weight: .medium))
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let detail = item.detail, !detail.isEmpty, detail != title(for: item) {
-                        Text(detail)
+                }
+                Spacer(minLength: 0)
+                AdamActivityMark(state: .waiting, size: 52)
+            }
+            if !facts.isEmpty { receipt(facts) }
+            actions(for: item)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(openCardLabel(item))
+    }
+
+    /// What would be spent and from what: the amount large, the rest quietly beneath.
+    private func receipt(_ facts: ApprovalFacts) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let amount = facts.amount {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let qualifier = facts.qualifier {
+                        Text(qualifier)
+                            .font(.appBody(12, weight: .medium))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    Text(amount)
+                        .font(.appEditorial(34, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
+                        .foregroundStyle(Color.appInk)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                }
+            }
+            if facts.card != nil || !facts.others.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let digits = facts.card {
+                        HStack(spacing: 8) {
+                            AppIcon("card", size: 15).foregroundStyle(Color.appMuted)
+                            Text("•••• \(digits)")
+                                .font(.appBody(14, weight: .medium))
+                                .foregroundStyle(Color.appInk)
+                        }
+                    }
+                    ForEach(facts.others, id: \.self) { line in
+                        Text(line)
                             .font(.appBody(13))
                             .foregroundStyle(Color.appMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 0)
-                AdamActivityMark(state: .waiting, size: 52)
             }
-            actions(for: item)
-                .padding(.top, 8)
         }
-        .padding(16)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.appBackground.opacity(0.55)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.7))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func openCardLabel(_ item: BoardItem) -> String {
+        var parts = ["Needs a yes", title(for: item)]
+        if let detail = item.detail, !detail.isEmpty, detail != title(for: item) { parts.append(detail) }
+        return parts.joined(separator: ". ")
     }
 
     @ViewBuilder
@@ -283,10 +390,10 @@ struct ThreadBoardCards: View {
         } label: {
             Text(label)
                 .font(.appBody(15, weight: .medium))
-                .foregroundStyle(primary ? Color.appOnAction : Color.appInk)
+                .foregroundColor(primary ? Color.appOnAction : Color.appInk)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(primary ? Color.appAction : Color.appBackground))
+                .background(Capsule().fill(primary ? Color.appAction : Color.appInk.opacity(0.10)))
         }
         .buttonStyle(.appScale(0.97))
     }
@@ -325,9 +432,13 @@ struct ThreadBoardCards: View {
         .padding(.trailing, item.taskId != nil ? 4 : 14)
         .padding(.vertical, item.taskId != nil ? 2 : 10)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.appWorking.opacity(0.10)))
+        .contentShape(Rectangle())
         .onTapGesture {
             if let workflowId = item.workflowId { openWorkflow = OpenWorkflow(id: workflowId) }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Working on \(title(for: item))")
+        .accessibilityAddTraits(item.workflowId != nil ? .isButton : [])
     }
 }
 

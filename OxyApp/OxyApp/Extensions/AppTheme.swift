@@ -515,22 +515,26 @@ struct AdamActivityMark: View {
         let tau = time - track.startedAt
         let progress = min(max(tau / Self.flight, 0), 1)
         let e = progress * progress * (3 - 2 * progress)
+        // Coming back from waiting, the dot slides left along the floor to the A's foot, and only
+        // then does the tracing begin. So the working motion is held until the dot has arrived.
+        let handoff = track.from == .waiting && state == .working
+        let kick = handoff ? Self.flight : 0
         var dot = Dot()
 
         if let from = track.from, progress < 1, !reduceMotion {
             ctx.drawLayer { layer in
                 layer.opacity = 1 - e
-                _ = scene(from, &layer, w, time, tau: 999)
+                _ = scene(from, &layer, w, time, tau: 999, kick: 0)
             }
             var target = Dot()
             ctx.drawLayer { layer in
                 layer.opacity = e
-                target = scene(state, &layer, w, time, tau: tau)
+                target = scene(state, &layer, w, time, tau: tau, kick: kick)
             }
-            dot = carried(from: track.fromDot, to: target, e)
+            dot = carried(from: track.fromDot, to: target, e, arcs: !handoff)
         } else {
             var layer = ctx
-            dot = scene(state, &layer, w, time, tau: tau)
+            dot = scene(state, &layer, w, time, tau: tau, kick: kick)
         }
 
         track.last = dot
@@ -543,14 +547,14 @@ struct AdamActivityMark: View {
     }
 
     /// The dot's flight from one state to the next: a gentle arc, landing exactly on the new dot.
-    private func carried(from a: Dot, to b: Dot, _ e: Double) -> Dot {
+    private func carried(from a: Dot, to b: Dot, _ e: Double, arcs: Bool = true) -> Dot {
         let dx = b.x - a.x
         let dy = b.y - a.y
         let length = hypot(dx, dy)
         var nx = length > 0 ? -dy / length : 0
         var ny = length > 0 ? dx / length : 0
         if ny > 0 { nx = -nx; ny = -ny }
-        let bulge = 0.2 * length * sin(Double.pi * e)
+        let bulge = arcs ? 0.2 * length * sin(Double.pi * e) : 0
         return Dot(
             x: a.x + dx * e + nx * bulge,
             y: a.y + dy * e + ny * bulge,
@@ -561,9 +565,13 @@ struct AdamActivityMark: View {
         )
     }
 
-    private func scene(_ which: AdamActivityState, _ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, tau: Double) -> Dot {
+    private func scene(_ which: AdamActivityState, _ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, tau: Double, kick: Double) -> Dot {
         switch which {
-        case .working: return sceneWorking(&ctx, w, time, tau)
+        case .working:
+            if kick > 0 && tau < 500 {
+                return sceneWorking(&ctx, w, time, max(tau - kick, 0), homeFade: clamp((tau - kick - 0.15) / 0.5))
+            }
+            return sceneWorking(&ctx, w, time, tau, homeFade: 1)
         case .listening: return sceneListening(&ctx, w, time)
         case .waiting: return sceneWaiting(&ctx, w, tau)
         }
@@ -585,7 +593,7 @@ struct AdamActivityMark: View {
     private static let travel = 0.76
     private static let cycle = 2.3
 
-    private func sceneWorking(_ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, _ tau: Double) -> Dot {
+    private func sceneWorking(_ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, _ tau: Double, homeFade: Double) -> Dot {
         let stroke = StrokeStyle(lineWidth: w * 0.1, lineCap: .round, lineJoin: .round)
         let pts = Self.corners.map { CGPoint(x: $0.x * w, y: $0.y * w) }
         var roof = Path()
@@ -614,7 +622,7 @@ struct AdamActivityMark: View {
             ctx.stroke(seg, with: .color(tint.opacity(0.12 + 0.2 * Double(k))), style: stroke)
         }
         let lift = sin(Double.pi * clamp((phase - Self.travel) / (1 - Self.travel)))
-        ctx.fill(circle(home, dotR * (1 + 0.25 * lift)), with: .color(tint.opacity(0.35 + 0.65 * lift)))
+        ctx.fill(circle(home, dotR * (1 + 0.25 * lift)), with: .color(tint.opacity((0.35 + 0.65 * lift) * homeFade)))
 
         let fade = phase <= Self.travel ? 1 : max(0, 1 - (phase - Self.travel) / 0.08)
         let at = point(at: head, pts)
@@ -671,22 +679,29 @@ struct AdamActivityMark: View {
 
     private static let sampleCount = 40
 
-    /// "?" as one stroke: a hook over the top that curls into a short stem.
+    /// "?" as one stroke: an upright oval bowl, level at the left tip, that eases into a straight stem
+    /// directly under its middle.
     private static let questionPoints: [CGPoint] = {
         var points: [CGPoint] = []
-        let centre = CGPoint(x: 0.5, y: 0.31)
-        let radius = 0.19
-        let start = 200.0 * Double.pi / 180
-        let end = -40.0 * Double.pi / 180
+        let centre = CGPoint(x: 0.5, y: 0.29)
+        let rx = 0.16
+        let ry = 0.185
+        let start = 180.0 * Double.pi / 180
+        let end = -68.0 * Double.pi / 180
         let arcCount = 26
         for i in 0...arcCount {
             let a = start + (end - start) * Double(i) / Double(arcCount)
-            points.append(CGPoint(x: centre.x + radius * cos(a), y: centre.y - radius * sin(a)))
+            points.append(CGPoint(x: centre.x + rx * cos(a), y: centre.y - ry * sin(a)))
         }
         let p0 = points.last!
-        let c1 = CGPoint(x: p0.x - 0.058, y: p0.y + 0.069)
-        let c2 = CGPoint(x: 0.5, y: 0.52)
-        let p3 = CGPoint(x: 0.5, y: 0.6)
+        var tx = rx * sin(end)
+        var ty = ry * cos(end)
+        let length = hypot(tx, ty)
+        tx /= length
+        ty /= length
+        let c1 = CGPoint(x: p0.x + 0.05 * tx, y: p0.y + 0.05 * ty)
+        let c2 = CGPoint(x: 0.5, y: 0.53)
+        let p3 = CGPoint(x: 0.5, y: stemEnd)
         let tail = sampleCount - points.count
         for i in 1...tail {
             let t = Double(i) / Double(tail)
@@ -698,6 +713,8 @@ struct AdamActivityMark: View {
         }
         return points
     }()
+
+    private static let stemEnd = 0.62
 
     private func hookPoint(_ fraction: Double) -> CGPoint {
         let pts = Self.questionPoints
@@ -746,8 +763,8 @@ struct AdamActivityMark: View {
         let lineWidth = max(1.6, w * 0.1)
         let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
         let question = Self.questionPoints.map { CGPoint(x: $0.x * w, y: $0.y * w) }
-        let landY = 0.85
-        let stemY = 0.6
+        let landY = 0.855
+        let stemY = Self.stemEnd
         let dotR = 0.085
         let strokeR = Double(lineWidth / 2 / w)
 

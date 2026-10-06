@@ -19,7 +19,7 @@ struct VaultView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Logins Adam can use", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Saved logins", onBack: { dismiss() })
 
                     if !isUnlocked {
                         lockedState
@@ -34,7 +34,7 @@ struct VaultView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 28) {
                                 if let errorMessage {
-                                    ErrorBanner(message: errorMessage)
+                                    ErrorBanner(message: errorMessage, onRetry: { Task { await loadAll() } })
                                 }
                                 credentialsSection
                                 grantsSection
@@ -45,9 +45,23 @@ struct VaultView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .task { await authenticateAndLoad() }
+            .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_VAULT"] == "1" {
+                    let decoder = JSONDecoder()
+                    credentials = (try? decoder.decode([VaultCredentialSummary].self, from: Data(#"[{"id":"c1","site":"johnlewis.com","label":"John Lewis","username":"chizi@example.com","updated_at":"2026-10-01T10:00:00Z"},{"id":"c2","site":"tesco.com","label":"Tesco","username":"","updated_at":"2026-10-02T10:00:00Z"}]"#.utf8))) ?? []
+                    grants = (try? decoder.decode([VaultGrantSummary].self, from: Data(#"[{"id":"g1","site":"johnlewis.com","scope":"site","max_uses":5,"use_count":1}]"#.utf8))) ?? []
+                    uses = (try? decoder.decode([VaultCredentialUse].self, from: Data(#"[{"id":"u1","site":"johnlewis.com","outcome":"used","created_at":"2026-10-05T09:00:00Z"},{"id":"u2","site":"unknown-shop.example","outcome":"denied","reason":"not_permitted","created_at":"2026-10-05T09:30:00Z"}]"#.utf8))) ?? []
+                    isUnlocked = true
+                    isLoading = false
+                    return
+                }
+                #endif
+                await authenticateAndLoad()
+            }
             .refreshable { await loadAll() }
             .sheet(isPresented: $showEntrySheet) {
                 VaultCredentialEntrySheet { saved in
@@ -66,55 +80,64 @@ struct VaultView: View {
     // MARK: - Sections
 
     private var lockedState: some View {
-        VStack(spacing: 12) {
-            Text(errorMessage ?? "Use Face ID to view saved sign-ins.")
-                .font(.rowSecondary)
+        VStack(spacing: 18) {
+            AdamDot(solid: false, size: 14)
+            Text(errorMessage ?? "Use Face ID to see saved logins.")
+                .font(.appBody(15))
                 .foregroundStyle(Color.appMuted)
                 .multilineTextAlignment(.center)
-            Button("Unlock") { Task { await authenticateAndLoad() } }
-                .font(.rowTitle)
+            Button {
+                HapticManager.shared.impact(.light)
+                Task { await authenticateAndLoad() }
+            } label: {
+                Text("Unlock")
+                    .font(.appBody(15, weight: .medium))
+                    .foregroundStyle(Color.appOnAction)
+                    .padding(.horizontal, 22)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(Color.appAction))
+            }
+            .buttonStyle(.appScale(0.97))
         }
         .padding(.horizontal, AppSpacing.margin)
-        .padding(.top, 48)
+        .padding(.top, 96)
+    }
+
+    private func quietAction(_ title: String, role: Color = .appAccent, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            Text(title)
+                .font(.appBody(14, weight: .medium))
+                .foregroundStyle(role)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.plain)
     }
 
     private var credentialsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                AppSectionHeader(title: "Saved sign-ins")
-                Spacer()
-                Button("Add") { showEntrySheet = true }
-                    .font(.rowSecondary)
-            }
-            .padding(.bottom, 12)
-
+        SettingsGroup(title: "Saved sign-ins") {
             if credentials.isEmpty {
-                Text("No saved sign-ins.")
-                    .font(.rowSecondary)
-                    .foregroundStyle(Color.appMuted)
-                    .padding(.vertical, 14)
+                SettingsStatement(text: "No saved sign-ins", solid: false)
+                    .padding(.horizontal, 4)
             } else {
-                ForEach(credentials) { credential in
-                    HStack(spacing: 14) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(credential.label)
-                                .font(.rowTitle)
-                                .foregroundStyle(Color.appInk)
-                            Text("\(credential.site) · \(credential.username.isEmpty ? "No username" : credential.username)")
-                                .font(.rowSecondary)
-                                .foregroundStyle(Color.appMuted)
+                SettingsList {
+                    ForEach(Array(credentials.enumerated()), id: \.element.id) { index, credential in
+                        if index > 0 { SettingsRule() }
+                        SettingsRow(
+                            title: credential.label,
+                            subtitle: "\(credential.site) · \(credential.username.isEmpty ? "No username" : credential.username)"
+                        ) {
+                            quietAction("Remove", role: .appDestructive) {
+                                Task { await removeCredential(credential) }
+                            }
                         }
-                        Spacer(minLength: 8)
-                        Button("Remove", role: .destructive) {
-                            Task { await removeCredential(credential) }
-                        }
-                        .font(.rowSecondary)
                     }
-                    .padding(.vertical, 14)
-                    .frame(minHeight: 44)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            quietAction("Add a sign-in") { showEntrySheet = true }
+                .padding(.horizontal, 4)
         }
     }
 
@@ -122,44 +145,26 @@ struct VaultView: View {
     // without asking first. Those permissions existed as API only, so the one thing a person
     // most needs to be able to undo was the one thing they could not see.
     private var grantsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                AppSectionHeader(title: "Sign-in permissions")
-                Spacer()
-                Button("Add") { showGrantSheet = true }
-                    .font(.rowSecondary)
-            }
-            .padding(.bottom, 12)
-
+        SettingsGroup(title: "Sign-in permissions") {
             if grants.isEmpty {
-                Text("Every sign-in is asked for.")
-                    .font(.rowSecondary)
-                    .foregroundStyle(Color.appMuted)
-                    .padding(.vertical, 14)
+                SettingsStatement(text: "Every sign-in is asked for", solid: false)
+                    .padding(.horizontal, 4)
             } else {
-                ForEach(grants) { grant in
-                    HStack(spacing: 14) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(grant.site)
-                                .font(.rowTitle)
-                                .foregroundStyle(Color.appInk)
-                            Text(grant.detailLine)
-                                .font(.rowSecondary)
-                                .foregroundStyle(Color.appMuted)
-                        }
-                        Spacer(minLength: 8)
-                        if grant.isLive {
-                            Button("Revoke", role: .destructive) {
-                                Task { await revokeGrant(grant) }
+                SettingsList {
+                    ForEach(Array(grants.enumerated()), id: \.element.id) { index, grant in
+                        if index > 0 { SettingsRule() }
+                        SettingsRow(title: grant.site, subtitle: grant.detailLine) {
+                            if grant.isLive {
+                                quietAction("Revoke", role: .appDestructive) {
+                                    Task { await revokeGrant(grant) }
+                                }
                             }
-                            .font(.rowSecondary)
                         }
                     }
-                    .padding(.vertical, 14)
-                    .frame(minHeight: 44)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            quietAction("Add a permission") { showGrantSheet = true }
+                .padding(.horizontal, 4)
         }
     }
 
@@ -167,27 +172,16 @@ struct VaultView: View {
     // trying to steer Adam at a site you never permitted, and it is only visible if it is
     // shown even when nothing went wrong.
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Recent sign-in activity")
-                .padding(.bottom, 12)
-
+        SettingsGroup(title: "Recent sign-in activity") {
             if uses.isEmpty {
-                Text("Nothing yet.")
-                    .font(.rowSecondary)
-                    .foregroundStyle(Color.appMuted)
-                    .padding(.vertical, 14)
+                SettingsStatement(text: "Nothing yet", solid: false)
+                    .padding(.horizontal, 4)
             } else {
-                ForEach(uses) { use in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(use.site)
-                            .font(.rowTitle)
-                            .foregroundStyle(Color.appInk)
-                        Text(use.detailLine)
-                            .font(.rowSecondary)
-                            .foregroundStyle(Color.appMuted)
+                SettingsList {
+                    ForEach(Array(uses.enumerated()), id: \.element.id) { index, use in
+                        if index > 0 { SettingsRule() }
+                        SettingsRow(title: use.site, subtitle: use.detailLine)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
                 }
             }
         }

@@ -74,134 +74,111 @@ struct PairedDisplaysView: View {
     @State private var copied = false
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                GlebChrome.pastelBlob.ignoresSafeArea()
+        SettingsPage(title: "Displays") {
+            if let errorMessage {
+                ErrorBanner(message: errorMessage, onRetry: { Task { await loadDisplays() } })
+            }
 
-                VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Displays", onBack: { dismiss() })
+            SettingsGroup(title: "Pair a display") {
+                VStack(alignment: .leading, spacing: 14) {
+                    AppLineField(placeholder: "Name (optional)", text: $pairingName)
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        Task { await createPairing() }
+                    } label: {
+                        Text(isWorking ? "Creating code…" : "Create pairing code")
+                            .font(.appBody(15, weight: .medium))
+                            .foregroundStyle(Color.appOnAction)
+                            .padding(.horizontal, 20)
+                            .frame(minHeight: 44)
+                            .background(Capsule().fill(Color.appAction))
+                    }
+                    .buttonStyle(.appScale(0.97))
+                    .disabled(isWorking)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .settingsSurface()
+            }
 
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 22) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                AppSectionTitle("Nearby displays", size: 20)
-                                Text("Pair a browser display nearby. It receives only updates you explicitly send.")
-                                    .font(.appBody(13))
-                                    .foregroundStyle(Color.appMuted)
+            if let challenge {
+                SettingsGroup(title: "On the display") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Open this link, then enter the code")
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.appMuted)
+                        Text(challenge.displayUrl)
+                            .font(.appMono(12))
+                            .foregroundStyle(Color.appInk)
+                            .textSelection(.enabled)
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(challenge.code)
+                                .font(.appMono(32, weight: .semibold))
+                                .foregroundStyle(Color.appInk)
+                                .textSelection(.enabled)
+                            Spacer()
+                            Button {
+                                UIPasteboard.general.string = challenge.code
+                                HapticManager.shared.success()
+                                copied = true
+                            } label: {
+                                Text(copied ? "Copied" : "Copy code")
+                                    .font(.appBody(14, weight: .medium))
+                                    .foregroundStyle(Color.appAccent)
+                                    .frame(minHeight: 44)
                             }
+                            .buttonStyle(.plain)
+                        }
+                        Text("Works once. Expires in 10 minutes.")
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .settingsSurface()
+                }
+            }
 
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Start pairing")
-                                    .font(.appBody(15, weight: .semibold))
-                                    .foregroundStyle(Color.appInk)
-                                AppLineField(placeholder: "Display name (optional)", text: $pairingName)
+            SettingsGroup(title: "Paired") {
+                if isLoading {
+                    OxySkeletonCard(height: 60, cornerRadius: 16)
+                } else if displays.isEmpty {
+                    SettingsStatement(text: "No displays paired", solid: false)
+                        .padding(.horizontal, 4)
+                } else {
+                    SettingsList {
+                        ForEach(Array(displays.enumerated()), id: \.element.id) { index, display in
+                            if index > 0 { SettingsRule() }
+                            SettingsRow(title: display.name, subtitle: displayPresenceLabel(display)) {
                                 Button {
-                                    Task { await createPairing() }
+                                    pendingRevoke = display
+                                    showRevokeConfirmation = true
                                 } label: {
-                                    HStack {
-                                        Text(isWorking ? "Creating code…" : "Create pairing code")
-                                        Spacer()
-                                    }
-                                    .font(.appBody(14, weight: .semibold))
-                                    .foregroundStyle(Color.appInk)
-                                    .padding(.vertical, 14)
+                                    Text("Forget")
+                                        .font(.appBody(14, weight: .medium))
+                                        .foregroundStyle(Color.appDestructive)
+                                        .frame(minWidth: 44, minHeight: 44)
                                 }
-                                .disabled(isWorking)
-                            }
-
-                            if let challenge {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Open this link on the display, then enter the code")
-                                        .font(.appBody(14, weight: .semibold))
-                                        .foregroundStyle(Color.appInk)
-                                    Text(challenge.displayUrl)
-                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(Color.appMuted)
-                                        .textSelection(.enabled)
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(challenge.code)
-                                            .font(.system(size: 32, weight: .bold, design: .monospaced))
-                                            .foregroundStyle(Color.appInk)
-                                            .textSelection(.enabled)
-                                        Spacer()
-                                        Button(copied ? "Copied" : "Copy code") {
-                                            UIPasteboard.general.string = challenge.code
-                                            copied = true
-                                        }
-                                        .font(.appBody(13, weight: .semibold))
-                                        .foregroundStyle(Color.appAccent)
-                                    }
-                                    Text("One-time code. It expires after 10 minutes.")
-                                        .font(.appBody(12))
-                                        .foregroundStyle(Color.appMuted)
-                                }
-                            }
-
-                            VStack(alignment: .leading, spacing: 10) {
-                                AppSectionTitle("Paired", size: 20)
-                                if isLoading {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                } else if displays.isEmpty {
-                                    Text("No displays paired yet.")
-                                        .font(.appBody(13))
-                                        .foregroundStyle(Color.appMuted)
-                                } else {
-                                    VStack(spacing: 0) {
-                                        ForEach(displays) { display in
-                                            HStack(alignment: .top, spacing: 12) {
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(display.name)
-                                                        .font(.appBody(15, weight: .semibold))
-                                                        .foregroundStyle(Color.appInk)
-                                                    Text(displayPresenceLabel(display))
-                                                        .font(.appBody(12))
-                                                        .foregroundStyle(Color.appMuted)
-                                                }
-                                                Spacer()
-                                                Button("Forget") {
-                                                    pendingRevoke = display
-                                                    showRevokeConfirmation = true
-                                                }
-                                                .font(.appBody(13, weight: .semibold))
-                                                .foregroundStyle(Color.appDestructive)
-                                            }
-                                            .padding(.vertical, 14)
-                                            if display.id != displays.last?.id {
-                                                SettingsDivider()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.appBody(12))
-                                    .foregroundStyle(Color.appDestructive)
+                                .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 12)
-                        .padding(.bottom, 32)
                     }
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .task { await loadDisplays() }
-            .refreshable { await loadDisplays() }
-            .confirmationDialog(
-                "Forget this display?",
-                isPresented: $showRevokeConfirmation,
-                titleVisibility: .visible
-            ) {
-                if let display = pendingRevoke {
-                    Button("Forget \(display.name)", role: .destructive) {
-                        Task { await revoke(display) }
-                    }
+        }
+        .task { await loadDisplays() }
+        .refreshable { await loadDisplays() }
+        .confirmationDialog(
+            "Forget this display?",
+            isPresented: $showRevokeConfirmation,
+            titleVisibility: .visible
+        ) {
+            if let display = pendingRevoke {
+                Button("Forget \(display.name)", role: .destructive) {
+                    Task { await revoke(display) }
                 }
-                Button("Cancel", role: .cancel) {}
             }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

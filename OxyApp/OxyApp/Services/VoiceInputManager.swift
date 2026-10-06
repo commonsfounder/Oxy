@@ -78,6 +78,7 @@ final class VoiceInputManager {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             let rec = try AVAudioRecorder(url: url, settings: settings)
             rec.isMeteringEnabled = true

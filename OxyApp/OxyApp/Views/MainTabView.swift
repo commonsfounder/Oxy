@@ -18,7 +18,12 @@ struct MainTabView: View {
                     switch choice {
                     case .activity: AdamActivityView()
                     case .home: YourHomeView()
-                    default: AdamYouView()
+                    case .memory: MemoryView()
+                    case .apps: ConnectorsView()
+                    case .payments: PaymentsView()
+                    case .logins: VaultView()
+                    case .displays: PairedDisplaysView()
+                    case .settings, .privateChat: AdamYouView()
                     }
                 }
                 .presentationDragIndicator(.visible)
@@ -126,7 +131,7 @@ private struct AdamYouView: View {
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     private enum Destination: String, Identifiable {
-        case you, connections, privacy, preferences, account, agents
+        case you, connections, preferences, account, agents
         var id: String { rawValue }
     }
 
@@ -137,15 +142,13 @@ private struct AdamYouView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) {
                         Text("Settings")
-                            .font(.appBody(28, weight: .bold))
+                            .font(.appEditorial(34, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
                             .foregroundStyle(Color.appInk)
 
                         SettingsList {
                             youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
                             SettingsRule(inset: 34)
                             youRow(title: "Connections", subtitle: connectionsStatus, icon: "cube") { destination = .connections }
-                            SettingsRule(inset: 34)
-                            youRow(title: "Privacy and control", subtitle: privacyStatus, icon: "shield-check") { destination = .privacy }
                             SettingsRule(inset: 34)
                             youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
                             SettingsRule(inset: 34)
@@ -222,7 +225,7 @@ private struct AdamYouView: View {
 
     private var youStatus: String {
         let name = SettingsStore.load().userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "What Adam knows about you" : name
+        return name.isEmpty ? "Your name, home and memory" : name
     }
 
     private var connectionsStatus: String {
@@ -234,16 +237,11 @@ private struct AdamYouView: View {
         }
     }
 
-    private var privacyStatus: String {
-        SettingsStore.load().guardMode ? "Asks before every action" : "Asks before messaging or spending"
-    }
-
     @ViewBuilder
     private func destinationView(_ item: Destination) -> some View {
         switch item {
         case .you: YouPage()
         case .connections: ConnectionsPage()
-        case .privacy: PrivacyPage()
         case .preferences: PreferencesPage()
         case .account: ProfileView()
         case .agents: ModelRoutingView()

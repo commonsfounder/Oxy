@@ -47,7 +47,7 @@ struct ErrorBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color.appSurface)
+        .background(Color.settingsRaised)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)

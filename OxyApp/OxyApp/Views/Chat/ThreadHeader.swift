@@ -5,6 +5,7 @@ import SwiftUI
 struct ThreadHeader: View {
     var isIncognito: Bool
     var isWorking: Bool
+    var activity: AdamActivityState? = nil
     var deviceOnline: Bool
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
@@ -17,7 +18,7 @@ struct ThreadHeader: View {
                     HapticManager.shared.impact(.light)
                     wheelOpen = true
                 } label: {
-                    WheelHub(progress: 0, incognito: isIncognito)
+                    WheelHub(progress: 0, incognito: isIncognito, activity: activity)
                         .overlay(alignment: .topTrailing) { statusDot }
                 }
                 .buttonStyle(.appScale)
@@ -47,13 +48,15 @@ struct ThreadHeader: View {
             .allowsHitTesting(false)
         }
         .animation(.appStandard, value: isWorking)
+        .animation(.appStandard, value: activity)
         .animation(.appStandard, value: deviceOnline)
     }
 
     @ViewBuilder
     private var statusDot: some View {
         if isWorking {
-            PulsingDot(color: .appWorking)
+            // The mark in the hub shows the work itself; no separate dot.
+            EmptyView()
         } else if deviceOnline {
             Circle().fill(Color.appDone)
                 .frame(width: 9, height: 9)

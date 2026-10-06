@@ -21,6 +21,7 @@ struct OxyApp: App {
 struct RootView: View {
     @Environment(AppState.self) private var appState
     @State private var didRestoreSession = false
+    @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
 
     var body: some View {
         Group {
@@ -33,6 +34,7 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.35), value: appState.isAuthenticated)
+        .preferredColorScheme((ThreadBackground(rawValue: backgroundRaw) ?? .automatic).scheme)
         .task {
             appState.restoreSession()
             #if DEBUG
