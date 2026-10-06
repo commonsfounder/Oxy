@@ -191,6 +191,7 @@ const { encryptTokens, decryptTokens } = require('./services/token-crypto');
 const { isAllowedOrigin } = require('./lib/cors');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
 const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
+const transaction = require('./services/transaction');
 const { saveVaultCredential, listVaultCredentials, deleteVaultCredential } = require('./services/vault-credentials');
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
@@ -3393,6 +3394,16 @@ const executeActions = createActionExecution({
   setPendingAction,
   validateAction: validateActionWithContract,
   getLinkedCardInfo: (userId) => getLinkedCard(supabase, userId),
+  getReviewDetails: async (userId, action) => {
+    if (action?.type !== 'transaction_authorize') return null;
+    const [pendingPayment, card] = await Promise.all([
+      transaction.pendingSummary(userId),
+      getAgentCardSummary(supabase, userId).catch(() => null)
+    ]);
+    if (!pendingPayment) return null;
+    const cardText = card?.last4 ? `${card.brand ? `${String(card.brand).replace(/^./, c => c.toUpperCase())} ` : ''}ending ${card.last4}` : null;
+    return { ...pendingPayment, card: cardText };
+  },
   logAction: (userId, action, result) => supabase.from('action_log').insert({
     user_id: userId,
     action: serializeLoggedAction(action, result),

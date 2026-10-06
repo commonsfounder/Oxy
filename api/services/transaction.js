@@ -419,6 +419,20 @@ async function prepare(userId, { card = null, profile = null } = {}) {
 }
 
 /**
+ * What is waiting for approval right now, as the page last stated it: the figure remembered by
+ * prepare() and the shop it is on. Reads only; never touches the page's controls.
+ */
+async function pendingSummary(userId) {
+  const session = getSession(userId);
+  if (!session || !session.pendingPaymentLabel) return null;
+  let merchant = null;
+  try {
+    merchant = new URL(session.page.url()).hostname.replace(/^www\./, '') || null;
+  } catch { /* a page with no readable address simply has no shop name */ }
+  return { amount: session.pendingPaymentTotal || null, merchant, commitLabel: session.pendingPaymentLabel };
+}
+
+/**
  * PHASE 2. Commit. Reached only through the deterministic review gate.
  * `authorize` is supplied by the caller and is the last word — this module never decides
  * whether an amount is allowed, it only reports what the page says.
@@ -568,6 +582,7 @@ module.exports = {
   recordConfirmedPurchase,
   // phases
   prepare,
+  pendingSummary,
   commit,
   watch,
   readAmount,

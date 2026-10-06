@@ -390,6 +390,57 @@ test('action runner does not look up a linked card for non-money review actions'
   assert.deepEqual(lookups, []);
 });
 
+test('a purchase approval is built from what the payment page and saved card say', async () => {
+  const lookups = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => { throw new Error('should not execute before review'); },
+    setPendingAction: async () => {},
+    getReviewDetails: async (userId, action) => {
+      lookups.push([userId, action.type]);
+      return { amount: '£54.20', merchant: 'johnlewis.com', card: 'Visa ending 4242' };
+    },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [{ type: 'transaction_authorize', input: {} }], { userMessage: 'yes buy it' });
+
+  assert.deepEqual(lookups, [['user-1', 'transaction_authorize']]);
+  assert.equal(result[0].result.pending, true);
+  assert.equal(result[0].result.subject.amount, '£54.20');
+});
+
+test('a failing review-detail lookup still parks the purchase for approval', async () => {
+  const pending = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => { throw new Error('should not execute before review'); },
+    setPendingAction: async (userId, action) => pending.push(action),
+    getReviewDetails: async () => { throw new Error('browser gone'); },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [{ type: 'transaction_authorize', input: {} }], { userMessage: 'yes buy it' });
+
+  assert.equal(result[0].result.pending, true);
+  assert.equal(pending.length, 1);
+});
+
+test('review details are only looked up for purchases', async () => {
+  const lookups = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => { throw new Error('should not execute before review'); },
+    setPendingAction: async () => {},
+    getReviewDetails: async (userId, action) => { lookups.push(action.type); return null; },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  await executeActions('user-1', [{ type: 'send_email', input: { to: 'josh@example.com', body: 'hi' } }], { userMessage: 'email josh' });
+
+  assert.deepEqual(lookups, []);
+});
+
 // ── A logging failure must never fail the action it is logging, or the batch. A PostgREST
 // insert is thenable but has no `.catch`, so chaining one throws synchronously and turns a
 // whole iteration into a false failure. safeLogAction uses a real try/await/catch instead.

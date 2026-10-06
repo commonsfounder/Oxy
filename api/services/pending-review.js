@@ -163,7 +163,18 @@ function reviewDetailForAction(action, cardInfo = null) {
   }
 }
 
-function buildPendingReviewResult(action, cardInfo = null) {
+/** What a purchase approval says: only figures the payment page and saved card actually stated. */
+function purchaseReview(details) {
+  const amount = String(details?.amount || '').trim();
+  if (!amount) return null;
+  const merchant = String(details?.merchant || '').trim();
+  const card = String(details?.card || '').trim();
+  const cardText = `Pay ${amount}${merchant ? ` to ${merchant}` : ''}${card ? ` with your ${card}` : ''}.`;
+  const subject = { amount, ...(merchant ? { merchant } : {}), ...(card ? { card } : {}) };
+  return { cardText, subject };
+}
+
+function buildPendingReviewResult(action, cardInfo = null, details = null) {
   const contract = getActionContract(action?.type) || {};
   const prompt = action?.type === 'send_message'
     ? 'Check the message, then tap Send.'
@@ -180,12 +191,14 @@ function buildPendingReviewResult(action, cardInfo = null) {
               : action?.type === 'create_calendar_event'
                 ? 'Check the details, then tap Add.'
                 : `${reviewTitleForAction(action)}. Check the details, then tap Confirm or Cancel.`;
+  const purchase = action?.type === 'transaction_authorize' ? purchaseReview(details) : null;
   return applyActionContractResultMetadata(action, {
     success: false,
     outcome: 'awaiting_user',
     pending: true,
     text: prompt,
-    cardText: reviewDetailForAction(action, cardInfo) || 'Ready for review.',
+    cardText: purchase?.cardText || reviewDetailForAction(action, cardInfo) || 'Ready for review.',
+    ...(purchase ? { subject: purchase.subject } : {}),
     actionSummary: reviewTitleForAction(action),
     risk: contract.risk || 'high',
     confirmation: 'review_required',

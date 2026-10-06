@@ -116,3 +116,31 @@ test('buildPendingReviewResult threads cardInfo into the card text', () => {
   );
   assert.equal(result.cardText, 'Charge your visa card ending in 4242 $10.00 for gift.');
 });
+
+test('a purchase approval states the amount, shop and card it will use', () => {
+  const result = buildPendingReviewResult(
+    { type: 'transaction_authorize', input: {} },
+    null,
+    { amount: '£54.20', merchant: 'johnlewis.com', card: 'Visa ending 4242' }
+  );
+  assert.equal(result.pending, true);
+  assert.equal(result.cardText, 'Pay £54.20 to johnlewis.com with your Visa ending 4242.');
+  assert.deepEqual(result.subject, { amount: '£54.20', merchant: 'johnlewis.com', card: 'Visa ending 4242' });
+});
+
+test('a purchase approval with no readable amount invents nothing', () => {
+  const result = buildPendingReviewResult({ type: 'transaction_authorize', input: {} }, null, { amount: null, merchant: 'johnlewis.com' });
+  assert.equal(result.cardText, 'Ready for review.');
+  assert.equal(result.subject, undefined);
+  const bare = buildPendingReviewResult({ type: 'transaction_authorize', input: {} });
+  assert.equal(bare.cardText, 'Ready for review.');
+});
+
+test('purchase details never leak onto other approvals', () => {
+  const result = buildPendingReviewResult(
+    { type: 'send_email', input: { to: 'josh@example.com', body: 'hi' } },
+    null,
+    { amount: '£1.00', merchant: 'example.com' }
+  );
+  assert.equal(result.subject, undefined);
+});
