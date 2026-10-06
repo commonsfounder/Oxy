@@ -38,6 +38,8 @@ struct MessageBubble: View {
             return true
         case "get_directions", "plan_trip":
             return !action.isFailure && (action.deepLink != nil || action.webLink != nil)
+        case "find_place":
+            return !action.isFailure && (action.places?.count ?? 0) >= 2
         default:
             return false
         }
@@ -223,6 +225,8 @@ struct MessageBubble: View {
                             TravelResultCard(action: action, kind: .hotels)
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
                             DirectionsResultCard(action: action)
+                        } else if action.action == "find_place" {
+                            PlaceResultsCard(action: action)
                         }
                     }
 

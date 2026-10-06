@@ -119,6 +119,37 @@ struct ActionSelection: Codable, Equatable {
     let options: [ActionSelectionOption]
 }
 
+/// One place a search found, with only the facts Google stated.
+struct PlaceOption: Codable, Equatable, Hashable, Identifiable {
+    let name: String
+    let address: String
+    let lat: Double
+    let lng: Double
+    let distanceMeters: Int?
+    let rating: Double?
+    let ratingCount: Int?
+    let price: String?
+    let openNow: Bool?
+    let link: String?
+
+    var id: String { "\(name)|\(lat),\(lng)" }
+
+    /// "★ 4.6 (812) · ££ · Open now · 350 m", leaving out whatever wasn't stated.
+    var facts: String {
+        var parts: [String] = []
+        if let rating {
+            let count = ratingCount.map { " (\($0))" } ?? ""
+            parts.append("★ \(String(format: "%.1f", rating))\(count)")
+        }
+        if let price { parts.append(price) }
+        if let openNow { parts.append(openNow ? "Open now" : "Closed now") }
+        if let distanceMeters {
+            parts.append(distanceMeters < 1000 ? "\(distanceMeters) m" : String(format: "%.1f km", Double(distanceMeters) / 1000))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String
@@ -149,6 +180,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let selection: ActionSelection?
     /// A page Adam wrote to look at or tap through; shown as a card that opens it.
     let scene: SceneContent?
+    /// Every place a search found, best first. Only on place searches.
+    let places: [PlaceOption]?
 
     /// Bounded backend outcomes keep handoffs and review pauses visible without
     /// treating their legacy `success` compatibility flag as a completed effect.
@@ -167,7 +200,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
-        case subject, taskId, selection, scene
+        case subject, taskId, selection, scene, places
         // Older servers sent these at the top level; decoded into `subject` below.
         case imageUrls, productName, price, total, colorOptions
     }
@@ -197,7 +230,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         subject: ResultSubject? = nil,
         taskId: String? = nil,
         selection: ActionSelection? = nil,
-        scene: SceneContent? = nil
+        scene: SceneContent? = nil,
+        places: [PlaceOption]? = nil
     ) {
         self.action = action
         self.success = success
@@ -224,6 +258,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.taskId = taskId
         self.selection = selection
         self.scene = scene
+        self.places = places
     }
 
     init(native result: NativeLocalActionResult) {
@@ -272,6 +307,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
             selection = try result.decodeIfPresent(ActionSelection.self, forKey: .selection)
             scene = try result.decodeIfPresent(SceneContent.self, forKey: .scene)
+            places = try result.decodeIfPresent([PlaceOption].self, forKey: .places)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
@@ -297,6 +333,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
             selection = try container.decodeIfPresent(ActionSelection.self, forKey: .selection)
             scene = try container.decodeIfPresent(SceneContent.self, forKey: .scene)
+            places = try container.decodeIfPresent([PlaceOption].self, forKey: .places)
         }
     }
 
@@ -327,6 +364,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(taskId, forKey: .taskId)
         try container.encodeIfPresent(selection, forKey: .selection)
         try container.encodeIfPresent(scene, forKey: .scene)
+        try container.encodeIfPresent(places, forKey: .places)
     }
 }
 
