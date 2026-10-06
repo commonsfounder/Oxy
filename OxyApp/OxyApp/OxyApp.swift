@@ -6,7 +6,9 @@ struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
     init() {
-        UISlider.appearance().maximumTrackTintColor = UIColor(white: 1, alpha: 0.16)
+        UISlider.appearance().maximumTrackTintColor = UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.16) : UIColor(white: 0, alpha: 0.14)
+        }
     }
 
     var body: some Scene {

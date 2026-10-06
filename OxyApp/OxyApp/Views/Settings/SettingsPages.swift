@@ -385,6 +385,9 @@ struct PreferencesPage: View {
                 }
             }
         }
+        // Colours are looked up when drawn; a new id makes this page redraw in the theme just chosen.
+        .id(backgroundRaw)
+        .preferredColorScheme((ThreadBackground(rawValue: backgroundRaw) ?? .automatic).scheme)
         .sheet(isPresented: $showsWheelEditor) {
             WheelEditorSheet(orderRaw: $wheelOrderRaw)
                 .presentationDetents([.large])
