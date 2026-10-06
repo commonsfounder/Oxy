@@ -229,18 +229,24 @@ struct ThreadBoardCards: View {
 
     private func openCard(_ item: BoardItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Needs a yes")
-                .font(.appBody(12, weight: .semibold))
-                .foregroundStyle(Color.appNeedsYou)
-            Text(title(for: item))
-                .font(.appBody(16, weight: .medium))
-                .foregroundStyle(Color.appInk)
-                .fixedSize(horizontal: false, vertical: true)
-            if let detail = item.detail, !detail.isEmpty, detail != title(for: item) {
-                Text(detail)
-                    .font(.appBody(13))
-                    .foregroundStyle(Color.appMuted)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Needs a yes")
+                        .font(.appBody(12, weight: .semibold))
+                        .foregroundStyle(Color.appNeedsYou)
+                    Text(title(for: item))
+                        .font(.appBody(16, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = item.detail, !detail.isEmpty, detail != title(for: item) {
+                        Text(detail)
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+                AdamActivityMark(state: .waiting, size: 52)
             }
             actions(for: item)
                 .padding(.top, 8)
@@ -289,6 +295,7 @@ struct ThreadBoardCards: View {
         let isStopping = model.stopping.contains(item.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
+                AdamActivityMark(state: .working, size: 26)
                 Text(title(for: item))
                     .font(.appBody(14, weight: .medium))
                     .foregroundStyle(Color.appWorking)

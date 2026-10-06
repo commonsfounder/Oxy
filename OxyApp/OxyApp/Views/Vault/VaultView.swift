@@ -19,7 +19,7 @@ struct VaultView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Saved sign-ins", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Logins Adam can use", onBack: { dismiss() })
 
                     if !isUnlocked {
                         lockedState

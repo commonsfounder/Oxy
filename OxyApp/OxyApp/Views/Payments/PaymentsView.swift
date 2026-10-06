@@ -17,7 +17,7 @@ struct PaymentsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Payments", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Payment methods", onBack: { dismiss() })
 
                     if isLoading {
                         VStack(spacing: 12) {

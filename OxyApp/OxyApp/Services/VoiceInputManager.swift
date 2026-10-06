@@ -80,6 +80,7 @@ final class VoiceInputManager {
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             let rec = try AVAudioRecorder(url: url, settings: settings)
+            rec.isMeteringEnabled = true
             rec.prepareToRecord()
             guard rec.record() else {
                 throw NSError(domain: "VoiceInputManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Recorder did not start."])
@@ -98,6 +99,14 @@ final class VoiceInputManager {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             HouseholdSoundMonitor.shared.resumeAfterVoiceInput()
         }
+    }
+
+    /// How loud you are right now, 0 to 1, for the listening indicator.
+    func level() -> Double {
+        guard isRecording, let rec = recorder else { return 0 }
+        rec.updateMeters()
+        let decibels = Double(rec.averagePower(forChannel: 0))
+        return min(max((decibels + 50) / 50, 0), 1)
     }
 
     func stopRecording() {

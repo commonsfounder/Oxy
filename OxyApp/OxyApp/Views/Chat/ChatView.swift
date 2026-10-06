@@ -424,6 +424,7 @@ struct ChatView: View {
                         isSending: isOffline,
                         isBusy: viewModel.isSending,
                         onStop: { viewModel.stopCurrentTurn() },
+                        voiceLevel: { voiceInput.level() },
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isTranscribing,
                         voiceTranscript: voiceInput.transcript,
@@ -1209,6 +1210,7 @@ private struct ChatInputBar: View {
     let isSending: Bool
     var isBusy: Bool = false
     var onStop: () -> Void = {}
+    var voiceLevel: (() -> Double)? = nil
     let isRecording: Bool
     let isPreparingVoice: Bool
     let voiceTranscript: String
@@ -1384,7 +1386,7 @@ private struct ChatInputBar: View {
             .buttonStyle(.appScale)
             .accessibilityLabel("Cancel")
 
-            PulseOrb(color: isPreparingVoice ? Color.appMuted : Color.appWorking, size: 22)
+            AdamActivityMark(state: isPreparingVoice ? .working : .listening, size: 28, tint: isPreparingVoice ? Color.appMuted : Color.appAccent, level: voiceLevel)
 
             Group {
                 if isPreparingVoice {

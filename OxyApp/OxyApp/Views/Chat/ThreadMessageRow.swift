@@ -400,34 +400,6 @@ struct ReplyPreviewBar: View {
 
 // MARK: - Working
 
-/// A small dot with soft rings that expand and fade, like a quiet ping. Used wherever Adam is
-/// attentive: working on a reply, or listening.
-struct PulseOrb: View {
-    var color: Color = .appWorking
-    var size: CGFloat = 24
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            ZStack {
-                ForEach(0..<2, id: \.self) { index in
-                    let p = reduceMotion ? 0.5 : ((t / 2.2) + Double(index) * 0.5).truncatingRemainder(dividingBy: 1)
-                    Circle()
-                        .stroke(color.opacity(0.55 * (1 - p)), lineWidth: 1.5)
-                        .scaleEffect(0.3 + 0.7 * p)
-                }
-                Circle()
-                    .fill(color)
-                    .frame(width: size * 0.4, height: size * 0.4)
-                    .scaleEffect(reduceMotion ? 1 : 1 + 0.1 * sin(t * 2.8))
-            }
-            .frame(width: size, height: size)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 /// Text with a slow highlight sweeping across it.
 struct ShimmerText: View {
     let text: String
@@ -460,7 +432,7 @@ struct WorkingBubble: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-                PulseOrb(size: 26)
+                AdamActivityMark(state: .working, size: 28)
                 if let label {
                     ShimmerText(text: label)
                         .lineLimit(1)

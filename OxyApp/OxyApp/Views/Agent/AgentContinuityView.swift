@@ -17,7 +17,7 @@ struct AgentContinuityView: View {
         ZStack {
             GlebChrome.pastelBlob.ignoresSafeArea()
             VStack(spacing: 0) {
-                ScreenHeaderView(title: "Import history", onBack: { dismiss() })
+                ScreenHeaderView(title: "Import your chats", onBack: { dismiss() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if let preview {

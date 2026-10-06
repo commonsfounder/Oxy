@@ -42,7 +42,7 @@ struct MemoryView: View {
 
             VStack(spacing: 0) {
                 if !embedded {
-                    ScreenHeaderView(title: "Memory", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Everything saved", onBack: { dismiss() })
                 }
                 // A real List, not a hand-rolled ScrollView, so swipe-to-delete is the
                 // native, reliable gesture instead of a custom drag (which rendered a

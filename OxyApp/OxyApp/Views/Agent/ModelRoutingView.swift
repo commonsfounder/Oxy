@@ -13,7 +13,7 @@ struct ModelRoutingView: View {
         ZStack {
             GlebChrome.pastelBlob.ignoresSafeArea()
             VStack(spacing: 0) {
-                ScreenHeaderView(title: "AI choices", onBack: { dismiss() })
+                ScreenHeaderView(title: "Advanced", onBack: { dismiss() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if let snapshot {
@@ -40,7 +40,7 @@ struct ModelRoutingView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 AppIcon("sparkles", size: 16).foregroundStyle(Color.appAccent)
-                Text("Adam's AI")
+                Text("Current model")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
             }
@@ -60,7 +60,7 @@ struct ModelRoutingView: View {
 
     private func routeEditor(_ snapshot: ModelRoutingSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionTitle("Choose Adam's AI", size: 20)
+            AppSectionTitle("Change model", size: 20)
             Picker("Provider", selection: $selectedProvider) {
                 ForEach(snapshot.providers) { provider in
                     Text(provider.name).tag(provider.id)
@@ -91,7 +91,7 @@ struct ModelRoutingView: View {
 
     private func providerList(_ providers: [ModelProvider]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppSectionTitle("Available AI", size: 20)
+            AppSectionTitle("Available models", size: 20)
             ForEach(providers) { provider in
                 HStack(spacing: 12) {
                     AppIcon(provider.configured ? "bolt" : "dotted", size: 14)
@@ -116,7 +116,7 @@ struct ModelRoutingView: View {
 
     private func errorState(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("AI choices unavailable").font(.appBody(18, weight: .semibold))
+            Text("Couldn't load models").font(.appBody(18, weight: .semibold))
             Text(message).font(.appBody(13)).foregroundStyle(Color.appMuted)
             Button("Try again") { Task { await load() } }
                 .font(.appBody(14, weight: .semibold))

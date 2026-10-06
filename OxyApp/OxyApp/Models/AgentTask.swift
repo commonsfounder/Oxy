@@ -276,6 +276,11 @@ struct AgentAuditEntry: Codable, Identifiable, Equatable {
     let executionMode: String
     let reviewRequired: Bool
     let undo: String?
+    /// Plain-English description from the server; older servers omit these four.
+    let summary: String?
+    let kind: String?
+    let usedLocation: Bool?
+    let hidden: Bool?
 
     var id: String { [createdAt ?? "", type, status].joined(separator: "-") }
 }

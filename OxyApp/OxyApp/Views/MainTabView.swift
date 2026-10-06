@@ -71,7 +71,7 @@ struct AdamPresence: View {
                 .rotationEffect(.degrees(rotating ? 360 : 0))
 
             AdamMark()
-                .frame(width: size * 0.35, height: size * 0.25)
+                .frame(width: size * 0.3, height: size * 0.3)
         }
         .frame(width: size, height: size)
         .scaleEffect(reduceMotion ? 1 : (breathing ? activeScale : 1))
@@ -117,10 +117,16 @@ struct AdamPresence: View {
 private struct AdamYouView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: Destination?
-    @State private var showsBackgroundPicker = false
+    @State private var contextModel = SettingsContextModel()
+    @State private var showBackendURLEditor = false
+    @State private var versionTapCount = 0
+    #if DEBUG
+    @State private var showsIndicatorPreview = false
+    #endif
+    @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     private enum Destination: String, Identifiable {
-        case profile, memory, connections, agents, privacy, settings
+        case you, connections, privacy, preferences, account, agents
         var id: String { rawValue }
     }
 
@@ -129,184 +135,119 @@ private struct AdamYouView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 30) {
+                    VStack(alignment: .leading, spacing: 26) {
                         Text("Settings")
-                            .font(.title.weight(.semibold))
-                            .appHeroTracking(28)
+                            .font(.appBody(28, weight: .bold))
                             .foregroundStyle(Color.appInk)
 
-                        identityHeader
-
-                        youGroup {
-                            youRow(title: "What Adam remembers", subtitle: "See it and change it", icon: "person") { destination = .memory }
-                            AppDivider(inset: 50)
-                            youRow(title: "Connected apps", subtitle: "Mail, calendar, messages and more", icon: "cube") { destination = .connections }
+                        SettingsList {
+                            youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
+                            SettingsRule(inset: 34)
+                            youRow(title: "Connections", subtitle: connectionsStatus, icon: "cube") { destination = .connections }
+                            SettingsRule(inset: 34)
+                            youRow(title: "Privacy and control", subtitle: privacyStatus, icon: "shield-check") { destination = .privacy }
+                            SettingsRule(inset: 34)
+                            youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
+                            SettingsRule(inset: 34)
+                            youRow(title: "Account", subtitle: appState.userId, icon: "list") { destination = .account }
                         }
 
-                        youGroup {
-                            youRow(title: "Privacy and safety", subtitle: "What Adam asks you first", icon: "shield-check") { destination = .privacy }
-                            AppDivider(inset: 50)
-                            youRow(title: "Account and preferences", subtitle: "Your details, alerts and more", icon: "list") { destination = .settings }
-                            AppDivider(inset: 50)
-                            youRow(title: "Appearance", subtitle: ThreadBackground.current.title, icon: "sun") { showsBackgroundPicker = true }
-                        }
+                        Spacer(minLength: 40)
 
-                        youSection("Advanced") {
-                            youRow(title: "Which AI Adam uses", subtitle: "For people who like to choose", icon: "waveform") { destination = .agents }
+                        VStack(spacing: 14) {
+                            Button {
+                                versionTapCount += 1
+                                if versionTapCount >= 5 {
+                                    versionTapCount = 0
+                                    showBackendURLEditor = true
+                                }
+                            } label: {
+                                VStack(spacing: 10) {
+                                    AdamMark().frame(width: 36, height: 36)
+                                    Text("adam-0001-alpha")
+                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(Color.appMuted)
+                                }
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Adam, version adam-0001-alpha")
+
+                            Button { destination = .agents } label: {
+                                Text("Advanced")
+                                    .font(.appBody(13))
+                                    .foregroundStyle(Color.appMuted)
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
+                        .frame(maxWidth: .infinity)
                     }
                     .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 18)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 28)
+                    .containerRelativeFrame(.vertical, alignment: .top)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showBackendURLEditor) {
+                BackendURLEditorSheet(currentURL: $customBackendURL) { showBackendURLEditor = false }
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+            .task { await contextModel.load(isDemo: appState.isDemoSession) }
         }
         .fullScreenCover(item: $destination) { item in
             destinationView(item).swipeToDismiss()
         }
-        .sheet(isPresented: $showsBackgroundPicker) { BackgroundPicker() }
         #if DEBUG
+        .fullScreenCover(isPresented: $showsIndicatorPreview) {
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"] == "transition" { ActivityTransitionPreview() } else { ActivityMarkPreview() }
+        }
         .onAppear {
-            if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"],
-               let target = Destination(rawValue: raw) { destination = target }
+            if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"] {
+                if raw == "indicator" || raw == "transition" { showsIndicatorPreview = true }
+                else if let target = Destination(rawValue: raw) { destination = target }
+            }
         }
         #endif
     }
 
-    private var identityHeader: some View {
-        HStack(spacing: 16) {
-            Text(initials)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.appInk)
-                .frame(width: 50, height: 50)
-                .background(Color.appReceivedBubble, in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(Color.appInk)
-            }
-            Spacer()
-            Button { destination = .profile } label: {
-                AppIcon("chevron-right", size: 13)
-                    .foregroundStyle(Color.appMuted)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.appScale)
-            .accessibilityLabel("Open profile")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private func youSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Color.appInk)
-            VStack(spacing: 0) { content() }
-                .padding(.horizontal, 16)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-    }
-
-    private func youGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) { content() }
-            .padding(.horizontal, 16)
-            .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
     private func youRow(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                AppIcon(icon, size: 17)
-                    .foregroundStyle(Color.appInk)
-                    .frame(width: 36, height: 36)
-                    .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.appInk)
-                    Text(subtitle).font(.footnote).foregroundStyle(Color.appMuted)
-                }
-                Spacer()
-                AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted)
-            }
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
+        SettingsNavRow(title: title, subtitle: subtitle, lead: .icon(icon), action: action)
+    }
+
+    private var youStatus: String {
+        let name = SettingsStore.load().userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "What Adam knows about you" : name
+    }
+
+    private var connectionsStatus: String {
+        let apps = contextModel.context?.connectedApps ?? []
+        switch apps.count {
+        case 0: return "Apps, displays and payments"
+        case 1...3: return apps.joined(separator: ", ")
+        default: return "\(apps.count) connected"
         }
-        .buttonStyle(.appScale(0.99))
+    }
+
+    private var privacyStatus: String {
+        SettingsStore.load().guardMode ? "Asks before every action" : "Asks before messaging or spending"
     }
 
     @ViewBuilder
     private func destinationView(_ item: Destination) -> some View {
         switch item {
-        case .profile: ProfileView()
-        case .memory: MemoryView()
-        case .connections: ConnectorsView()
+        case .you: YouPage()
+        case .connections: ConnectionsPage()
+        case .privacy: PrivacyPage()
+        case .preferences: PreferencesPage()
+        case .account: ProfileView()
         case .agents: ModelRoutingView()
-        case .privacy: TrustCenterView()
-        case .settings: SettingsView()
         }
-    }
-
-    private var displayName: String {
-        let saved = savedSettings.userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !saved.isEmpty, !["user", "demo", "test"].contains(saved.lowercased()) { return saved }
-        let local = appState.userId.split(separator: "@").first.map(String.init) ?? ""
-        return local.isEmpty ? "You" : local.prefix(1).uppercased() + local.dropFirst()
-    }
-
-    private var initials: String {
-        let parts = displayName.split(separator: " ").prefix(2)
-        let value = parts.compactMap(\.first).map(String.init).joined()
-        return value.isEmpty ? "Y" : value.uppercased()
-    }
-
-    private var savedSettings: OxySettings {
-        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
-              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else { return OxySettings() }
-        return settings
-    }
-}
-
-private struct BackgroundPicker: View {
-    @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("Appearance")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Color.appInk)
-            HStack(spacing: 16) {
-                ForEach(ThreadBackground.allCases) { option in
-                    Button {
-                        HapticManager.shared.select()
-                        backgroundRaw = option.rawValue
-                        dismiss()
-                    } label: {
-                        VStack(spacing: 8) {
-                            Circle()
-                                .fill(option.swatch)
-                                .frame(width: 58, height: 58)
-                                .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
-                                .overlay(Circle().strokeBorder(Color.appInk, lineWidth: backgroundRaw == option.rawValue ? 2.5 : 0).padding(-4))
-                            Text(option.title)
-                                .font(.footnote)
-                                .foregroundStyle(Color.appInk)
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .buttonStyle(.appScale)
-                    .accessibilityAddTraits(backgroundRaw == option.rawValue ? .isSelected : [])
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appBackground.ignoresSafeArea())
-        .presentationDetents([.height(220)])
     }
 }
 
@@ -317,3 +258,54 @@ private struct BackgroundPicker: View {
         .environment(AppState())
 }
    
+
+#if DEBUG
+/// Debug only (OXY_DEBUG_YOU=indicator): the activity mark in each state, small and large.
+struct ActivityMarkPreview: View {
+    var body: some View {
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 34) {
+                ForEach([("Working", AdamActivityState.working), ("Listening", .listening), ("Waiting for you", .waiting)], id: \.0) { name, state in
+                    HStack(spacing: 24) {
+                        AdamActivityMark(state: state, size: 96)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(name).font(.appBody(15, weight: .medium)).foregroundStyle(Color.appInk)
+                            AdamActivityMark(state: state, size: 28)
+                        }
+                    }
+                }
+                HStack(spacing: 24) {
+                    TimelineView(.periodic(from: .now, by: 2.8)) { context in
+                        let steps: [AdamActivityState] = [.working, .listening, .waiting]
+                        AdamActivityMark(state: steps[Int(context.date.timeIntervalSinceReferenceDate / 2.8) % steps.count], size: 96)
+                    }
+                    Text("Changing state").font(.appBody(15, weight: .medium)).foregroundStyle(Color.appInk)
+                }
+                WorkingBubble(label: "Looking at image").padding(.horizontal, -AppSpacing.chatMargin)
+            }
+            .padding(.horizontal, AppSpacing.margin)
+        }
+    }
+}
+#endif
+
+#if DEBUG
+/// Debug only (OXY_DEBUG_YOU=transition): one large mark that goes working, then waiting, then back.
+struct ActivityTransitionPreview: View {
+    var body: some View {
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            TimelineView(.periodic(from: .now, by: 3.0)) { context in
+                let working = Int(context.date.timeIntervalSinceReferenceDate / 3.0) % 2 == 0
+                VStack(spacing: 28) {
+                    AdamActivityMark(state: working ? .working : .waiting, size: 220)
+                    Text(working ? "Working" : "Waiting for you")
+                        .font(.appBody(17, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+        }
+    }
+}
+#endif

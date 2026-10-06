@@ -53,7 +53,7 @@ struct WheelHub: View {
                     .opacity(1 - open)
             } else {
                 AdamMark()
-                    .frame(width: 22, height: 16)
+                    .frame(width: 20, height: 20)
                     .scaleEffect(1 - 0.4 * open)
                     .opacity(1 - open)
             }

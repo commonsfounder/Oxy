@@ -126,7 +126,7 @@ struct YourHomeView: View {
             PendantStatusView().presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showsSettings) {
-            SettingsView().swipeToDismiss()
+            HomeAddressPage().swipeToDismiss()
         }
     }
 

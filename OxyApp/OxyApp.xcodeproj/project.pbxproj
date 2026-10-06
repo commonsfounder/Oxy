@@ -20,10 +20,8 @@
 		A10000010000000000000003 /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000003 /* Message.swift */; };
 		A10000010000000000000209 /* AgentTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000209 /* AgentTask.swift */; };
 		A1000001000000000000020A /* AgentTasksService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020A /* AgentTasksService.swift */; };
-		A1000001000000000000020B /* AgentWorkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020B /* AgentWorkView.swift */; };
 		A1000001000000000000020C /* AgentContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020C /* AgentContext.swift */; };
 		A1000001000000000000020D /* AgentContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020D /* AgentContextService.swift */; };
-		A1000001000000000000020E /* AgentOSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020E /* AgentOSView.swift */; };
 		A10000010000000000000212 /* ModelRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000212 /* ModelRouting.swift */; };
 		A10000010000000000000213 /* ModelRoutingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000213 /* ModelRoutingService.swift */; };
 		A10000010000000000000214 /* ModelRoutingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000214 /* ModelRoutingView.swift */; };
@@ -54,7 +52,10 @@
 		A10000010000000000000015 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* MainTabView.swift */; };
 		A10000010000000000000017 /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000017 /* MemoryView.swift */; };
 		A10000010000000000000018 /* ConnectorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000018 /* ConnectorsView.swift */; };
-		A10000010000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019 /* SettingsView.swift */; };
+		A10000010000000000000019 /* SettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019 /* SettingsModel.swift */; };
+		A10000010000000000009F02 /* SettingsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F02 /* SettingsPages.swift */; };
+		A10000010000000000009F03 /* PrivacyPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F03 /* PrivacyPages.swift */; };
+		A10000010000000000009F01 /* SettingsKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F01 /* SettingsKit.swift */; };
 		A10000010000000000000048 /* PaymentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000048 /* PaymentsView.swift */; };
 		A10000010000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000020 /* Assets.xcassets */; };
 		A10000010000000000000F03 /* Fraunces.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F01 /* Fraunces.ttf */; };
@@ -101,10 +102,8 @@
 		A20000010000000000000003 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		A20000010000000000000209 /* AgentTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTask.swift; sourceTree = "<group>"; };
 		A2000001000000000000020A /* AgentTasksService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTasksService.swift; sourceTree = "<group>"; };
-		A2000001000000000000020B /* AgentWorkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkView.swift; sourceTree = "<group>"; };
 		A2000001000000000000020C /* AgentContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContext.swift; sourceTree = "<group>"; };
 		A2000001000000000000020D /* AgentContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextService.swift; sourceTree = "<group>"; };
-		A2000001000000000000020E /* AgentOSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOSView.swift; sourceTree = "<group>"; };
 		A20000010000000000000212 /* ModelRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouting.swift; sourceTree = "<group>"; };
 		A20000010000000000000213 /* ModelRoutingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRoutingService.swift; sourceTree = "<group>"; };
 		A20000010000000000000214 /* ModelRoutingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRoutingView.swift; sourceTree = "<group>"; };
@@ -136,7 +135,10 @@
 		A20000010000000000000017 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		A20000010000000000000018 /* ConnectorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000048 /* PaymentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaymentsView.swift; sourceTree = "<group>"; };
-		A20000010000000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A20000010000000000000019 /* SettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModel.swift; sourceTree = "<group>"; };
+		A20000010000000000009F02 /* SettingsPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPages.swift; sourceTree = "<group>"; };
+		A20000010000000000009F03 /* PrivacyPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPages.swift; sourceTree = "<group>"; };
+		A20000010000000000009F01 /* SettingsKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsKit.swift; sourceTree = "<group>"; };
 		A20000010000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000010000000000000F01 /* Fraunces.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Fraunces.ttf; sourceTree = "<group>"; };
 		A20000010000000000000F02 /* Inter.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Inter.ttf; sourceTree = "<group>"; };
@@ -381,7 +383,10 @@
 		A50000010000000000000014 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				A20000010000000000000019 /* SettingsView.swift */,
+				A20000010000000000000019 /* SettingsModel.swift */,
+				A20000010000000000009F02 /* SettingsPages.swift */,
+				A20000010000000000009F03 /* PrivacyPages.swift */,
+				A20000010000000000009F01 /* SettingsKit.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -389,7 +394,6 @@
 		A5000001000000000000020B /* Work */ = {
 			isa = PBXGroup;
 			children = (
-				A2000001000000000000020B /* AgentWorkView.swift */,
 			);
 			path = Work;
 			sourceTree = "<group>";
@@ -397,7 +401,6 @@
 		A5000001000000000000020C /* Agent */ = {
 			isa = PBXGroup;
 			children = (
-				A2000001000000000000020E /* AgentOSView.swift */,
 				A20000010000000000000214 /* ModelRoutingView.swift */,
 				A20000010000000000000217 /* AgentContinuityView.swift */,
 			);
@@ -574,10 +577,8 @@
 				A10000010000000000000003 /* Message.swift in Sources */,
 				A10000010000000000000209 /* AgentTask.swift in Sources */,
 				A1000001000000000000020A /* AgentTasksService.swift in Sources */,
-				A1000001000000000000020B /* AgentWorkView.swift in Sources */,
 				A1000001000000000000020C /* AgentContext.swift in Sources */,
 				A1000001000000000000020D /* AgentContextService.swift in Sources */,
-				A1000001000000000000020E /* AgentOSView.swift in Sources */,
 				A10000010000000000000212 /* ModelRouting.swift in Sources */,
 				A10000010000000000000213 /* ModelRoutingService.swift in Sources */,
 				A10000010000000000000214 /* ModelRoutingView.swift in Sources */,
@@ -613,7 +614,10 @@
 				A10000010000000000000015 /* MainTabView.swift in Sources */,
 				A10000010000000000000017 /* MemoryView.swift in Sources */,
 				A10000010000000000000018 /* ConnectorsView.swift in Sources */,
-				A10000010000000000000019 /* SettingsView.swift in Sources */,
+				A10000010000000000000019 /* SettingsModel.swift in Sources */,
+				A10000010000000000009F02 /* SettingsPages.swift in Sources */,
+				A10000010000000000009F03 /* PrivacyPages.swift in Sources */,
+				A10000010000000000009F01 /* SettingsKit.swift in Sources */,
 				A10000010000000000000021 /* LocationManager.swift in Sources */,
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,

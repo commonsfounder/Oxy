@@ -5,7 +5,7 @@ import UIKit
 struct ProfileView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var settings = OxySettings()
+    @State private var showsImport = false
 
     @State private var showSignOutConfirm = false
     @State private var showSignOutAllConfirm = false
@@ -15,12 +15,6 @@ struct ProfileView: View {
     @State private var isSigningOutAll = false
     @State private var accountStatusText: String?
     @State private var sharePayload: SharePayload?
-    @State private var profileDestination: ProfileDestination?
-
-    enum ProfileDestination: Identifiable {
-        case aboutYou, memory
-        var id: String { "\(self)" }
-    }
 
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
@@ -34,55 +28,8 @@ struct ProfileView: View {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
                     ScrollView {
                         VStack(alignment: .leading, spacing: 36) {
-                            section(title: "Identity") {
-                                HStack {
-                                    Text("Your name")
-                                        .font(.appBody(15, weight: .regular))
-                                        .foregroundStyle(Color.appInk)
-                                    Spacer(minLength: 16)
-                                    TextField(
-                                        "",
-                                        text: $settings.userName,
-                                        prompt: Text("Add your name").foregroundStyle(Color.appMuted)
-                                    )
-                                        .font(.appBody(15))
-                                        .foregroundStyle(Color.appInk)
-                                        .tint(Color.appMuted)
-                                        .multilineTextAlignment(.trailing)
-                                        .textContentType(.givenName)
-                                        .onChange(of: settings.userName) { _, _ in saveSettings() }
-                                }
-                                .padding(.vertical, 18)
-
-                                SettingsDivider()
-
-                                HStack {
-                                    Text("Assistant name")
-                                        .font(.appBody(15, weight: .regular))
-                                        .foregroundStyle(Color.appInk)
-                                    Spacer(minLength: 16)
-                                    TextField(
-                                        "",
-                                        text: $settings.name,
-                                        prompt: Text("Adam").foregroundStyle(Color.appMuted)
-                                    )
-                                        .font(.appBody(15))
-                                        .foregroundStyle(Color.appInk)
-                                        .tint(Color.appMuted)
-                                        .multilineTextAlignment(.trailing)
-                                        .onChange(of: settings.name) { _, _ in saveSettings() }
-                                }
-                                .padding(.vertical, 18)
-
-                                SettingsDivider()
-
+                            SettingsList {
                                 identityRow(label: "Account ID", value: appState.userId)
-                            }
-
-                            section(title: "Adam") {
-                                actionRow(label: "About you", action: { profileDestination = .aboutYou })
-                                SettingsDivider()
-                                actionRow(label: "Memory", action: { profileDestination = .memory })
                             }
 
                             section(title: "Your data") {
@@ -93,13 +40,23 @@ struct ProfileView: View {
                                 .disabled(isExportingData || isDeletingAccount)
                             }
 
+                            section(title: "Import and help") {
+                                actionRow(label: "Import from ChatGPT or Claude", action: { showsImport = true })
+                                SettingsRule()
+                                legalLink(label: "Support", path: "/support")
+                                SettingsRule()
+                                legalLink(label: "Privacy Policy", path: "/privacy")
+                                SettingsRule()
+                                legalLink(label: "Terms of Use", path: "/terms")
+                            }
+
                             section(title: "Sign out and delete") {
                                 actionRow(
                                     label: "Sign out",
                                     action: { showSignOutConfirm = true }
                                 )
 
-                                SettingsDivider()
+                                SettingsRule()
 
                                 actionRow(
                                     label: isSigningOutAll ? "Signing out…" : "Sign out of all devices",
@@ -107,7 +64,7 @@ struct ProfileView: View {
                                 )
                                 .disabled(isSigningOutAll)
 
-                                SettingsDivider()
+                                SettingsRule()
 
                                 actionRow(
                                     label: isDeletingAccount ? "Deleting account…" : "Delete account",
@@ -117,7 +74,7 @@ struct ProfileView: View {
                                 .disabled(isExportingData || isDeletingAccount)
 
                                 if let accountStatusText {
-                                    SettingsDivider()
+                                    SettingsRule()
                                     Text(accountStatusText)
                                         .font(.appBody(12, weight: .regular))
                                         .foregroundStyle(Color.appMuted)
@@ -126,6 +83,7 @@ struct ProfileView: View {
                                         .padding(.vertical, 14)
                                 }
                             }
+
                         }
                         .padding(.horizontal, AppSpacing.margin)
                         .padding(.top, 12)
@@ -134,7 +92,9 @@ struct ProfileView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .onAppear(perform: loadSettings)
+            .fullScreenCover(isPresented: $showsImport) {
+                AgentContinuityView().swipeToDismiss().environment(\.colorScheme, colorScheme)
+            }
             .alert("Sign out", isPresented: $showSignOutConfirm) {
                 Button("Sign out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}
@@ -156,33 +116,28 @@ struct ProfileView: View {
             .sheet(item: $sharePayload) { payload in
                 ShareSheet(activityItems: [payload.url])
             }
-            .fullScreenCover(item: $profileDestination) { dest in
-                Group {
-                    switch dest {
-                    case .aboutYou: AgentOSView()
-                    case .memory: MemoryView()
-                    }
-                }
-                .swipeToDismiss()
-                .environment(\.colorScheme, colorScheme)
-            }
         }
     }
 
     // MARK: - Rows
 
     private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SettingsSectionHeader(title: title)
-                .padding(.bottom, 10)
-            TodayCard { VStack(spacing: 0) { content() } }
+        SettingsGroup(title: title) { SettingsList { content() } }
+    }
+
+    private func legalLink(label: String, path: String) -> some View {
+        SettingsRow(title: label, action: {
+            guard let url = URL(string: "\(APIClient.shared.baseURL)\(path)") else { return }
+            UIApplication.shared.open(url)
+        }) {
+            AppIcon("arrow-up-right", size: 12).foregroundStyle(Color.appMuted)
         }
     }
 
     private func identityRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.appBody(15, weight: .regular))
+                .font(.appBody(15, weight: .medium))
                 .foregroundStyle(Color.appInk)
             Spacer(minLength: 16)
             Text(value)
@@ -191,7 +146,7 @@ struct ProfileView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .padding(.vertical, 18)
+        .frame(minHeight: 50)
     }
 
     private func actionRow(
@@ -205,33 +160,16 @@ struct ProfileView: View {
         } label: {
             HStack {
                 Text(label)
-                    .font(.appBody(15, weight: .regular))
+                    .font(.appBody(15, weight: .medium))
                 Spacer()
-                AppIcon("chevron-right", size: 14)
+                AppIcon("chevron-right", size: 12)
                     .foregroundStyle(Color.appMuted)
             }
             .foregroundStyle(destructive ? Color.appDestructive : Color.appInk)
-            .padding(.vertical, 16)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.98))
-    }
-
-    // MARK: - Settings persistence
-
-    private func loadSettings() {
-        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
-           let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
-            settings = saved
-        }
-    }
-
-    private func saveSettings() {
-        if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: "oxy_settings")
-        }
-        Task {
-            await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
-        }
     }
 
     // MARK: - Account actions

@@ -26,7 +26,7 @@ struct ConnectorsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Your apps", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Connections", onBack: { dismiss() })
 
                     if isLoading {
                         VStack(spacing: 12) {

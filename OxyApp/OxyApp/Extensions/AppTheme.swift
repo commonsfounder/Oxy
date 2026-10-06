@@ -386,17 +386,18 @@ func appGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder conten
 
 // MARK: - BrandWordmark
 //
-// The supplied architectural mark is rebuilt as live geometry so it remains crisp
-// in compact chrome and large identity moments alike.
+// An A drawn as a roof over a doorway, with one blue dot standing where the
+// crossbar would be: Adam, present in the house. Live geometry, so it stays
+// crisp from a 16pt chip to a full-screen identity moment.
 
 struct BrandWordmark: View {
     var height: CGFloat = 14
     var color: Color = .appInk
 
     var body: some View {
-        HStack(spacing: height * 0.58) {
+        HStack(spacing: height * 0.5) {
             AdamMark()
-                .frame(width: height * 1.42, height: height)
+                .frame(width: height, height: height)
             Text("ADAM")
                 .font(.appBody(height * 0.78, weight: .bold))
                 .tracking(height * 0.16)
@@ -407,74 +408,405 @@ struct BrandWordmark: View {
     }
 }
 
-/// The dark frame carries the identity; the blue channels are reserved for
-/// activity and action throughout the interface.
+/// Graphite roof, blue presence dot. Blue stays reserved for activity: when
+/// `active` is false the dot goes quiet.
 struct AdamMark: View {
     var active = true
 
     var body: some View {
         ZStack {
-            AdamEnergyShape()
-                .fill(active ? Color.appAccent : Color.appMuted.opacity(0.35))
-            AdamFrameShape()
-                .fill(Color.appInk)
+            AdamRoofShape().fill(Color.appInk)
+            AdamDotShape().fill(active ? Color.appAccent : Color.appMuted.opacity(0.35))
         }
-        .aspectRatio(1.42, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
         .accessibilityHidden(true)
     }
 }
 
-private struct AdamFrameShape: Shape {
+private struct AdamRoofShape: Shape {
     func path(in rect: CGRect) -> Path {
         func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
             CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
         }
-        var path = Path()
-        path.move(to: point(0.27, 0.08))
-        path.addLine(to: point(0.73, 0.08))
-        path.addLine(to: point(0.94, 0.92))
-        path.addCurve(to: point(0.63, 0.51), control1: point(0.78, 0.92), control2: point(0.69, 0.82))
-        path.addLine(to: point(0.63, 0.30))
-        path.addLine(to: point(0.56, 0.30))
-        path.addLine(to: point(0.56, 0.51))
-        path.addLine(to: point(0.51, 0.51))
-        path.addLine(to: point(0.51, 0.30))
-        path.addLine(to: point(0.44, 0.30))
-        path.addLine(to: point(0.44, 0.51))
-        path.addLine(to: point(0.37, 0.51))
-        path.addCurve(to: point(0.06, 0.92), control1: point(0.31, 0.82), control2: point(0.22, 0.92))
-        path.closeSubpath()
-        return path
+        var line = Path()
+        line.move(to: point(0.17, 0.85))
+        line.addLine(to: point(0.5, 0.16))
+        line.addLine(to: point(0.83, 0.85))
+        return line.strokedPath(StrokeStyle(lineWidth: rect.width * 0.2, lineCap: .round, lineJoin: .round))
     }
 }
 
-private struct AdamEnergyShape: Shape {
+private struct AdamDotShape: Shape {
     func path(in rect: CGRect) -> Path {
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        let r = rect.width * 0.08
+        let c = CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.69)
+        return Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+    }
+}
+
+// MARK: - Activity mark
+
+enum AdamActivityState {
+    /// Adam is doing something: the dot traces the roof of the A.
+    case working
+    /// Adam is hearing you: the dot becomes the speaker cone of a ripple of dots.
+    case listening
+    /// Adam needs you: the dot draws a question mark, then drops in as its full stop.
+    case waiting
+}
+
+/// The activity indicator. One blue dot is the actor in every state. When the state changes the
+/// dot is carried across, never replaced: it flies from where it was to where it is needed next.
+struct AdamActivityMark: View {
+    var state: AdamActivityState = .working
+    var size: CGFloat = 26
+    var tint: Color = .appAccent
+    /// Live loudness from 0 to 1 while listening. Without it the dots move on their own, like speech.
+    var level: (() -> Double)? = nil
+    @State private var smoother = LevelSmoother()
+    @State private var track = Track()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private final class LevelSmoother {
+        var value = 0.0
+        func step(toward target: Double) -> Double {
+            value += (target - value) * (target > value ? 0.45 : 0.12)
+            return value
+        }
+    }
+
+    /// The dot, in unit coordinates: where it is, how big, how solid, and how squashed.
+    private struct Dot {
+        var x = 0.5
+        var y = 0.5
+        var r = 0.07
+        var alpha = 1.0
+        var sx = 1.0
+        var sy = 1.0
+    }
+
+    /// Remembers the dot between frames so a change of state can start from where it was.
+    private final class Track {
+        var startedAt = Date().timeIntervalSinceReferenceDate
+        var from: AdamActivityState?
+        var fromDot = Dot()
+        var last = Dot()
+    }
+
+    private static let flight = 0.5
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, canvas in
+                render(ctx, canvas.width, time)
+            }
+        }
+        .frame(width: size, height: size)
+        .onChange(of: state) { old, _ in
+            track.from = old
+            track.fromDot = track.last
+            track.startedAt = Date().timeIntervalSinceReferenceDate
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func render(_ ctx: GraphicsContext, _ w: CGFloat, _ time: Double) {
+        let tau = time - track.startedAt
+        let progress = min(max(tau / Self.flight, 0), 1)
+        let e = progress * progress * (3 - 2 * progress)
+        var dot = Dot()
+
+        if let from = track.from, progress < 1, !reduceMotion {
+            ctx.drawLayer { layer in
+                layer.opacity = 1 - e
+                _ = scene(from, &layer, w, time, tau: 999)
+            }
+            var target = Dot()
+            ctx.drawLayer { layer in
+                layer.opacity = e
+                target = scene(state, &layer, w, time, tau: tau)
+            }
+            dot = carried(from: track.fromDot, to: target, e)
+        } else {
+            var layer = ctx
+            dot = scene(state, &layer, w, time, tau: tau)
+        }
+
+        track.last = dot
+        let rx = dot.r * w * dot.sx
+        let ry = dot.r * w * dot.sy
+        ctx.fill(
+            Path(ellipseIn: CGRect(x: dot.x * w - rx, y: dot.y * w - ry, width: rx * 2, height: ry * 2)),
+            with: .color(tint.opacity(dot.alpha))
+        )
+    }
+
+    /// The dot's flight from one state to the next: a gentle arc, landing exactly on the new dot.
+    private func carried(from a: Dot, to b: Dot, _ e: Double) -> Dot {
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let length = hypot(dx, dy)
+        var nx = length > 0 ? -dy / length : 0
+        var ny = length > 0 ? dx / length : 0
+        if ny > 0 { nx = -nx; ny = -ny }
+        let bulge = 0.2 * length * sin(Double.pi * e)
+        return Dot(
+            x: a.x + dx * e + nx * bulge,
+            y: a.y + dy * e + ny * bulge,
+            r: a.r + (b.r - a.r) * e,
+            alpha: a.alpha + (b.alpha - a.alpha) * e,
+            sx: 1 + (b.sx - 1) * e,
+            sy: 1 + (b.sy - 1) * e
+        )
+    }
+
+    private func scene(_ which: AdamActivityState, _ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, tau: Double) -> Dot {
+        switch which {
+        case .working: return sceneWorking(&ctx, w, time, tau)
+        case .listening: return sceneListening(&ctx, w, time)
+        case .waiting: return sceneWaiting(&ctx, w, tau)
+        }
+    }
+
+    private func circle(_ at: CGPoint, _ r: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: at.x - r, y: at.y - r, width: r * 2, height: r * 2))
+    }
+
+    private func ease(_ x: Double) -> Double { x * x }
+    private func easeOut(_ x: Double) -> Double { 1 - (1 - x) * (1 - x) }
+    private func smooth(_ x: Double) -> Double { x * x * (3 - 2 * x) }
+    private func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
+
+    // MARK: Working — the dot traces the roof of the A
+
+    private static let corners: [CGPoint] = [CGPoint(x: 0.17, y: 0.85), CGPoint(x: 0.5, y: 0.16), CGPoint(x: 0.83, y: 0.85)]
+    private static let home = CGPoint(x: 0.5, y: 0.69)
+    private static let travel = 0.76
+    private static let cycle = 2.3
+
+    private func sceneWorking(_ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double, _ tau: Double) -> Dot {
+        let stroke = StrokeStyle(lineWidth: w * 0.1, lineCap: .round, lineJoin: .round)
+        let pts = Self.corners.map { CGPoint(x: $0.x * w, y: $0.y * w) }
+        var roof = Path()
+        roof.move(to: pts[0]); roof.addLine(to: pts[1]); roof.addLine(to: pts[2])
+        ctx.stroke(roof, with: .color(Color.appMuted.opacity(0.38)), style: stroke)
+
+        let home = CGPoint(x: Self.home.x * w, y: Self.home.y * w)
+        let dotR = w * 0.07
+        if reduceMotion {
+            return Dot(x: Self.home.x, y: Self.home.y, r: 0.07)
+        }
+        // Counting from the moment the state began, so the dot always starts at the left foot.
+        let clock = tau > 500 ? time : tau
+        let phase = (clock / Self.cycle).truncatingRemainder(dividingBy: 1)
+        let u = min(phase / Self.travel, 1)
+        let head = u * u * (3 - 2 * u)
+        let tailLength = 0.3
+        for k in 0..<4 {
+            let a = max(0, head - tailLength + tailLength * Double(k) / 4)
+            let b = max(0, head - tailLength + tailLength * Double(k + 1) / 4)
+            guard b > a else { continue }
+            var seg = Path()
+            seg.move(to: point(at: a, pts))
+            for f in stride(from: a, through: b, by: 0.02) { seg.addLine(to: point(at: f, pts)) }
+            seg.addLine(to: point(at: b, pts))
+            ctx.stroke(seg, with: .color(tint.opacity(0.12 + 0.2 * Double(k))), style: stroke)
+        }
+        let lift = sin(Double.pi * clamp((phase - Self.travel) / (1 - Self.travel)))
+        ctx.fill(circle(home, dotR * (1 + 0.25 * lift)), with: .color(tint.opacity(0.35 + 0.65 * lift)))
+
+        let fade = phase <= Self.travel ? 1 : max(0, 1 - (phase - Self.travel) / 0.08)
+        let at = point(at: head, pts)
+        return Dot(x: Double(at.x / w), y: Double(at.y / w), r: 0.07, alpha: fade)
+    }
+
+    /// A point a fraction of the way along the roof, measured by length so the speed is even.
+    private func point(at fraction: Double, _ pts: [CGPoint]) -> CGPoint {
+        let first = hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+        let second = hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y)
+        let along = min(max(fraction, 0), 1) * (first + second)
+        if along <= first {
+            let f = first == 0 ? 0 : along / first
+            return CGPoint(x: pts[0].x + (pts[1].x - pts[0].x) * f, y: pts[0].y + (pts[1].y - pts[0].y) * f)
+        }
+        let f = second == 0 ? 0 : (along - first) / second
+        return CGPoint(x: pts[1].x + (pts[2].x - pts[1].x) * f, y: pts[1].y + (pts[2].y - pts[1].y) * f)
+    }
+
+    // MARK: Listening — the dot becomes the speaker cone
+
+    private func sceneListening(_ ctx: inout GraphicsContext, _ w: CGFloat, _ time: Double) -> Dot {
+        let n = w < 40 ? 5 : (w < 80 ? 7 : 9)
+        let step = 0.82 * w / CGFloat(n - 1)
+        let centre = CGPoint(x: w / 2, y: w / 2)
+        let baseR = step * 0.2
+        let half = Double(n - 1) / 2
+
+        let synthetic = abs(sin(time * 1.3) * sin(time * 2.9 + 1)) * (0.55 + 0.45 * sin(time * 7.3))
+        let loud = reduceMotion ? 0.4 : smoother.step(toward: min(max(level?() ?? synthetic, 0), 1))
+
+        ctx.fill(circle(centre, w * 0.47), with: .color(tint.opacity(0.06 + 0.07 * loud)))
+
+        for row in 0..<n {
+            for col in 0..<n {
+                let gx = Double(col) - half
+                let gy = Double(row) - half
+                let d = hypot(gx, gy)
+                if d == 0 { continue }
+                let wave = reduceMotion ? 0 : sin(d * 1.9 - time * 6.0) * exp(-d * 0.22)
+                let ripple = reduceMotion ? 0 : sin(d * 3.4 - time * 9.5 + 1.3) * exp(-d * 0.35) * 0.5
+                let z = (wave + ripple) * (0.25 + 0.75 * loud)
+                let crest = max(0, z)
+                let radius = max(baseR * 0.45, baseR * CGFloat(1 + 1.7 * z))
+                let glow = min(1, crest * 1.4 + loud * 0.3 * exp(-d * 0.45))
+                let at = CGPoint(x: centre.x + CGFloat(gx) * step, y: centre.y + CGFloat(gy) * step)
+                ctx.fill(circle(at, radius), with: .color(tint.opacity(0.26 + 0.74 * glow)))
+            }
+        }
+        return Dot(x: 0.5, y: 0.5, r: Double(baseR * (1.7 + 1.2 * loud) / w))
+    }
+
+    // MARK: Waiting — the dot draws a question mark and drops in as its full stop
+
+    private static let sampleCount = 40
+
+    /// "?" as one stroke: a hook over the top that curls into a short stem.
+    private static let questionPoints: [CGPoint] = {
+        var points: [CGPoint] = []
+        let centre = CGPoint(x: 0.5, y: 0.31)
+        let radius = 0.19
+        let start = 200.0 * Double.pi / 180
+        let end = -40.0 * Double.pi / 180
+        let arcCount = 26
+        for i in 0...arcCount {
+            let a = start + (end - start) * Double(i) / Double(arcCount)
+            points.append(CGPoint(x: centre.x + radius * cos(a), y: centre.y - radius * sin(a)))
+        }
+        let p0 = points.last!
+        let c1 = CGPoint(x: p0.x - 0.058, y: p0.y + 0.069)
+        let c2 = CGPoint(x: 0.5, y: 0.52)
+        let p3 = CGPoint(x: 0.5, y: 0.6)
+        let tail = sampleCount - points.count
+        for i in 1...tail {
+            let t = Double(i) / Double(tail)
+            let m = 1 - t
+            points.append(CGPoint(
+                x: m * m * m * p0.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * p3.x,
+                y: m * m * m * p0.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * p3.y
+            ))
+        }
+        return points
+    }()
+
+    private func hookPoint(_ fraction: Double) -> CGPoint {
+        let pts = Self.questionPoints
+        let f = clamp(fraction) * Double(pts.count - 1)
+        let i = min(Int(f.rounded(.down)), pts.count - 1)
+        let j = min(i + 1, pts.count - 1)
+        let t = CGFloat(f - Double(i))
+        return CGPoint(x: pts[i].x + (pts[j].x - pts[i].x) * t, y: pts[i].y + (pts[j].y - pts[i].y) * t)
+    }
+
+    private func strokePath(_ pts: [CGPoint], from a: Double, to b: Double) -> Path {
+        let last = Double(pts.count - 1)
+        let fa = clamp(a) * last
+        let fb = clamp(b) * last
+        guard fb > fa + 0.001 else { return Path() }
+        func at(_ f: Double) -> CGPoint {
+            let i = min(Int(f.rounded(.down)), pts.count - 1)
+            let j = min(i + 1, pts.count - 1)
+            let t = CGFloat(f - Double(i))
+            return CGPoint(x: pts[i].x + (pts[j].x - pts[i].x) * t, y: pts[i].y + (pts[j].y - pts[i].y) * t)
         }
         var path = Path()
-
-        path.move(to: point(0.37, 0.45))
-        path.addLine(to: point(0.42, 0.45))
-        path.addCurve(to: point(0.38, 0.92), control1: point(0.42, 0.68), control2: point(0.41, 0.82))
-        path.addLine(to: point(0.25, 0.92))
-        path.addCurve(to: point(0.37, 0.45), control1: point(0.34, 0.80), control2: point(0.37, 0.65))
-        path.closeSubpath()
-
-        path.move(to: point(0.47, 0.45))
-        path.addLine(to: point(0.53, 0.45))
-        path.addLine(to: point(0.56, 0.92))
-        path.addLine(to: point(0.44, 0.92))
-        path.closeSubpath()
-
-        path.move(to: point(0.58, 0.45))
-        path.addLine(to: point(0.63, 0.45))
-        path.addCurve(to: point(0.75, 0.92), control1: point(0.63, 0.65), control2: point(0.66, 0.80))
-        path.addLine(to: point(0.62, 0.92))
-        path.addCurve(to: point(0.58, 0.45), control1: point(0.59, 0.82), control2: point(0.58, 0.68))
-        path.closeSubpath()
+        path.move(to: at(fa))
+        var i = Int(fa.rounded(.down)) + 1
+        while Double(i) < fb { path.addLine(to: pts[i]); i += 1 }
+        path.addLine(to: at(fb))
         return path
+    }
+
+    /// Floor taps as (time since the state began, strength): the landing and its bounces, then a
+    /// small impatient double hop every few seconds.
+    private func contacts(_ tau: Double) -> [(Double, Double)] {
+        var list: [(Double, Double)] = [(1.45, 1), (1.71, 0.6), (1.87, 0.35)]
+        if tau > 1.9 {
+            let k = Int(((tau - 1.9) / 2.6).rounded(.down))
+            for j in max(0, k - 1)...k {
+                let base = 1.9 + Double(j) * 2.6
+                list.append((base + 1.56, 0.5))
+                list.append((base + 1.74, 0.3))
+            }
+        }
+        return list
+    }
+
+    private func sceneWaiting(_ ctx: inout GraphicsContext, _ w: CGFloat, _ tau: Double) -> Dot {
+        let lineWidth = max(1.6, w * 0.1)
+        let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+        let question = Self.questionPoints.map { CGPoint(x: $0.x * w, y: $0.y * w) }
+        let landY = 0.85
+        let stemY = 0.6
+        let dotR = 0.085
+        let strokeR = Double(lineWidth / 2 / w)
+
+        if reduceMotion {
+            ctx.stroke(strokePath(question, from: 0, to: 1), with: .color(tint), style: style)
+            return Dot(x: 0.5, y: landY, r: dotR)
+        }
+
+        // The dot draws the hook, then lets go of the end of it and falls.
+        let hookStart = 0.45
+        let hookEnd = 1.15
+        let drawn = smooth(clamp((tau - hookStart) / (hookEnd - hookStart)))
+        ctx.stroke(strokePath(question, from: 0, to: drawn), with: .color(tint), style: style)
+
+        var dot = Dot(x: 0.5, y: landY, r: dotR)
+        if tau < hookEnd {
+            let at = hookPoint(drawn)
+            dot = Dot(x: Double(at.x), y: Double(at.y), r: strokeR)
+        } else if tau < 1.45 {
+            let u = (tau - hookEnd) / 0.30
+            dot.y = stemY + (landY - stemY) * ease(u)
+            dot.r = strokeR + (dotR - strokeR) * u
+            dot.sy = 1 + 0.3 * u
+            dot.sx = 1 / sqrt(dot.sy)
+        } else if tau < 1.71 {
+            let u = (tau - 1.45) / 0.26
+            dot.y = landY - 4 * 0.12 * u * (1 - u)
+            dot.sy = 1 + 0.15 * sin(Double.pi * u)
+            dot.sx = 1 / sqrt(dot.sy)
+        } else if tau < 1.87 {
+            let u = (tau - 1.71) / 0.16
+            dot.y = landY - 4 * 0.04 * u * (1 - u)
+        } else if tau >= 1.9 {
+            let p = ((tau - 1.9) / 2.6).truncatingRemainder(dividingBy: 1)
+            if p >= 0.5 && p < 0.6 {
+                let u = (p - 0.5) / 0.1
+                dot.y = landY - 4 * 0.1 * u * (1 - u)
+            } else if p >= 0.6 && p < 0.67 {
+                let u = (p - 0.6) / 0.07
+                dot.y = landY - 4 * 0.035 * u * (1 - u)
+            }
+        }
+        if tau >= 1.45 {
+            let squash = contacts(tau).map { max(0, 1 - abs(tau - $0.0) / 0.03) * $0.1 }.max() ?? 0
+            dot.sx *= 1 + 0.3 * squash
+            dot.sy *= 1 - 0.3 * squash
+        }
+
+        let floorY = 0.935 * w
+        for (c, strength) in contacts(tau) {
+            let age = (tau - c) / 0.5
+            guard age >= 0, age <= 1 else { continue }
+            let spread = w * (0.07 + 0.3 * easeOut(age)) * strength
+            ctx.stroke(
+                Path(ellipseIn: CGRect(x: w / 2 - spread, y: floorY - spread * 0.22, width: spread * 2, height: spread * 0.44)),
+                with: .color(tint.opacity(0.55 * (1 - age) * strength)), lineWidth: max(1, w * 0.035)
+            )
+        }
+        return dot
     }
 }
 
@@ -561,7 +893,7 @@ struct SettingsSectionHeader: View {
     }
 }
 
-/// White-on / #333-off capsule toggle, no glow or halo.
+/// Capsule toggle at the system switch size: blue when on, quiet grey when off.
 struct SettingsToggle: View {
     @Binding var isOn: Bool
 
@@ -570,16 +902,17 @@ struct SettingsToggle: View {
             withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.appAction : Color.appToggleOff)
-                .frame(width: 30, height: 16)
+                .fill(isOn ? Color.appAccent : Color.appToggleOff)
+                .frame(width: 51, height: 31)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.appOnAction : Color.appMuted)
-                        .frame(width: 12, height: 12)
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+                        .frame(width: 27, height: 27)
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
                 )
-                .frame(width: 44, height: 44)
+                .frame(width: 51, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
