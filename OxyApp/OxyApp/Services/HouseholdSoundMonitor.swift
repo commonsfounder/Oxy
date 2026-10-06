@@ -37,6 +37,9 @@ struct HouseholdSoundEventFilter {
     private struct Rule {
         let aliases: [String]
         let threshold: Double
+        /// Windows in a row that must agree. Sustained sounds (a crying baby) take two to rule out a blip;
+        /// short ones (breaking glass, a knock) are over in a second, so waiting for two means missing them.
+        let hitsRequired: Int
         let subject: String
         let title: String
         let body: String
@@ -54,6 +57,7 @@ struct HouseholdSoundEventFilter {
         Rule(
             aliases: ["smoke_detector"],
             threshold: 0.65,
+            hitsRequired: 2,
             subject: "Smoke detector",
             title: "Smoke detector heard",
             body: "A smoke detector may be sounding nearby.",
@@ -64,6 +68,7 @@ struct HouseholdSoundEventFilter {
         Rule(
             aliases: ["glass_breaking", "breaking_glass", "glass_shatter"],
             threshold: 0.7,
+            hitsRequired: 1,
             subject: "Breaking glass",
             title: "Breaking glass heard",
             body: "Glass may have broken nearby.",
@@ -74,6 +79,7 @@ struct HouseholdSoundEventFilter {
         Rule(
             aliases: ["door_bell"],
             threshold: 0.7,
+            hitsRequired: 2,
             subject: "Doorbell",
             title: "Doorbell heard",
             body: "Someone may be at the door.",
@@ -83,7 +89,8 @@ struct HouseholdSoundEventFilter {
         ),
         Rule(
             aliases: ["knock"],
-            threshold: 0.65,
+            threshold: 0.8,
+            hitsRequired: 1,
             subject: "Knocking",
             title: "Knocking heard",
             body: "Someone may be at the door.",
@@ -94,6 +101,7 @@ struct HouseholdSoundEventFilter {
         Rule(
             aliases: ["baby_crying", "baby_cry", "infant_cry"],
             threshold: 0.72,
+            hitsRequired: 2,
             subject: "Baby crying",
             title: "Baby crying heard",
             body: "A baby may need attention.",
@@ -105,7 +113,6 @@ struct HouseholdSoundEventFilter {
 
     private var evidence: [String: Evidence] = [:]
     private var lastEmittedAt: [String: Date] = [:]
-    private let requiredHits = 2
     private let evidenceWindow: TimeInterval = 6
     private let cooldown: TimeInterval = 15 * 60
 
@@ -131,7 +138,7 @@ struct HouseholdSoundEventFilter {
         let previous = evidence[key]
         let count = previous.map { now.timeIntervalSince($0.lastSeenAt) <= evidenceWindow ? $0.count + 1 : 1 } ?? 1
         evidence = [key: Evidence(count: count, lastSeenAt: now)]
-        guard count >= requiredHits else { return nil }
+        guard count >= rule.hitsRequired else { return nil }
         guard lastEmittedAt[key].map({ now.timeIntervalSince($0) >= cooldown }) ?? true else { return nil }
 
         lastEmittedAt[key] = now
