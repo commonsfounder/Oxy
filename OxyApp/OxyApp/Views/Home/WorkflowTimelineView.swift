@@ -24,7 +24,7 @@ struct WorkflowTimelineView: View {
 
     var body: some View {
         ZStack {
-            GlebChrome.pastelBlob.ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
@@ -36,7 +36,7 @@ struct WorkflowTimelineView: View {
 
                     if isLoading && detail == nil {
                         ProgressView()
-                            .tint(GlebChrome.ink.opacity(0.4))
+                            .tint(Color.appMuted)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
                     } else if let detail {
@@ -78,7 +78,7 @@ struct WorkflowTimelineView: View {
                     dismiss()
                 } label: {
                     AppIcon("chevron-left", size: 18)
-                        .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                        .foregroundStyle(Color.appMuted)
                         .padding(8)
                 }
                 .buttonStyle(.appScale)
@@ -89,8 +89,8 @@ struct WorkflowTimelineView: View {
             if let workflow = detail?.workflow {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(workflow.goal)
-                        .font(.heroTitle)
-                        .foregroundStyle(GlebChrome.ink)
+                        .font(.pageTitle)
+                        .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 8) {
@@ -100,11 +100,11 @@ struct WorkflowTimelineView: View {
                             AppIcon(workflow.status == "completed" ? "check-circle" : "alert-circle", size: 14)
                                 .foregroundStyle(workflow.status == "completed"
                                                  ? Color.appAccent
-                                                 : Color.red.opacity(0.6))
+                                                 : Color.appDestructive)
                         }
                         Text(workflow.plainStatus)
                             .font(.appBody(13, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
             }
@@ -121,15 +121,15 @@ struct WorkflowTimelineView: View {
                     .foregroundStyle(Color.appAccent)
                     .padding(.top, 1)
                 Text(checkpoint.prompt)
-                    .font(.appBody(16, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink)
+                    .font(.appBody(16, weight: .medium))
+                    .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
 
             if resolvingCheckpointID == checkpoint.id {
                 ProgressView()
-                    .tint(GlebChrome.ink.opacity(0.4))
+                    .tint(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if checkpoint.isChoice, let options = checkpoint.options {
                 VStack(spacing: 6) {
@@ -140,23 +140,22 @@ struct WorkflowTimelineView: View {
                             HStack(spacing: 8) {
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(option.label)
-                                        .font(.appBody(14, weight: .semibold))
-                                        .foregroundStyle(GlebChrome.ink)
+                                        .font(.rowTitle)
+                                        .foregroundStyle(Color.appInk)
                                     if let detail = option.detail, !detail.isEmpty {
                                         Text(detail)
                                             .font(.appBody(12))
-                                            .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                                            .foregroundStyle(Color.appMuted)
                                     }
                                 }
                                 Spacer(minLength: 0)
                                 AppIcon("chevron-right", size: 12)
-                                    .foregroundStyle(GlebChrome.ink.opacity(0.3))
+                                    .foregroundStyle(Color.appMuted)
                             }
                             .padding(.horizontal, 13)
                             .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.45)))
+                            .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.appScale(0.98))
                     }
@@ -165,21 +164,19 @@ struct WorkflowTimelineView: View {
                 HStack(spacing: 8) {
                     Button { resolve(checkpoint, approved: true, choice: nil) } label: {
                         Text("Yes, do it")
-                            .font(.appBody(14, weight: .semibold))
-                            .foregroundStyle(GlebChrome.ink)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                            .background(Capsule().fill(Color.appAccent.opacity(0.22)))
+                            .font(.appBody(15, weight: .medium))
+                            .foregroundStyle(Color.appOnAction)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Capsule().fill(Color.appAction))
                     }
                     .buttonStyle(.appScale(0.97))
 
                     Button { resolve(checkpoint, approved: false, choice: nil) } label: {
                         Text("Not now")
-                            .font(.appBody(14, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.6))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                            .background(Capsule().fill(Color.white.opacity(0.4)))
+                            .font(.appBody(15, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Capsule().fill(Color.appInk.opacity(0.10)))
                     }
                     .buttonStyle(.appScale(0.97))
                 }
@@ -187,7 +184,7 @@ struct WorkflowTimelineView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { MissionGlassPlate() }
+        .settingsSurface(radius: 20)
     }
 
     // MARK: - What it gathered
@@ -195,29 +192,27 @@ struct WorkflowTimelineView: View {
     private func documentsSection(_ documents: [WorkflowDocument]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Files")
-                .font(.appBody(12, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(GlebChrome.ink.opacity(0.42))
+                .font(.sectionLabel)
+                .foregroundStyle(Color.appMuted)
 
             ForEach(documents) { document in
                 HStack(spacing: 10) {
                     AppIcon("doc", size: 14)
-                        .foregroundStyle(GlebChrome.ink.opacity(0.45))
+                        .foregroundStyle(Color.appMuted)
                     Text(document.displayName)
                         .font(.appBody(14, weight: .medium))
-                        .foregroundStyle(GlebChrome.ink.opacity(0.85))
+                        .foregroundStyle(Color.appInk)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if let size = document.sizeText {
                         Text(size)
                             .font(.appBody(12, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.35))
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.34)))
+                .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
     }
@@ -227,9 +222,8 @@ struct WorkflowTimelineView: View {
     private func timelineSection(_ events: [WorkflowEvent]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("What happened")
-                .font(.appBody(12, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(GlebChrome.ink.opacity(0.42))
+                .font(.sectionLabel)
+                .foregroundStyle(Color.appMuted)
 
             VStack(alignment: .leading, spacing: 0) {
                 // Newest first: the interesting end of a live job is the most recent thing.
@@ -251,6 +245,14 @@ struct WorkflowTimelineView: View {
     // MARK: - Data
 
     private func load(quiet: Bool = false) async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW"] == "1" {
+            let json = #"{"workflow":{"id":"w1","goal":"Order the headphones from John Lewis","status":"waiting_for_user"},"timeline":[{"id":"e1","kind":"started","summary":"Started looking for the headphones","actor":"adam","created_at":"2026-10-06T21:00:00Z"},{"id":"e2","kind":"found","summary":"Found them at John Lewis for £54.20","actor":"adam","created_at":"2026-10-06T21:02:00Z"},{"id":"e3","kind":"asked","summary":"Asked you to approve the payment","actor":"adam","created_at":"2026-10-06T21:03:00Z"}],"pendingCheckpoints":[{"id":"c1","type":"payment_confirmation","status":"pending","prompt":"Place the order for £54.20?"}],"documents":[{"id":"d1","filename":"receipt.pdf","label":"Order summary","mime_type":"application/pdf","byte_size":48211}]}"#
+            detail = try? JSONDecoder().decode(WorkflowDetail.self, from: Data(json.utf8))
+            isLoading = false
+            return
+        }
+        #endif
         if !quiet { isLoading = true }
         do {
             let fetched = try await HomeBoardService.fetchWorkflow(id: workflowId)
@@ -305,13 +307,13 @@ private struct TimelineRow: View {
             // continuous thread rather than a stack of unrelated rows.
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(isFirst ? Color.clear : GlebChrome.ink.opacity(0.13))
+                    .fill(isFirst ? Color.clear : Color.appMuted)
                     .frame(width: 1, height: 8)
                 Circle()
-                    .fill(isFirst ? Color.appAccent : GlebChrome.ink.opacity(0.25))
+                    .fill(isFirst ? Color.appAccent : Color.appMuted)
                     .frame(width: isFirst ? 8 : 6, height: isFirst ? 8 : 6)
                 Rectangle()
-                    .fill(isLast ? Color.clear : GlebChrome.ink.opacity(0.13))
+                    .fill(isLast ? Color.clear : Color.appMuted)
                     .frame(width: 1)
                     .frame(maxHeight: .infinity)
             }
@@ -319,8 +321,8 @@ private struct TimelineRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.summary ?? event.kind)
-                    .font(.system(size: 14, weight: isFirst ? .semibold : .regular))
-                    .foregroundStyle(GlebChrome.ink.opacity(isFirst ? 0.95 : 0.72))
+                    .font(.appBody(15, weight: isFirst ? .medium : .regular))
+                    .foregroundStyle((isFirst ? Color.appInk : Color.appMuted))
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 6) {
@@ -332,7 +334,7 @@ private struct TimelineRow: View {
                     if let relative = event.date?.oxyRelativeShort {
                         Text(relative)
                             .font(.appBody(12))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.35))
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
             }
