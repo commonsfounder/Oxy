@@ -87,7 +87,7 @@ struct AdamActivityView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Activity")
-                            .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                            .font(.heroTitle)
                             .foregroundStyle(Color.appInk)
                             .accessibilityAddTraits(.isHeader)
                         filterBar
@@ -135,7 +135,7 @@ struct AdamActivityView: View {
                     withAnimation(.appStandard) { filter = item }
                 } label: {
                     Text(item.rawValue)
-                        .font(.footnote.weight(.semibold))
+                        .font(.appBody(13, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
                         .padding(.horizontal, 15)
@@ -147,23 +147,24 @@ struct AdamActivityView: View {
             }
         }
         .padding(4)
-        .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: dynamicTypeSize.isAccessibilitySize ? 24 : 28))
+        .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: dynamicTypeSize.isAccessibilitySize ? 24 : 28))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func section(_ title: String, _ items: [ActivityEvent]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.appBody(13, weight: .semibold))
+                .font(.sectionLabel)
                 .foregroundStyle(Color.appMuted)
+                .padding(.horizontal, 4)
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { Rectangle().fill(Color.appCardOutline).frame(height: 1) }
+                    if index > 0 { SettingsRule() }
                     row(item)
                 }
             }
             .padding(.horizontal, 16)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+            .settingsSurface()
         }
     }
 
@@ -176,23 +177,23 @@ struct AdamActivityView: View {
             } label: {
                 HStack(alignment: .top, spacing: 13) {
                     Text(timeLabel(for: item))
-                        .font(.footnote.weight(.medium))
+                        .font(.appBody(13, weight: .medium))
                         .foregroundStyle(Color.appMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .frame(width: 66, alignment: .leading)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.isFailure ? "Couldn't finish" : item.type.label)
-                            .font(.appBody(11, weight: .semibold))
+                            .font(.appBody(12, weight: .semibold))
                             .foregroundStyle(item.isFailure ? Color.appWarning : Color.appMuted)
                         Text(item.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.appBody(15, weight: .medium))
                             .foregroundStyle(Color.appInk)
                             .lineLimit(expanded ? nil : 2)
                             .multilineTextAlignment(.leading)
                         if let detail = detailLine(for: item) {
                             Text(detail)
-                                .font(.footnote)
+                                .font(.appBody(13))
                                 .foregroundStyle(Color.appMuted)
                                 .lineLimit(expanded ? nil : 2)
                                 .multilineTextAlignment(.leading)
@@ -277,10 +278,10 @@ struct AdamActivityView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(filter == .comingUp ? "Nothing scheduled" : "Nothing yet")
-                .font(.title3.weight(.semibold))
+                .font(.sectionTitle)
                 .foregroundStyle(Color.appInk)
             Text("What Adam notices, does, asks you and schedules shows up here. Your conversations stay in Chat.")
-                .font(.subheadline)
+                .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -291,7 +291,7 @@ struct ChatView: View {
                                     .font(.appBody(12, weight: .semibold))
                                 if let label = viewModel.historySnapshotLabel {
                                     Text(label)
-                                        .font(.appBody(11))
+                                        .font(.appBody(12))
                                 }
                             }
                             Spacer()
@@ -1205,7 +1205,7 @@ private struct ActionReviewSheet: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.appTitle(20, weight: .semibold))
+                        .font(.sectionTitle)
                         .foregroundStyle(Color.appInk)
                 }
                 Spacer()
@@ -1437,7 +1437,7 @@ private struct ChatInputBar: View {
                             .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
-                            .font(.appBody(11))
+                            .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
@@ -1527,7 +1527,7 @@ private struct ChatInputBar: View {
 
     private var textField: some View {
         TextField(isSending ? "You're offline" : (incognito ? "Private · not saved" : "Ask Adam"), text: $text, axis: .vertical)
-            .font(.appBody(14.5, weight: .regular))
+            .font(.appBody(15, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .lineLimit(1...6)
@@ -1673,7 +1673,7 @@ private struct PrivateModeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Private mode")
-                .font(.title2.weight(.semibold))
+                .font(.pageTitle)
                 .foregroundStyle(Color.appInk)
             point("Adam doesn't save this chat or learn from it.")
             point("To answer, Adam may still use the web, your connected apps and its AI provider. They handle your data under their own rules.")

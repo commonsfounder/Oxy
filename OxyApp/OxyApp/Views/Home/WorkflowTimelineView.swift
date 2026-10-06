@@ -89,7 +89,7 @@ struct WorkflowTimelineView: View {
             if let workflow = detail?.workflow {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(workflow.goal)
-                        .font(.appBody(27, weight: .regular))
+                        .font(.heroTitle)
                         .foregroundStyle(GlebChrome.ink)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -195,7 +195,7 @@ struct WorkflowTimelineView: View {
     private func documentsSection(_ documents: [WorkflowDocument]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Files")
-                .font(.appBody(11, weight: .semibold))
+                .font(.appBody(12, weight: .semibold))
                 .tracking(1.3)
                 .foregroundStyle(GlebChrome.ink.opacity(0.42))
 
@@ -210,7 +210,7 @@ struct WorkflowTimelineView: View {
                     Spacer(minLength: 0)
                     if let size = document.sizeText {
                         Text(size)
-                            .font(.appBody(11, weight: .medium))
+                            .font(.appBody(12, weight: .medium))
                             .foregroundStyle(GlebChrome.ink.opacity(0.35))
                     }
                 }
@@ -227,7 +227,7 @@ struct WorkflowTimelineView: View {
     private func timelineSection(_ events: [WorkflowEvent]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("What happened")
-                .font(.appBody(11, weight: .semibold))
+                .font(.appBody(12, weight: .semibold))
                 .tracking(1.3)
                 .foregroundStyle(GlebChrome.ink.opacity(0.42))
 
@@ -326,12 +326,12 @@ private struct TimelineRow: View {
                 HStack(spacing: 6) {
                     if event.isUser {
                         Text("You")
-                            .font(.appBody(11, weight: .semibold))
+                            .font(.appBody(12, weight: .semibold))
                             .foregroundStyle(Color.appAccent.opacity(0.8))
                     }
                     if let relative = event.date?.oxyRelativeShort {
                         Text(relative)
-                            .font(.appBody(11))
+                            .font(.appBody(12))
                             .foregroundStyle(GlebChrome.ink.opacity(0.35))
                     }
                 }

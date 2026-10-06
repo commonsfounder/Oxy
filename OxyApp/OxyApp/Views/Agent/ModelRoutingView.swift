@@ -105,7 +105,7 @@ struct ModelRoutingView: View {
                     Spacer()
                     if provider.id == selectedProvider {
                         Text("In use")
-                            .font(.appBody(11, weight: .semibold))
+                            .font(.appBody(12, weight: .semibold))
                             .foregroundStyle(Color.appAccent)
                     }
                 }

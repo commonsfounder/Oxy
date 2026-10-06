@@ -74,7 +74,7 @@ struct TurnReceiptRow: View {
             if let _ = directOpenStep {
                 HStack(spacing: 3) {
                     Text("Open")
-                        .font(.appBody(12.5, weight: .medium))
+                        .font(.appBody(13, weight: .medium))
                     AppIcon("chevron-right", size: 11)
                 }
                 .foregroundStyle(Color.appTitanium)

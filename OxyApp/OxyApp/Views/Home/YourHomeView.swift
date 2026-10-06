@@ -93,7 +93,7 @@ struct YourHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30) {
                     Text("Your home")
-                        .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                        .font(.heroTitle)
                         .foregroundStyle(Color.appInk)
                         .accessibilityAddTraits(.isHeader)
 
@@ -138,7 +138,7 @@ struct YourHomeView: View {
             AdamPresence(state: .complete, size: 72)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your home isn't connected yet")
-                    .font(.title3.weight(.semibold))
+                    .font(.sectionTitle)
                     .foregroundStyle(Color.appInk)
                 Text("Connect Adam to give it awareness of what's happening around your home.")
                     .font(.appBody(15))
@@ -160,13 +160,13 @@ struct YourHomeView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 previewRow("Answers out loud, in the room")
-                Rectangle().fill(Color.appCardOutline).frame(height: 1)
+                SettingsRule()
                 previewRow("Notices what changes around the house")
-                Rectangle().fill(Color.appCardOutline).frame(height: 1)
+                SettingsRule()
                 previewRow("Keeps watching for what you ask it to")
             }
             .padding(.horizontal, 16)
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
+            .settingsSurface()
         }
     }
 
@@ -275,7 +275,7 @@ struct YourHomeView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+            .settingsSurface()
             if urgentFailed {
                 Text("Couldn't change that. Try again.")
                     .font(.appBody(13))
@@ -307,9 +307,8 @@ struct YourHomeView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Noticed recently")
             if home.observations.isEmpty {
-                Text("Nothing noticed yet.")
-                    .font(.appBody(14))
-                    .foregroundStyle(Color.appMuted)
+                SettingsStatement(text: "Nothing noticed yet", solid: false)
+                    .padding(.horizontal, 4)
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(home.observations.enumerated()), id: \.element.id) { index, item in
@@ -320,7 +319,7 @@ struct YourHomeView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+                .settingsSurface()
             }
         }
     }
@@ -340,8 +339,9 @@ struct YourHomeView: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.appBody(13, weight: .semibold))
+            .font(.sectionLabel)
             .foregroundStyle(Color.appMuted)
+            .padding(.horizontal, 4)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -349,12 +349,12 @@ struct YourHomeView: View {
             sectionTitle(title)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 16)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.appReceivedBubble))
+                .settingsSurface()
         }
     }
 
     private var divider: some View {
-        Rectangle().fill(Color.appCardOutline).frame(height: 1)
+        SettingsRule()
     }
 
     private func deviceRow(_ device: HomeModel.Device) -> some View {

@@ -328,7 +328,7 @@ private struct MemoryRow: View {
                     // Quiet provenance cue — "Saved" (typed by hand) vs "Learned"
                     // (picked up from conversation) — never shouted.
                     Text(item.sourceLabel)
-                        .font(.appBody(11))
+                        .font(.appBody(12))
                         .foregroundStyle(Color.appMuted)
                 }
                 Spacer(minLength: 8)

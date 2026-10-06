@@ -23,7 +23,7 @@ struct ConnectionTroubleView: View {
                     .foregroundStyle(Color.appMuted)
 
                 Text("We couldn't reach your home device.")
-                    .font(.appDisplay(30, weight: .regular))
+                    .font(.heroTitle)
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)

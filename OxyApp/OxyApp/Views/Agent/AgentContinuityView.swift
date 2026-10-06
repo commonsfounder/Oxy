@@ -133,14 +133,14 @@ struct AgentContinuityView: View {
                                     .font(.appBody(13, weight: .medium))
                                     .foregroundStyle(Color.appInk)
                                 Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger — runs only when you ask")
-                                    .font(.appBody(11))
+                                    .font(.appBody(12))
                                     .foregroundStyle(Color.appMuted)
                             }
                         }
                     }
                     if preview.workflows.count > 8 {
                         Text("and \(preview.workflows.count - 8) more")
-                            .font(.appBody(11))
+                            .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                     }
                 }
@@ -219,7 +219,7 @@ struct AgentContinuityView: View {
                             Text(item.source.capitalized).font(.appBody(14, weight: .semibold))
                             Spacer()
                             Text(item.status.capitalized)
-                                .font(.appBody(11, weight: .semibold))
+                                .font(.appBody(12, weight: .semibold))
                                 .foregroundStyle(item.status == "failed" ? Color.appDestructive : Color.appAccent)
                         }
                         Text("\(item.conversationCount) conversations · \(item.messageCount) messages · \(item.memoryCount) memories")

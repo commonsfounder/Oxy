@@ -15,7 +15,7 @@ struct ErrorBanner: View {
                 .foregroundStyle(Color.appMuted)
 
             Text(message)
-                .font(.subheadline)
+                .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -24,7 +24,7 @@ struct ErrorBanner: View {
             if let onRetry {
                 Button(action: onRetry) {
                     Text("Try again")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.appBody(15, weight: .medium))
                         .foregroundStyle(Color.appOnAction)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 44)
@@ -53,7 +53,6 @@ struct ErrorBanner: View {
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .strokeBorder(Color.appHairline, lineWidth: 0.5)
         )
-        .padding(.horizontal, 12)
     }
 }
 

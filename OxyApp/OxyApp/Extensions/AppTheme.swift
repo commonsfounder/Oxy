@@ -114,9 +114,18 @@ enum AppSpacing {
 
 extension Font {
     static var screenTitle: Font { .appBody(20, weight: .semibold) }
-    static var rowTitle: Font    { .appBody(16, weight: .regular) }
+    /// The Preferences type scale, used by every screen: group label, row title, secondary line, body, control, fine print.
+    static var sectionLabel: Font { .appBody(13, weight: .medium) }
+    static var rowTitle: Font    { .appBody(15, weight: .medium) }
     static var rowSecondary: Font { .appBody(13, weight: .regular) }
+    static var bodyText: Font { .appBody(15) }
+    static var control: Font { .appBody(15, weight: .medium) }
+    static var fineprint: Font { .appBody(12, weight: .medium) }
     static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
+    /// The serif headline scale: first screens, page headers, and the title of a card or sheet.
+    static var heroTitle: Font { .appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .title1) }
+    static var pageTitle: Font { .appEditorial(24, weight: 400, soft: 30, wonk: false, relativeTo: .title2) }
+    static var sectionTitle: Font { .appEditorial(20, weight: 400, soft: 30, wonk: false, relativeTo: .title3) }
 }
 
 // MARK: - Radius

@@ -278,7 +278,7 @@ struct ThreadBoardCards: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+        .settingsSurface(radius: 22)
         .accessibilityElement(children: .combine)
     }
 
@@ -309,7 +309,7 @@ struct ThreadBoardCards: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+        .settingsSurface(radius: 22)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(openCardLabel(item))
     }
@@ -492,7 +492,7 @@ private struct FinishedCard: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+            .settingsSurface(radius: 22)
             .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.99))

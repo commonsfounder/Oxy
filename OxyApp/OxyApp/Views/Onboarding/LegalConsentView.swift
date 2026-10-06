@@ -21,7 +21,7 @@ struct LegalConsentView: View {
                     .foregroundStyle(Color.appMuted)
 
                 Text("Before we begin.")
-                    .font(.appDisplay(36, weight: .regular))
+                    .font(.heroTitle)
                     .foregroundStyle(Color.appInk)
                     .padding(.top, 18)
 

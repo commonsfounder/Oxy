@@ -150,7 +150,7 @@ private struct LoginFormPage: View {
                     .padding(.bottom, 44)
 
                 Text(isRegistering ? "Create your account." : "Welcome back.")
-                    .font(.appDisplay(30, weight: .bold))
+                    .font(.heroTitle)
                     .foregroundStyle(Color.appInk)
                     .padding(.bottom, 44)
 
@@ -212,7 +212,7 @@ private struct LoginFormPage: View {
                     .padding(.top, 14)
 
                     Text("Debug demo session")
-                        .font(.appBody(11, weight: .light))
+                        .font(.appBody(12, weight: .light))
                         .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 8)
