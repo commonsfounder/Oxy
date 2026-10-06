@@ -257,9 +257,10 @@ extension Font {
         wonk: Bool = true,
         relativeTo textStyle: UIFont.TextStyle = .title1
     ) -> Font {
-        Font(UIFontMetrics(forTextStyle: textStyle).scaledFont(for: appFrauncesUIFont(
-            size: size, weight: weight, soft: soft, wonk: wonk
-        )))
+        Font(UIFontMetrics(forTextStyle: textStyle).scaledFont(
+            for: appFrauncesUIFont(size: size, weight: weight, soft: soft, wonk: wonk),
+            maximumPointSize: size * 1.3
+        ))
     }
 
     /// System text that follows the phone's text-size setting, capped so layouts stay usable.

@@ -325,7 +325,7 @@ struct ThreadBoardCards: View {
                             .foregroundStyle(Color.appMuted)
                     }
                     Text(amount)
-                        .font(.appEditorial(34, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
+                        .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
                         .foregroundStyle(Color.appInk)
                         .minimumScaleFactor(0.7)
                         .lineLimit(1)

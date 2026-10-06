@@ -1276,7 +1276,7 @@ private struct ActionReviewSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             if let amount = purchase.amount {
                 Text(amount)
-                    .font(.appEditorial(44, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                    .font(.appEditorial(36, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
                     .foregroundStyle(Color.appInk)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)

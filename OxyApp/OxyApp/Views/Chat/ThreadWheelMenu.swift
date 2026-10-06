@@ -461,7 +461,7 @@ struct WheelEditorSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text("Your wheel")
-                        .font(.appEditorial(30, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
+                        .font(.appEditorial(24, weight: 400, soft: 30, wonk: false, relativeTo: .title1))
                         .foregroundStyle(Color.appInk)
                         .accessibilityAddTraits(.isHeader)
                     Spacer()

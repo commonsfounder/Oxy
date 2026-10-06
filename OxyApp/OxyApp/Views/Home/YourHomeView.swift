@@ -93,7 +93,7 @@ struct YourHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30) {
                     Text("Your home")
-                        .font(.appEditorial(34, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                        .font(.appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
                         .foregroundStyle(Color.appInk)
                         .accessibilityAddTraits(.isHeader)
 
