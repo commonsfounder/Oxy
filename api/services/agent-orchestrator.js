@@ -342,7 +342,7 @@ async function runAgentLoop({
 
     logAgentStep(agentTrace, { type: 'observe', results: results.map(r => r.action) });
 
-    if (onStep) onStep({ phase: 'observed', results });
+    if (onStep) onStep({ phase: 'observed', results, actions });
 
     // Mid-loop reflection, skipped when a result already says the goal isn't reached yet (a
     // browser step's continuesBrowsing) — asking again costs an extra model call for an answer

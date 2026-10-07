@@ -217,6 +217,7 @@ const {
   defaultModelForProvider,
   providerConfiguration
 } = require('./services/model-routing');
+const { progressLine } = require('./services/progress-lines');
 const { geocodeLocation } = require('./geocoding');
 const { lookupHomeAddresses } = require('./services/ideal-postcodes');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
@@ -2546,47 +2547,8 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
 }
 
-const ACTION_STATUS_LABELS = {
-  send_email: 'Sending email',
-  get_emails: 'Checking emails',
-  search_emails: 'Searching emails',
-  create_calendar_event: 'Creating calendar event',
-  get_calendar_events: 'Checking calendar',
-  book_uber: 'Booking Uber',
-  find_place: 'Finding place',
-  get_directions: 'Checking directions',
-  plan_trip: 'Planning trip',
-  plan_itinerary: 'Planning itinerary',
-  modify_itinerary: 'Updating itinerary',
-  send_telegram: 'Sending Telegram message',
-  get_telegram_contacts: 'Checking Telegram contacts',
-  search_trains: 'Checking train times',
-  forget_memory: 'Updating memory',
-  generate_visual: 'Generating visual',
-  create_diagram: 'Creating diagram',
-  create_presentation: 'Building presentation',
-  web_search: 'Searching the web',
-  send_message: 'Writing your message',
-  remember_person: 'Remembering that',
-  save_occasion: 'Saving the date',
-  browser_open: 'Opening the website',
-  browser_observe: 'Looking at the page',
-  browser_act: 'Filling it in',
-  browser_upload: 'Adding the file',
-  browser_download: 'Downloading',
-  browser_continue_without_account: 'Continuing as a guest',
-  browser_sign_in: 'Signing in',
-  browser_fill_known_details: 'Filling in your details',
-  browser_close: 'Finishing up',
-  transaction_prepare: 'Getting the total',
-  transaction_authorize: 'Waiting for your yes',
-  transaction_status: 'Checking the order'
-};
-
-// The phone shows these while Adam works, so an unknown action gets a plain phrase, never its
-// internal name.
-function getActionStatusLabel(actionType, phase = 'start') {
-  const base = ACTION_STATUS_LABELS[actionType] || 'Working on it';
+function getActionStatusLabel(actionType, phase = 'start', input = {}) {
+  const base = progressLine(actionType, input);
   if (phase === 'complete') return `${base} complete`;
   if (phase === 'failed') return `${base} failed`;
   return base;
@@ -7535,8 +7497,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           sequential: deterministicAction.actions.length > 1,
           guardMode: settings.guardMode
         }, trace, {
-          onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
-          onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
+          onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start', action.input), { action: action.type }),
+          onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result), action.input), {
             action: action.type,
             success: result?.success !== false
           })
@@ -7789,15 +7751,15 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
                 agenticSendStatus('agent_thinking', 'Working on it');
               } else if (step.phase === 'executing') {
                 for (const action of step.actions || []) {
-                  agenticSendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type });
+                  agenticSendStatus('action_start', getActionStatusLabel(action.type, 'start', action.input), { action: action.type });
                 }
               } else if (step.phase === 'observed') {
-                for (const r of step.results || []) {
-                  agenticSendStatus('action_complete', getActionStatusLabel(r.action, actionCompletionPhase(r.result)), {
+                (step.results || []).forEach((r, idx) => {
+                  agenticSendStatus('action_complete', getActionStatusLabel(r.action, actionCompletionPhase(r.result), step.actions?.[idx]?.input), {
                     action: r.action,
                     success: r.result?.outcome === 'completed' || (r.result?.outcome == null && r.result?.success === true)
                   });
-                }
+                });
               }
             },
             persistTask: persistConversation,
@@ -8034,8 +7996,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             actionCount: actions.length,
             actions: actions.map(action => action.type)
           }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, channel, trace, guardMode: settings.guardMode }, trace, {
-            onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
-            onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
+            onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start', action.input), { action: action.type }),
+            onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result), action.input), {
               action: action.type,
               success: result?.success !== false
             })
