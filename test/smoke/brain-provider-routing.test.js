@@ -9,8 +9,8 @@ const {
 } = require('../../api/services/brain-provider');
 
 const KEYS = [
-  'OPENAI_API_KEY', 'GROQ_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY',
-  'OXY_LOCAL_MODEL_BASE_URL', 'OXY_GEMINI_MODEL', 'OXY_BRAIN_PROVIDER'
+  'OPENAI_API_KEY', 'GROQ_API_KEY', 'ANTHROPIC_API_KEY',
+  'OXY_LOCAL_MODEL_BASE_URL', 'OXY_BRAIN_PROVIDER'
 ];
 
 // Captures the first outbound request instead of making it, so a provider's *destination*
@@ -22,7 +22,7 @@ function withCapturedFetch(run, { env = {} } = {}) {
   const seen = {};
   for (const k of KEYS) delete process.env[k];
   Object.assign(process.env, {
-    OPENAI_API_KEY: 'k', GROQ_API_KEY: 'k', ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'k',
+    OPENAI_API_KEY: 'k', GROQ_API_KEY: 'k', ANTHROPIC_API_KEY: 'k',
     OXY_LOCAL_MODEL_BASE_URL: 'http://localhost:11434/v1',
     ...env
   });
@@ -48,8 +48,7 @@ const HOSTS = {
   openai: 'api.openai.com',
   anthropic: 'api.anthropic.com',
   groq: 'api.groq.com',
-  local: 'localhost:11434',
-  gemini: 'generativelanguage.googleapis.com'
+  local: 'localhost:11434'
 };
 
 test('every provider reaches its own vendor on the tool-calling path', async () => {
@@ -70,7 +69,7 @@ test('every provider reaches its own vendor on the non-streaming path', async ()
   }
 });
 
-test('an unknown provider throws instead of falling through to Gemini', async () => {
+test('an unknown provider throws instead of falling through to another provider', async () => {
   await withCapturedFetch(async () => {
     await assert.rejects(() => callToolsBrain({ provider: 'typo', ...ARGS }), /Unknown brain provider: typo/);
     await assert.rejects(() => generateBrain({ provider: 'typo', ...ARGS }), /Unknown brain provider: typo/);
@@ -123,22 +122,10 @@ test('local fails with a named error when its base URL is unset', async () => {
   }, { env: { OXY_LOCAL_MODEL_BASE_URL: '' } });
 });
 
-test('borrowed grounding sends a Gemini model id, never the routed provider\'s', async () => {
-  await withCapturedFetch(async (seen) => {
-    await webSearchBrain({ provider: 'anthropic', model: 'claude-sonnet-5', prompt: 'weather' }).catch(() => {});
-    assert.ok(seen.url?.includes('generativelanguage.googleapis.com'));
-    assert.ok(
-      seen.url?.includes('gemini-2.5-flash'),
-      `grounding forwarded a non-Gemini model id: ${seen.url}`
-    );
-    assert.ok(!seen.url?.includes('claude'));
-  });
-});
-
-test('grounding returns empty rather than calling Gemini with no key', async () => {
+test('only OpenAI grounds; other providers return empty without calling anything', async () => {
   await withCapturedFetch(async (seen) => {
     const text = await webSearchBrain({ provider: 'anthropic', model: 'claude-sonnet-5', prompt: 'weather' });
     assert.equal(text, '');
-    assert.equal(seen.url, undefined, 'no request should be attempted without a Gemini key');
-  }, { env: { GEMINI_API_KEY: '', GOOGLE_API_KEY: '' } });
+    assert.equal(seen.url, undefined, 'no request should be attempted for a provider that cannot ground');
+  });
 });

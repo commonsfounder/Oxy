@@ -117,7 +117,7 @@ struct ChatService {
         )
     }
 
-    /// Polish a raw voice transcript through Gemini — removes filler words,
+    /// Polish a raw voice transcript through the chat model — removes filler words,
     /// fixes grammar, preserves intent.  Falls back to the original text on error.
     func polishTranscript(userId: String, transcript: String) async -> String {
         do {

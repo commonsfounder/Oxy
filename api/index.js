@@ -21,7 +21,6 @@ const crypto = require('crypto');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
-const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch: dispatchConnector, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const { extractIncoming } = require('./services/incoming');
 const { isNonEmptyString, isValidCalendarDate } = require('./services/request-validation');
@@ -105,7 +104,6 @@ async function dispatch(userId, action, input) {
   return dispatchConnector(adapter.id, userId, action, input);
 }
 const {
-  createGeminiServiceClient,
   createSupabaseServiceClient,
   getMissingRuntimeEnv,
   logMissingRuntimeEnvOnce
@@ -117,7 +115,6 @@ const {
   getBrainProvider
 } = require('./services/brain-provider');
 const {
-  getVoiceProvider,
   synthesizeSpeechOpenAI,
   transcribeSpeechOpenAI
 } = require('./services/voice-provider');
@@ -755,7 +752,7 @@ app.use((req, res, next) => {
       "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https:",
-      "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com https://api.telegram.org ws: wss:",
+      "connect-src 'self' https://*.googleapis.com https://api.telegram.org ws: wss:",
       "font-src 'self' data: https:",
       "media-src 'self' blob: data:",
       "object-src 'none'",
@@ -864,14 +861,6 @@ const loginRateLimiter = createRateLimiter(10, 60 * 1000);
 const chatRateLimiter = createRateLimiter(30, 60 * 1000, userOrIpRateKey);
 const imageRateLimiter = createRateLimiter(10, 60 * 1000, userOrIpRateKey);
 const forgotPasswordRateLimiter = createRateLimiter(3, 60 * 60 * 1000);
-const GEMINI_TTS_VOICES = new Set([
-  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
-  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
-  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
-  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
-  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
-]);
-
 // Prune stale rate-limit entries (skip in serverless — Maps are ephemeral per invocation)
 setInterval(() => {
   const now = Date.now();
@@ -953,8 +942,6 @@ async function startChatExecutionIdentity({
   await updateTaskMetadata(executionTask, session);
   return { matchedTask, executionTask, session };
 }
-const genAI = createGeminiServiceClient();
-const modernGenAI = new ModernGoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
 logMissingRuntimeEnvOnce('api bootstrap');
 
 const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
@@ -990,25 +977,12 @@ const configuredStreamModel = String(process.env.OXY_STREAM_MODEL || '').trim();
 const STREAMING_CHAT_MODEL = configuredStreamModel && providerConfiguration(DEFAULT_CHAT_PROVIDER, configuredStreamModel).ready
   ? configuredStreamModel
   : PRIMARY_CHAT_MODEL;
-// Voice in/out never moved off Google: transcription takes raw audio and generateSpeech
-// uses Gemini's own prebuilt voices, neither of which the text/vision brain seam covers.
-// They keep their own Gemini model ids so a chat-model change can't silently retarget them.
-const GEMINI_AUDIO_MODEL = process.env.OXY_GEMINI_AUDIO_MODEL || 'gemini-3.1-flash-lite';
 if ([PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL].some(m => m.includes('3.5'))) {
   throw new Error(`[models] BANNED: a model config contains "3.5". Remove it.`);
 }
-const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
-const promptCacheStates = new Map();
 const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
 const PROACTIVE_BRIEFING_SIGNATURE_PREF = 'proactive.briefing.last_snapshot';
 const DEVICE_PLATFORM_ALLOWLIST = new Set(['ios', 'web']);
-
-setTimeout(() => {
-  ensurePromptCacheWarm(null, STREAMING_CHAT_MODEL).catch(() => {});
-  if (PRIMARY_CHAT_MODEL !== STREAMING_CHAT_MODEL) {
-    ensurePromptCacheWarm(null, PRIMARY_CHAT_MODEL).catch(() => {});
-  }
-}, 0);
 
 function createRequestTrace(label) {
   const startedAt = Date.now();
@@ -1322,27 +1296,6 @@ function isLinkSendRequest(message) {
     /\blink\b/i.test(String(message || ''));
 }
 
-function pcmToWav(pcmBuffer, sampleRate = 24000) {
-  const numChannels = 1, bitsPerSample = 16;
-  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
-  const blockAlign = numChannels * bitsPerSample / 8;
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + pcmBuffer.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(numChannels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(byteRate, 28);
-  header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(bitsPerSample, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(pcmBuffer.length, 40);
-  return Buffer.concat([header, pcmBuffer]);
-}
-
 function invalidateUserContextCache(userId) {
   if (userId) contextCache.delete(userId);
 }
@@ -1422,40 +1375,12 @@ function isImplausibleTranscript(text, durationMs) {
 }
 
 async function transcribeAudio(buffer) {
-  if (getVoiceProvider() === 'openai') {
-    const transcript = normalizeTranscript(await transcribeSpeechOpenAI(buffer, 'audio/wav'));
-    // Keep the plausibility guard: a transcript with far more words than the clip could
-    // hold means the model hallucinated rather than heard, and passing that through as the
-    // user's words is worse than returning nothing.
-    if (transcript && !isImplausibleTranscript(transcript, getWavDurationMs(buffer))) return transcript;
-    return '';
-  }
-  const audioBase64Input = buffer.toString('base64');
-  const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-  // Still Gemini: the chat brain's seam is text/vision only. Pinned to an explicit Gemini id,
-  // since FAST_MODEL is an OpenAI id the Gemini SDK would reject as "model not found".
-  const transcribeModel = genAI.getGenerativeModel({ model: GEMINI_AUDIO_MODEL });
-  const durationMs = getWavDurationMs(buffer);
-
-  const prompts = [
-    'Transcribe this audio exactly. Return only the spoken words. If any part is unclear, omit it rather than guessing. If there is no clear speech, return an empty string.',
-    'Verbatim transcription only. Do not answer the user. Do not infer intent. Do not add any words that are not clearly audible. If unclear, return an empty string.'
-  ];
-
-  let lastTranscript = '';
-  for (const prompt of prompts) {
-    const response = await transcribeModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
-      generationConfig: { temperature: 0, topP: 0.1, topK: 1 }
-    });
-    const transcript = normalizeTranscript(response.response.text());
-    lastTranscript = transcript;
-    if (transcript && !isImplausibleTranscript(transcript, durationMs)) {
-      return transcript;
-    }
-  }
-
-  return isImplausibleTranscript(lastTranscript, durationMs) ? '' : lastTranscript;
+  const transcript = normalizeTranscript(await transcribeSpeechOpenAI(buffer, 'audio/wav'));
+  // Keep the plausibility guard: a transcript with far more words than the clip could
+  // hold means the model hallucinated rather than heard, and passing that through as the
+  // user's words is worse than returning nothing.
+  if (transcript && !isImplausibleTranscript(transcript, getWavDurationMs(buffer))) return transcript;
+  return '';
 }
 
 function validatePendantTranscriptionUpload(file) {
@@ -2282,79 +2207,6 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   return null;
 }
 
-function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
-  const cacheKey = `${modelName}:${CORE_SYSTEM_PROMPT}`;
-  let cacheState = promptCacheStates.get(cacheKey);
-  if (!cacheState) {
-    cacheState = { key: cacheKey, name: '', expireAt: 0, pending: null };
-    promptCacheStates.set(cacheKey, cacheState);
-  }
-  return cacheState;
-}
-
-async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MODEL) {
-  // Explicit cache objects are a Gemini concept. OpenAI caches repeated prompt prefixes
-  // server-side with no API call, so on that path this is a no-op and callers get the
-  // empty cache name they already treat as "uncached".
-  if (getBrainProvider() !== 'gemini') return '';
-  const cacheState = getPromptCacheState(modelName);
-  if (cacheState.name && Date.now() < cacheState.expireAt) {
-    if (trace) trace.log('prompt_cache.hit', cacheState.name);
-    return cacheState.name;
-  }
-  if (cacheState.pending) {
-    if (trace) trace.log('prompt_cache.pending');
-    return cacheState.pending;
-  }
-  cacheState.pending = (async () => {
-    try {
-      const cached = trace
-        ? await trace.run('gemini.caches.create', () => modernGenAI.caches.create({
-            model: modelName,
-            config: {
-              displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
-              systemInstruction: CORE_SYSTEM_PROMPT,
-              ttl: PROMPT_CACHE_TTL
-            }
-          }))
-        : await modernGenAI.caches.create({
-            model: modelName,
-            config: {
-              displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
-              systemInstruction: CORE_SYSTEM_PROMPT,
-              ttl: PROMPT_CACHE_TTL
-            }
-          });
-      cacheState.name = cached?.name || '';
-      cacheState.expireAt = Date.now() + 55 * 60 * 1000;
-      if (trace) trace.log('prompt_cache.created', cacheState.name || 'no-name');
-      return cacheState.name;
-    } catch (error) {
-      if (trace) trace.log('prompt_cache.unavailable', error.message);
-      return '';
-    } finally {
-      cacheState.pending = null;
-    }
-  })();
-  return cacheState.pending;
-}
-
-function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
-  if (getBrainProvider() !== 'gemini') return '';
-  const cacheState = getPromptCacheState(modelName);
-  if (cacheState.name && Date.now() < cacheState.expireAt) {
-    if (trace) trace.log('prompt_cache.hit', cacheState.name);
-    return cacheState.name;
-  }
-  if (cacheState.pending) {
-    if (trace) trace.log('prompt_cache.pending');
-    return cacheState.name || '';
-  }
-  if (trace) trace.log('prompt_cache.warm_start');
-  ensurePromptCacheWarm(null, modelName).catch(() => {});
-  return cacheState.name || '';
-}
-
 function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent, useAgentTools = true }) {
   // Keep control instructions authoritative. Cached prompts force dynamic rules into
   // conversation content, which is too weak for tool use and factuality.
@@ -2473,13 +2325,6 @@ async function runActions(userId, actions) {
   return results;
 }
 
-const GEMINI_TTS_MODELS = [
-  'gemini-3.1-flash-tts-preview',
-  'gemini-2.5-flash-preview-tts'
-];
-const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
-let preferredTtsModel = null;
-
 function buildVoiceExcerpt(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return '';
@@ -2493,51 +2338,11 @@ function buildVoiceExcerpt(text) {
   return (excerpt || trimmed.slice(0, 180)).trim();
 }
 
-async function generateSpeech(text, voiceName = 'Aoede') {
+async function generateSpeech(text, voiceName) {
   if (!text || !text.trim()) return null;
   // A reaction or a deliberate silence is not something to say out loud.
   if (reactions.isQuietReply(text) || reactions.isAgentReaction(text)) return null;
-  if (getVoiceProvider() === 'openai') return synthesizeSpeechOpenAI(text, voiceName);
-  const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
-  console.log(`[tts] generateSpeech start voice=${safeVoiceName} chars=${text.trim().length}`);
-  const failures = [];
-  const orderedModels = preferredTtsModel
-    ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
-    : GEMINI_TTS_MODELS;
-
-  for (const modelName of orderedModels) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 9000);
-    try {
-      const resp = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-        {
-          contents: [{ parts: [{ text }] }],
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
-          }
-        },
-        { signal: controller.signal, headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY } }
-      );
-      const base64Audio = resp.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Audio) {
-        throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
-      }
-      preferredTtsModel = modelName;
-      console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
-      console.log(`[tts] generateSpeech ready voice=${safeVoiceName} bytes=${Buffer.from(base64Audio, 'base64').length}`);
-      return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
-    } catch (err) {
-      const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
-      console.error(`[tts] generateSpeech fail voice=${safeVoiceName} model=${modelName}`, detail);
-      failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
+  return synthesizeSpeechOpenAI(text, voiceName);
 }
 
 const ACTION_STATUS_LABELS = {
@@ -2599,89 +2404,13 @@ function actionCompletionPhase(result) {
   }
 }
 
-async function* generateSpeechStream(text, voiceName = 'Aoede') {
+async function* generateSpeechStream(text, voiceName) {
   if (!text || !text.trim()) return;
   // The caller already splits on sentence boundaries and invokes this per sentence, so a
-  // single complete WAV per call is the same granularity the Gemini SSE path delivered —
-  // one whole short clip rather than partial audio the client would have to stitch.
-  if (getVoiceProvider() === 'openai') {
-    const audio = await synthesizeSpeechOpenAI(text, voiceName);
-    if (audio) yield audio;
-    return;
-  }
-  const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
-  console.log(`[tts] generateSpeechStream start voice=${safeVoiceName} chars=${text.trim().length}`);
-  const failures = [];
-  const orderedModels = preferredTtsModel
-    ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
-    : GEMINI_TTS_MODELS;
-
-  for (const modelName of orderedModels) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 9000);
-    let sawAudio = false;
-    try {
-      const resp = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse`,
-        {
-          contents: [{ parts: [{ text }] }],
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
-          }
-        },
-        {
-          signal: controller.signal,
-          responseType: 'stream',
-          headers: {
-            Accept: 'text/event-stream',
-            'x-goog-api-key': process.env.GEMINI_API_KEY
-          }
-        }
-      );
-
-      let buffer = '';
-      for await (const rawChunk of resp.data) {
-        buffer += rawChunk.toString('utf8');
-        const events = buffer.split(/\r?\n\r?\n/);
-        buffer = events.pop() || '';
-
-        for (const event of events) {
-          const lines = event.split(/\r?\n/).filter(line => line.startsWith('data: '));
-          for (const line of lines) {
-            const payload = line.slice(6).trim();
-            if (!payload || payload === '[DONE]') continue;
-            const parsed = JSON.parse(payload);
-            const parts = parsed?.candidates?.[0]?.content?.parts || [];
-            for (const part of parts) {
-              const base64Audio = part?.inlineData?.data || part?.inline_data?.data;
-              if (!base64Audio) continue;
-              sawAudio = true;
-              if (preferredTtsModel !== modelName) {
-                preferredTtsModel = modelName;
-                console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
-              }
-              console.log(`[tts] stream chunk ready voice=${safeVoiceName} bytes=${Buffer.from(base64Audio, 'base64').length}`);
-              yield pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
-            }
-          }
-        }
-      }
-
-      if (!sawAudio) {
-        throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
-      }
-      return;
-    } catch (err) {
-      const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
-      console.error(`[tts] generateSpeechStream fail voice=${safeVoiceName} model=${modelName}`, detail);
-      failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
+  // single complete WAV per call is one whole short clip rather than partial audio the
+  // client would have to stitch.
+  const audio = await synthesizeSpeechOpenAI(text, voiceName);
+  if (audio) yield audio;
 }
 
 function createSentenceTtsStreamer({ voiceName, sse, trace = null, onSpeakingStart = null }) {
@@ -2768,50 +2497,39 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null, onSpeakingSta
   };
 }
 
+const IMAGE_MODEL = process.env.OXY_IMAGE_MODEL || 'gpt-image-1';
+
 async function generateImage(prompt, imageFile) {
   if (!prompt || !prompt.trim()) {
     throw new Error('Image prompt is required.');
   }
+  if (imageFile && !(imageFile.mimetype || '').startsWith('image/')) {
+    throw new Error('Only image uploads are supported for image generation.');
+  }
 
-  const parts = [];
+  const baseURL = process.env.OXY_IMAGE_BASE_URL || 'https://api.openai.com/v1';
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not set (needed for image generation)');
+
+  let res;
   if (imageFile) {
-    if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
-      throw new Error('Only image uploads are supported for image generation.');
-    }
-    parts.push({
-      inline_data: {
-        mime_type: imageFile.mimetype,
-        data: imageFile.buffer.toString('base64')
-      }
+    const form = new FormData();
+    form.append('model', IMAGE_MODEL);
+    form.append('prompt', prompt.trim());
+    form.append('image', new Blob([imageFile.buffer], { type: imageFile.mimetype }), imageFile.originalname || 'image.png');
+    res = await fetch(`${baseURL}/images/edits`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+  } else {
+    res = await fetch(`${baseURL}/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: IMAGE_MODEL, prompt: prompt.trim(), size: '1024x1024' })
     });
   }
-  parts.push({ text: prompt.trim() });
+  if (!res.ok) throw new Error(`OpenAI image ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const image = (await res.json()).data?.[0]?.b64_json;
+  if (!image) throw new Error('Image generation returned no image.');
 
-  const resp = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent`,
-    {
-      contents: [{ parts }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
-    },
-    {
-      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY }
-    }
-  );
-
-  const responseParts = resp.data?.candidates?.[0]?.content?.parts || [];
-  const text = responseParts.find(part => typeof part.text === 'string' && part.text.trim())?.text?.trim() || 'Made this for you.';
-  const imagePart = responseParts.find(part => part.inlineData?.data || part.inline_data?.data);
-  const inlineData = imagePart?.inlineData || imagePart?.inline_data;
-
-  if (!inlineData?.data) {
-    throw new Error('Gemini image generation returned no image.');
-  }
-
-  return {
-    text,
-    image: inlineData.data,
-    mimeType: inlineData.mimeType || inlineData.mime_type || 'image/png'
-  };
+  return { text: 'Made this for you.', image, mimeType: 'image/png' };
 }
 
 async function analyzeImage(prompt, imageFile) {
@@ -5707,7 +5425,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   };
   const requestedRoute = resolveModelRoute(preferenceMap);
   const modelRoute = requestedRoute.configured ? requestedRoute : (requestedRoute.fallback || requestedRoute);
-  const cachedContentName = await getPromptCacheName(trace, modelRoute.model);
+  const cachedContentName = '';
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   // extractShoppingContextHints is a genuinely derived hint (retailer/domain inferred from the
   // conversation), not a repeat of anything sent verbatim elsewhere, so it's kept on both paths.
@@ -8519,8 +8237,7 @@ app.get('/debug/:userId', async (req, res) => {
       })),
       googleEmailTest: emailTest,
       googleCalendarTest: calendarTest,
-      envHasGmailRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
-      envHasGeminiKey: !!process.env.GEMINI_API_KEY
+      envHasGmailRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -8649,7 +8366,8 @@ app.get('/privacy', (_req, res) => {
     <p>Contract performance for account and assistant features. Legitimate interests for service improvement.</p>
     <h2>Third-Party Processors</h2>
     <ul>
-      <li>Google (Gemini AI, Gmail, Calendar, Maps) — for AI processing and connector features</li>
+      <li>OpenAI — AI processing, speech and image generation</li>
+      <li>Google (Gmail, Calendar, Maps) — connector features</li>
       <li>Supabase — database hosting (EU region)</li>
       <li>Telegram — messaging connector (when enabled)</li>
     </ul>
@@ -8730,7 +8448,7 @@ app.get('/robots.txt', (req, res) => {
 
 app.get('/humans.txt', (req, res) => {
   res.setHeader('Content-Type', 'text/plain');
-  res.send('/* TEAM */\nChizi Gamonye-Wuchi — Founder & Builder\nLocation: Solihull, UK\n\n/* THANKS */\nGemini · Supabase · Fly.io · Node.js\n\n/* SITE */\nLast update: 2026\nLanguage: English\nDoctype: HTML5\nIDE: Various');
+  res.send('/* TEAM */\nChizi Gamonye-Wuchi — Founder & Builder\nLocation: Solihull, UK\n\n/* THANKS */\nSupabase · Fly.io · Node.js\n\n/* SITE */\nLast update: 2026\nLanguage: English\nDoctype: HTML5\nIDE: Various');
 });
 
 app.post('/admin/cleanup-conversations', async (req, res) => {

@@ -50,7 +50,7 @@ The architecture hardcodes **capabilities and safety boundaries, never human tas
                          │
                  ┌───────▼──────────────┐
                  │   External APIs       │
-                 │  Gemini (LLM/TTS/STT) │
+                 │  OpenAI (LLM/TTS/STT) │
                  │  Playwright (browser  │
                  │    automation)        │
                  │  Google, Microsoft,   │
@@ -69,11 +69,11 @@ An Express 5 server (`server.js` → `api/index.js`) deployed as a standard Node
 The separate local [physical context runtime](api/physical/README.md) is under development for device observations, evidence-linked room state, persistent watches, and the ESP32-S3-BOX-3 protocol. It uses Node 26 and SQLite locally; it is not part of the Fly API or iOS app yet.
 
 **Core flow for a chat message (`POST /chat`):**
-1. User sends text or audio (`POST /process-audio` transcribes via Gemini first).
+1. User sends text or audio (`POST /process-audio` transcribes first).
 2. Conversation history, memories, preferences, connected-app context, task/entity recall, and routine state are loaded from Supabase.
-3. Gemini generates a response (with Google Search grounding).
+3. The chat model generates a response (web-grounded lookups go through OpenAI web search).
 4. If the response includes an `<action>` block, actions dispatch to the connector system, or to the browser-automation agent for checkout-style tasks.
-5. Data-fetching results (emails, calendar, train times, order state) are fed back to Gemini for natural summarisation.
+5. Data-fetching results (emails, calendar, train times, order state) are fed back to the model for natural summarisation.
 6. TTS audio is generated and streamed back alongside text via SSE.
 7. Memory facts are extracted and saved in the background; task/step traces are recorded for agent runs.
 

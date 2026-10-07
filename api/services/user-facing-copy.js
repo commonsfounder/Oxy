@@ -56,7 +56,7 @@ function actionDisplayName(type) {
 }
 
 function hasTechnicalError(rawError) {
-  return /\b(?:api|api key|server|stripe|supabase|gemini|google places|http|status code|exception|undefined|econn|enotfound|permission_denied|stack trace)\b/i.test(rawError);
+  return /\b(?:api|api key|server|stripe|supabase|openai|google places|http|status code|exception|undefined|econn|enotfound|permission_denied|stack trace)\b/i.test(rawError);
 }
 
 function actionFailureMessage(action, rawError = '') {

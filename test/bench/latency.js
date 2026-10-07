@@ -21,7 +21,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const RUNS = Number(process.env.BENCH_RUNS) || 3; // runs per message; run 1 warms caches
 // Which brain to benchmark. `BENCH_PROVIDER=groq npm run latency` routes the
 // spawned server's main generate to Groq (needs GROQ_API_KEY + OXY_GROQ_MODEL).
-const PROVIDER = (process.env.BENCH_PROVIDER || 'gemini').toLowerCase();
+const PROVIDER = (process.env.BENCH_PROVIDER || 'openai').toLowerCase();
 
 // A deliberately mixed set: a quick-turn (fast path), a factual/search turn,
 // a personal/memory turn, and a calendar-ish turn. Fixed forever so numbers compare.
@@ -32,7 +32,7 @@ const MESSAGES = [
   { tag: 'calendar', text: "what's on my calendar today" },
 ];
 
-const required = ['SUPABASE_URL', 'SUPABASE_KEY', 'GEMINI_API_KEY', 'OXY_SESSION_SECRET'];
+const required = ['SUPABASE_URL', 'SUPABASE_KEY', 'OPENAI_API_KEY', 'OXY_SESSION_SECRET'];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length) {
   console.error(`\nMissing env vars: ${missing.join(', ')}`);
@@ -121,7 +121,7 @@ function serverMarks(userId) {
   };
   const preamble = find(/\+(\d+)ms BEGIN buildChatContext/);
   const ctxDur = find(/END buildChatContext \((\d+)ms\)/);
-  const ttft = find(/\+(\d+)ms gemini\.first_token/);
+  const ttft = find(/\+(\d+)ms brain\.first_token/);
   const model_ttft = ttft != null && preamble != null && ctxDur != null
     ? ttft - preamble - ctxDur : null;
   return { preamble_ms: preamble, context_ms: ctxDur, server_ttft_ms: ttft, model_ttft_ms: model_ttft };

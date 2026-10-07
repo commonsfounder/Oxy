@@ -10,7 +10,6 @@ const MODEL_ENV_KEYS = Object.freeze({
 const PROVIDER_MODEL_ENV_KEYS = Object.freeze({
   openai: { reasoning: 'OXY_OPENAI_MODEL', fast: 'OXY_OPENAI_FAST_MODEL' },
   anthropic: { reasoning: 'OXY_ANTHROPIC_MODEL', fast: 'OXY_ANTHROPIC_FAST_MODEL' },
-  gemini: { reasoning: 'OXY_GEMINI_MODEL', fast: 'OXY_GEMINI_FAST_MODEL' },
   groq: { reasoning: 'OXY_GROQ_MODEL', fast: 'OXY_GROQ_FAST_MODEL' },
   local: { reasoning: 'OXY_LOCAL_MODEL', fast: 'OXY_LOCAL_FAST_MODEL' }
 });
@@ -21,6 +20,8 @@ const PROVIDER_MODEL_ENV_KEYS = Object.freeze({
 const MODEL_FAMILY_PREFIXES = Object.freeze({
   openai: /^(?:gpt-|o\d|chatgpt|text-)/i,
   anthropic: /^claude-/i,
+  // Not a provider any more, but a leftover gemini-* id in the environment or a saved
+  // preference must still be recognised as foreign and never sent to another provider.
   gemini: /^gemini-/i,
   groq: /^(?:llama|mixtral|mistral|qwen|gemma|deepseek)-/i
 });
@@ -39,13 +40,6 @@ const PROVIDERS = Object.freeze({
     defaultModel: () => defaultModelForProvider('anthropic'),
     envKeys: ['ANTHROPIC_API_KEY'],
     capabilities: ['general', 'agentic', 'streaming']
-  },
-  gemini: {
-    id: 'gemini',
-    name: 'Gemini',
-    defaultModel: () => defaultModelForProvider('gemini'),
-    envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-    capabilities: ['general', 'agentic', 'streaming', 'grounding']
   },
   groq: {
     id: 'groq',
@@ -100,7 +94,6 @@ function defaultModelForProvider(provider, role = 'reasoning', env = process.env
   switch (normalised) {
     case 'openai': return 'gpt-5.6-luna';
     case 'anthropic': return 'claude-sonnet-5';
-    case 'gemini': return role === 'fast' ? 'gemini-2.5-flash' : 'gemini-2.5-flash';
     case 'groq': return 'llama-3.3-70b-versatile';
     case 'local': return 'llama3.2';
     default: return 'gpt-5.6-luna';
