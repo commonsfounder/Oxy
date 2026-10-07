@@ -8,6 +8,7 @@
 prep: cuts the same 2 s training windows as extract.py and stores their mel spectrograms (so training never repeats that work).
 train: starts from the AudioSet weights, swaps the last layer for our 5 classes, trains everything with a lower rate for the body.
 """
+import os
 import sys
 import time
 from pathlib import Path
@@ -100,7 +101,7 @@ folder = Path(sys.argv[3])
 if (folder / "classes.json").exists():
     import json as _json
     CLASSES = _json.loads((folder / "classes.json").read_text())
-arrays = [np.load(f) for f in sorted(folder.glob("mel-*.npz"))]
+arrays = [np.load(f) for f in sorted(folder.glob("mel-*.npz"))[:int(os.environ.get("MAX_SHARDS", "99"))]]
 X = np.concatenate([a["x"] for a in arrays]); Y = np.concatenate([a["y"] for a in arrays]); SP = np.concatenate([a["split"] for a in arrays])
 tr, va = np.where(SP == 0)[0], np.where(SP == 1)[0]
 print(f"{len(tr)} train windows {np.bincount(Y[tr]).tolist()}, {len(va)} val windows, mel {X.shape[1:]}", flush=True)
@@ -151,11 +152,36 @@ def validate():
     with torch.no_grad():
         for i in range(0, len(va), 128):
             idx = va[i:i + 128]
-            logits = net(torch.from_numpy(X[idx].astype(np.float32)).unsqueeze(1).to(dev))[0]
-            correct += int((logits.argmax(1).cpu().numpy() == Y[idx]).sum())
+            if GPU_DATA:
+                logits = net(Xg[va_t[i:i + 128]].float().unsqueeze(1))[0]
+                correct += int((logits.argmax(1) == Yg[va_t[i:i + 128]]).sum())
+            else:
+                logits = net(torch.from_numpy(X[idx].astype(np.float32)).unsqueeze(1).to(dev))[0]
+                correct += int((logits.argmax(1).cpu().numpy() == Y[idx]).sum())
     model.train()
     return correct / len(va)
 
+
+GPU_DATA = os.environ.get("GPU_DATA", "1") == "1" and dev.type == "mps"
+if GPU_DATA:  # keep the spectrograms on the graphics chip (unified memory) and do sampling and augmentation there
+    Xg, Yg = torch.from_numpy(X).to(dev), torch.from_numpy(Y).to(dev)
+    va_t = torch.from_numpy(va).to(dev)
+    del X
+    dev_arange = {}
+
+    def gpu_batch(pick_np):
+        pick = torch.from_numpy(pick_np).to(dev)
+        xb = Xg[pick].float()
+        n_, F, T = xb.shape
+        shift = torch.randint(-15, 16, (n_, 1), device=dev)
+        cols = (torch.arange(T, device=dev)[None, :] - shift) % T
+        xb = xb.gather(2, cols[:, None, :].expand(n_, F, T))
+        f = torch.randint(0, 17, (n_, 1), device=dev); f0 = (torch.rand(n_, 1, device=dev) * (F - f)).long()
+        fi = torch.arange(F, device=dev)[None, :]
+        t = torch.randint(0, 21, (n_, 1), device=dev); t0 = (torch.rand(n_, 1, device=dev) * (T - t)).long()
+        ti = torch.arange(T, device=dev)[None, :]
+        xb = xb.masked_fill(((fi >= f0) & (fi < f0 + f))[:, :, None], 0).masked_fill(((ti >= t0) & (ti < t0 + t))[:, None, :], 0)
+        return (xb + torch.randn(n_, 1, 1, device=dev) * 0.3).unsqueeze(1), Yg[pick]
 
 ema = None
 if os.environ.get("EMA") == "1":
@@ -171,9 +197,12 @@ best, started = (0.0, None), time.time()
 model.train()
 for step in range(steps):
     idx = rng.choice(tr, batch, p=prob)
-    xb = augment(torch.from_numpy(X[idx].astype(np.float32))).unsqueeze(1).to(dev)
+    if GPU_DATA:
+        xb, yb = gpu_batch(idx)
+    else:
+        xb = augment(torch.from_numpy(X[idx].astype(np.float32))).unsqueeze(1).to(dev)
+        yb = torch.from_numpy(Y[idx]).to(dev)
     student = model(xb)[0]
-    yb = torch.from_numpy(Y[idx]).to(dev)
     loss = torch.nn.functional.cross_entropy(student, yb, weight=weights)
     if teacher is not None:
         with torch.no_grad():

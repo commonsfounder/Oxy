@@ -88,6 +88,16 @@ Settings: `firmware/sound-events/sound_events_config.h` (strict) and `sound_even
 **Alarm patterns on 12 real fire/smoke alarm recordings (FSD50K):** 3 detected (clean T3 patterns, including one distant one fixed by closing echo dropouts); the other 9 are fire bells/horns (not beep patterns) or 2 s snippets: the learned `alarm` class (recall at 1% FPR only .11) is weak, so bells and horns remain a gap.
 **Pipeline (all scripts in `test/dev/sound-eval/`):** `train/prepare2.py` (+ `fetch.py`) -> `train/augment2.py` -> `tiny/finetune.py prep|train` -> `tiny/qat.py` -> `tiny/extract.py` (cached scores) -> `tiny/eval15.py`, `tiny/calibrate.py`, `tiny/make_config.py`, `tiny/budget.py`, `tiny/check_c_logic.py`. GPU (`mps`) trains in ~25 s per 100 steps; keep the Mac awake (`caffeinate`) or jobs pause when it sleeps; do not run training and 4 extraction shards at once (memory thrash).
 
+## Capacity test: mn10 (5x the network) — the accuracy ceiling (2026-10-07)
+Same data, 16 kHz front end, whole-network fine-tune plus head warm start from the AudioSet rows and weight averaging (`ARCH=mn10_as WARM=1 EMA=1 tiny/finetune.py`).
+Val-window accuracy 0.555 (mn04: 0.516). Threshold-free benchmark, recall at 1% false alarms averaged over the six conditions, Apple | mn04 int8 | mn10:
+mean over 15 sounds 0.43 | 0.47 | 0.56. mn10 wins or ties Apple on 14 of 15 sounds (baby .75 vs .73 tie; siren .77 vs .70 still Apple's); biggest gains over mn04: doorbell .24 -> .40,
+phone_ring .26 -> .38, microwave .34 -> .46, toilet .74 -> .83, gunshot .44 -> .52, cough .65 -> .72, dog .68 -> .77, baby .60 -> .73, water .49 -> .56.
+Cost (`budget.py`, ARCH=mn10_as): 4,222,240 weights = 4.2 MB int8, 115 M multiply-adds per 2 s window (230 M per second of audio at 2 windows/s, 115 M at 1/s),
+largest layer output 414 KB (needs external RAM on the BOX-3); mn04 is 0.72 MB, 23 M per window, 155 KB. Neither measured on the chip.
+Weights `saved/models/efficientat-mn10-16k-15sounds-float16.pt` (stored as float16, loads into the float32 network).
+Speed notes: the Mac GPU is the limit (about 200 windows/s for mn04 training); on-GPU data path, bf16/fp16 and bigger batches gave no speed-up; keep other jobs off the GPU while training; plug in, quit heavy apps; sleep pauses jobs (`caffeinate`).
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.

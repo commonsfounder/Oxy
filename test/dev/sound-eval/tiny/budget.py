@@ -22,7 +22,9 @@ from helpers.utils import NAME_TO_WIDTH  # noqa: E402
 from models.mn.model import get_model  # noqa: E402
 
 classes = json.loads((mel_folder / "classes.json").read_text()) if (mel_folder / "classes.json").exists() else ["background", "glass_breaking", "knock", "doorbell", "baby_crying"]
-model = get_model(width_mult=NAME_TO_WIDTH("mn04_as"), pretrained_name="mn04_as", strides=[2, 2, 2, 2], head_type="mlp")
+import os  # noqa: E402
+ARCH = os.environ.get("ARCH", "mn04_as")
+model = get_model(width_mult=NAME_TO_WIDTH(ARCH), pretrained_name=ARCH, strides=[2, 2, 2, 2], head_type="mlp")
 model.classifier[5] = torch.nn.Linear(model.classifier[5].in_features, len(classes))
 model.load_state_dict(torch.load(weights, map_location="cpu"))
 model.eval()
