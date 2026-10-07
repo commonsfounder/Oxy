@@ -1,0 +1,2426 @@
+[
+ {
+  "label": "accordion",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "acoustic_guitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "air_conditioner",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "air_horn",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "aircraft",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "airplane",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "alarm_clock",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "ambulance_siren",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "outside"
+ },
+ {
+  "label": "applause",
+  "bucket": "routine signal",
+  "auc": 1.0,
+  "clips": 18,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "artillery_fire",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "babble",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "baby_crying",
+  "bucket": "in the app",
+  "auc": 0.9,
+  "clips": 66,
+  "readiness": "built, own model + Apple",
+  "note": ""
+ },
+ {
+  "label": "baby_laughter",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bagpipes",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "banjo",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "basketball_bounce",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bass_drum",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "bass_guitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "bassoon",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "bathtub_filling_washing",
+  "bucket": "alert candidate",
+  "auc": 1.0,
+  "clips": 19,
+  "readiness": "strong",
+  "note": "left running, sustained"
+ },
+ {
+  "label": "battle_cry",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "bee_buzz",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "beep",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "appliance finished, needs per-house learning"
+ },
+ {
+  "label": "bell",
+  "bucket": "routine signal",
+  "auc": 0.68,
+  "clips": 186,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "belly_laugh",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bicycle",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bicycle_bell",
+  "bucket": "routine signal",
+  "auc": 0.63,
+  "clips": 20,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "bird",
+  "bucket": "background context",
+  "auc": 0.77,
+  "clips": 110,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "bird_chirp_tweet",
+  "bucket": "background context",
+  "auc": 0.77,
+  "clips": 35,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "bird_flapping",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bird_squawk",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "bird_vocalization",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "biting",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "blender",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "boat_water_vehicle",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "boiling",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": 4,
+  "readiness": "too few clips to score",
+  "note": "kettle or pan boiled; untested"
+ },
+ {
+  "label": "booing",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "boom",
+  "bucket": "background context",
+  "auc": 0.81,
+  "clips": 13,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "bowed_string_instrument",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "bowling_impact",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "brass_instrument",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "breathing",
+  "bucket": "alert candidate",
+  "auc": 0.61,
+  "clips": 34,
+  "readiness": "weak",
+  "note": "overnight trend, no medical claims"
+ },
+ {
+  "label": "burp",
+  "bucket": "routine signal",
+  "auc": 0.42,
+  "clips": 15,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "bus",
+  "bucket": "background context",
+  "auc": 0.94,
+  "clips": 15,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "camera",
+  "bucket": "routine signal",
+  "auc": 0.71,
+  "clips": 22,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "car_horn",
+  "bucket": "alert candidate",
+  "auc": 0.62,
+  "clips": 19,
+  "readiness": "weak",
+  "note": "outside"
+ },
+ {
+  "label": "car_passing_by",
+  "bucket": "background context",
+  "auc": 0.9,
+  "clips": 13,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "cat",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "cat_meow",
+  "bucket": "routine signal",
+  "auc": 0.63,
+  "clips": 32,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "cat_purr",
+  "bucket": "routine signal",
+  "auc": 0.94,
+  "clips": 14,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "cello",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "chainsaw",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "chatter",
+  "bucket": "routine signal",
+  "auc": 0.95,
+  "clips": 31,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "cheering",
+  "bucket": "routine signal",
+  "auc": 0.9,
+  "clips": 16,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "chewing",
+  "bucket": "routine signal",
+  "auc": 0.81,
+  "clips": 13,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "chicken",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "chicken_cluck",
+  "bucket": "background context",
+  "auc": null,
+  "clips": 7,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "children_shouting",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "chime",
+  "bucket": "routine signal",
+  "auc": 0.93,
+  "clips": 25,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "choir_singing",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "chopping_food",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "chopping_wood",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "chuckle_chortle",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "church_bell",
+  "bucket": "background context",
+  "auc": 0.97,
+  "clips": 24,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "civil_defense_siren",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "outside"
+ },
+ {
+  "label": "clapping",
+  "bucket": "routine signal",
+  "auc": 0.48,
+  "clips": 66,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "clarinet",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "click",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "clock",
+  "bucket": "routine signal",
+  "auc": 0.88,
+  "clips": 21,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "coin_dropping",
+  "bucket": "routine signal",
+  "auc": 0.54,
+  "clips": 45,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "cough",
+  "bucket": "alert candidate",
+  "auc": 0.57,
+  "clips": 19,
+  "readiness": "weak",
+  "note": "as a trend, not each cough"
+ },
+ {
+  "label": "cow_moo",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "cowbell",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.3,
+  "clips": 41,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "coyote_howl",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "cricket_chirp",
+  "bucket": "background context",
+  "auc": 0.99,
+  "clips": 11,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "crow_caw",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "crowd",
+  "bucket": "background context",
+  "auc": 0.9,
+  "clips": 41,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "crumpling_crinkling",
+  "bucket": "routine signal",
+  "auc": 0.78,
+  "clips": 37,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "crushing",
+  "bucket": "routine signal",
+  "auc": 0.54,
+  "clips": 67,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "crying_sobbing",
+  "bucket": "alert candidate",
+  "auc": 0.9,
+  "clips": 66,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "cutlery_silverware",
+  "bucket": "routine signal",
+  "auc": 0.46,
+  "clips": 51,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "cymbal",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.6,
+  "clips": 138,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "didgeridoo",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "disc_scratching",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "dishes_pots_pans",
+  "bucket": "routine signal",
+  "auc": 0.42,
+  "clips": 60,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "dog",
+  "bucket": "routine signal",
+  "auc": 0.75,
+  "clips": 81,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "dog_bark",
+  "bucket": "alert candidate",
+  "auc": 0.78,
+  "clips": 37,
+  "readiness": "weak",
+  "note": "if it goes on while you are out"
+ },
+ {
+  "label": "dog_bow_wow",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "dog_growl",
+  "bucket": "background context",
+  "auc": 0.6,
+  "clips": 8,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "dog_howl",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "dog_whimper",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "door",
+  "bucket": "routine signal",
+  "auc": 0.6,
+  "clips": 601,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "door_bell",
+  "bucket": "in the app",
+  "auc": 0.71,
+  "clips": 123,
+  "readiness": "built, own model + Apple",
+  "note": ""
+ },
+ {
+  "label": "door_slam",
+  "bucket": "alert candidate",
+  "auc": 0.66,
+  "clips": 75,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "door_sliding",
+  "bucket": "routine signal",
+  "auc": 0.87,
+  "clips": 51,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "double_bass",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "drawer_open_close",
+  "bucket": "routine signal",
+  "auc": 0.57,
+  "clips": 30,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "drill",
+  "bucket": "routine signal",
+  "auc": 0.7,
+  "clips": 8,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "drum",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.37,
+  "clips": 258,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "drum_kit",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.82,
+  "clips": 59,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "duck_quack",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "electric_guitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.67,
+  "clips": 78,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "electric_piano",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "electric_shaver",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "electronic_organ",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "elk_bugle",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "emergency_vehicle",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "outside"
+ },
+ {
+  "label": "engine",
+  "bucket": "background context",
+  "auc": 0.89,
+  "clips": 88,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "engine_accelerating_revving",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "engine_idling",
+  "bucket": "background context",
+  "auc": 0.99,
+  "clips": 8,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "engine_knocking",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "engine_starting",
+  "bucket": "background context",
+  "auc": 0.85,
+  "clips": 11,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "eruption",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "finger_snapping",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "fire",
+  "bucket": "alert candidate",
+  "auc": 0.79,
+  "clips": 35,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "fire_crackle",
+  "bucket": "alert candidate",
+  "auc": 0.93,
+  "clips": 26,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "fire_engine_siren",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "outside"
+ },
+ {
+  "label": "firecracker",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "fireworks",
+  "bucket": "alert candidate",
+  "auc": 0.62,
+  "clips": 36,
+  "readiness": "weak",
+  "note": "outside"
+ },
+ {
+  "label": "flute",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "fly_buzz",
+  "bucket": "background context",
+  "auc": 0.9,
+  "clips": 9,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "foghorn",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "fowl",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "french_horn",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "frog",
+  "bucket": "background context",
+  "auc": null,
+  "clips": 5,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "frog_croak",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "frying_food",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 6,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "gargling",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "gasp",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": 5,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "giggling",
+  "bucket": "routine signal",
+  "auc": 0.52,
+  "clips": 27,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "glass_breaking",
+  "bucket": "in the app",
+  "auc": 0.53,
+  "clips": 459,
+  "readiness": "built, own model + Apple",
+  "note": ""
+ },
+ {
+  "label": "glass_clink",
+  "bucket": "alert candidate",
+  "auc": 0.63,
+  "clips": 89,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "glockenspiel",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.8,
+  "clips": 17,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "gong",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.59,
+  "clips": 44,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "goose_honk",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "guitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "guitar_strum",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "guitar_tapping",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "gunshot_gunfire",
+  "bucket": "alert candidate",
+  "auc": 0.58,
+  "clips": 36,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "gurgling",
+  "bucket": "routine signal",
+  "auc": 0.85,
+  "clips": 18,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "hair_dryer",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "hammer",
+  "bucket": "routine signal",
+  "auc": 0.62,
+  "clips": 34,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "hammond_organ",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "harmonica",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.75,
+  "clips": 36,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "harp",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.76,
+  "clips": 34,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "harpsichord",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "hedge_trimmer",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "helicopter",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "hi_hat",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.49,
+  "clips": 100,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "hiccup",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "horse_clip_clop",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "horse_neigh",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "humming",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "insect",
+  "bucket": "background context",
+  "auc": 0.95,
+  "clips": 28,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "keyboard_musical",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "keys_jangling",
+  "bucket": "routine signal",
+  "auc": 0.61,
+  "clips": 19,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "knock",
+  "bucket": "in the app",
+  "auc": 0.52,
+  "clips": 335,
+  "readiness": "built, own model + Apple",
+  "note": ""
+ },
+ {
+  "label": "laughter",
+  "bucket": "routine signal",
+  "auc": 0.65,
+  "clips": 159,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "lawn_mower",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "lion_roar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "liquid_dripping",
+  "bucket": "alert candidate",
+  "auc": 0.75,
+  "clips": 20,
+  "readiness": "weak",
+  "note": "possible leak, sustained"
+ },
+ {
+  "label": "liquid_filling_container",
+  "bucket": "routine signal",
+  "auc": 0.99,
+  "clips": 13,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "liquid_pouring",
+  "bucket": "routine signal",
+  "auc": 0.9,
+  "clips": 22,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "liquid_sloshing",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "liquid_splashing",
+  "bucket": "routine signal",
+  "auc": 0.57,
+  "clips": 29,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "liquid_spraying",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "liquid_squishing",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "liquid_trickle_dribble",
+  "bucket": "routine signal",
+  "auc": 0.9,
+  "clips": 21,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "mallet_percussion",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "mandolin",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "marimba_xylophone",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "mechanical_fan",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 4,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "microwave_oven",
+  "bucket": "alert candidate",
+  "auc": 0.7,
+  "clips": 32,
+  "readiness": "weak",
+  "note": "finished beep"
+ },
+ {
+  "label": "mosquito_buzz",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "motorboat_speedboat",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "motorcycle",
+  "bucket": "background context",
+  "auc": 0.91,
+  "clips": 18,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "music",
+  "bucket": "background context",
+  "auc": 0.69,
+  "clips": 2378,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "nose_blowing",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "oboe",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "ocean",
+  "bucket": "background context",
+  "auc": 0.95,
+  "clips": 20,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "orchestra",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "organ",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.7,
+  "clips": 48,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "owl_hoot",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "percussion",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "person_running",
+  "bucket": "routine signal",
+  "auc": 0.91,
+  "clips": 26,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "person_shuffling",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "person_walking",
+  "bucket": "routine signal",
+  "auc": 0.8,
+  "clips": 79,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "piano",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.75,
+  "clips": 148,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "pig_oink",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "pigeon_dove_coo",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "playing_badminton",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "playing_hockey",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "playing_squash",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "playing_table_tennis",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "playing_tennis",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "playing_volleyball",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "plucked_string_instrument",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "police_siren",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "outside"
+ },
+ {
+  "label": "power_tool",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "power_windows",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "printer",
+  "bucket": "routine signal",
+  "auc": 0.83,
+  "clips": 10,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "race_car",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "rail_transport",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "railroad_car",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "rain",
+  "bucket": "background context",
+  "auc": 0.91,
+  "clips": 29,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "raindrop",
+  "bucket": "background context",
+  "auc": null,
+  "clips": 6,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "rapping",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "ratchet_and_pawl",
+  "bucket": "routine signal",
+  "auc": 0.55,
+  "clips": 9,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "rattle_instrument",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.58,
+  "clips": 47,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "reverse_beeps",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "ringtone",
+  "bucket": "alert candidate",
+  "auc": 0.65,
+  "clips": 27,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "rooster_crow",
+  "bucket": "background context",
+  "auc": null,
+  "clips": 7,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "rope_skipping",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "rowboat_canoe_kayak",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "sailing",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "saw",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 7,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "saxophone",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "scissors",
+  "bucket": "routine signal",
+  "auc": 0.76,
+  "clips": 10,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "screaming",
+  "bucket": "alert candidate",
+  "auc": 0.6,
+  "clips": 22,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "scuba_diving",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "sea_waves",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "sewing_machine",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "sheep_bleat",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "shofar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "shout",
+  "bucket": "routine signal",
+  "auc": 0.69,
+  "clips": 33,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "sigh",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 7,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "silence",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "singing",
+  "bucket": "routine signal",
+  "auc": 0.83,
+  "clips": 31,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "singing_bowl",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "sink_filling_washing",
+  "bucket": "alert candidate",
+  "auc": 0.95,
+  "clips": 35,
+  "readiness": "strong",
+  "note": "left running, sustained"
+ },
+ {
+  "label": "siren",
+  "bucket": "alert candidate",
+  "auc": 1.0,
+  "clips": 16,
+  "readiness": "strong",
+  "note": "outside"
+ },
+ {
+  "label": "sitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "skateboard",
+  "bucket": "background context",
+  "auc": null,
+  "clips": 6,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "skiing",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "slap_smack",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "slurp",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "smoke_detector",
+  "bucket": "in the app",
+  "auc": 0.67,
+  "clips": 377,
+  "readiness": "built, own model + Apple",
+  "note": ""
+ },
+ {
+  "label": "snake_hiss",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "snake_rattle",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "snare_drum",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.29,
+  "clips": 183,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "sneeze",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 2,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "snicker",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "snoring",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": "overnight trend"
+ },
+ {
+  "label": "speech",
+  "bucket": "routine signal",
+  "auc": 0.55,
+  "clips": 305,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "squeak",
+  "bucket": "routine signal",
+  "auc": 0.71,
+  "clips": 72,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "steel_guitar_slide_guitar",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "steelpan",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "stream_burbling",
+  "bucket": "routine signal",
+  "auc": 1.0,
+  "clips": 18,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "subway_metro",
+  "bucket": "background context",
+  "auc": 0.86,
+  "clips": 19,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "synthesizer",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "tabla",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": 6,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "tambourine",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.4,
+  "clips": 52,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "tap",
+  "bucket": "routine signal",
+  "auc": 0.52,
+  "clips": 57,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "tearing",
+  "bucket": "routine signal",
+  "auc": 0.53,
+  "clips": 21,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "telephone",
+  "bucket": "alert candidate",
+  "auc": 0.73,
+  "clips": 104,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "telephone_bell_ringing",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "theremin",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "thump_thud",
+  "bucket": "routine signal",
+  "auc": 0.51,
+  "clips": 56,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "thunder",
+  "bucket": "background context",
+  "auc": 1.0,
+  "clips": 25,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "thunderstorm",
+  "bucket": "background context",
+  "auc": 1.0,
+  "clips": 25,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "tick",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": 6,
+  "readiness": "too few clips to score",
+  "note": ""
+ },
+ {
+  "label": "tick_tock",
+  "bucket": "routine signal",
+  "auc": 0.8,
+  "clips": 8,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "timpani",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "toilet_flush",
+  "bucket": "alert candidate",
+  "auc": 1.0,
+  "clips": 17,
+  "readiness": "strong",
+  "note": "a toilet that keeps running, sustained"
+ },
+ {
+  "label": "toothbrush",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "traffic_noise",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "train",
+  "bucket": "background context",
+  "auc": 0.96,
+  "clips": 31,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "train_horn",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "train_wheels_squealing",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "train_whistle",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "trombone",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "truck",
+  "bucket": "background context",
+  "auc": 0.87,
+  "clips": 10,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "trumpet",
+  "bucket": "ignore (not a home sound)",
+  "auc": 0.86,
+  "clips": 110,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "tuning_fork",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "turkey_gobble",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "typewriter",
+  "bucket": "routine signal",
+  "auc": 0.57,
+  "clips": 11,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "typing",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "typing_computer_keyboard",
+  "bucket": "routine signal",
+  "auc": 0.92,
+  "clips": 31,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "ukulele",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "underwater_bubbling",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "vacuum_cleaner",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "vehicle_skidding",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "vibraphone",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "violin_fiddle",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "water",
+  "bucket": "routine signal",
+  "auc": 0.88,
+  "clips": 112,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "water_pump",
+  "bucket": "alert candidate",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "water_tap_faucet",
+  "bucket": "alert candidate",
+  "auc": 0.94,
+  "clips": 68,
+  "readiness": "strong",
+  "note": "left running, sustained"
+ },
+ {
+  "label": "waterfall",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "whale_vocalization",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "whispering",
+  "bucket": "routine signal",
+  "auc": 0.72,
+  "clips": 18,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "whistling",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "whoosh_swoosh_swish",
+  "bucket": "background context",
+  "auc": 0.37,
+  "clips": 29,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "wind",
+  "bucket": "background context",
+  "auc": 0.95,
+  "clips": 29,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "wind_chime",
+  "bucket": "routine signal",
+  "auc": 0.99,
+  "clips": 11,
+  "readiness": "strong",
+  "note": ""
+ },
+ {
+  "label": "wind_instrument",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ },
+ {
+  "label": "wind_noise_microphone",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "wind_rustling_leaves",
+  "bucket": "background context",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "wood_cracking",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "writing",
+  "bucket": "routine signal",
+  "auc": 0.87,
+  "clips": 31,
+  "readiness": "okay",
+  "note": ""
+ },
+ {
+  "label": "yell",
+  "bucket": "routine signal",
+  "auc": 0.71,
+  "clips": 24,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "yodeling",
+  "bucket": "routine signal",
+  "auc": null,
+  "clips": null,
+  "readiness": "no test data",
+  "note": ""
+ },
+ {
+  "label": "zipper",
+  "bucket": "routine signal",
+  "auc": 0.69,
+  "clips": 26,
+  "readiness": "weak",
+  "note": ""
+ },
+ {
+  "label": "zither",
+  "bucket": "ignore (not a home sound)",
+  "auc": null,
+  "clips": null,
+  "readiness": "-",
+  "note": ""
+ }
+]
