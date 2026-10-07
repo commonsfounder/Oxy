@@ -68,6 +68,7 @@
 		A10000010000000000000022 /* VoiceInputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000022 /* VoiceInputManager.swift */; };
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
 		D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000002 /* HouseholdSoundMonitor.swift */; };
+		D90000010000000000000009 /* HouseholdSounds.mlmodel in Sources */ = {isa = PBXBuildFile; fileRef = D9000001000000000000000A /* HouseholdSounds.mlmodel */; };
 		D90000010000000000000005 /* SoundClipStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000006 /* SoundClipStore.swift */; };
 		D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000004 /* AlarmPatternDetector.swift */; };
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
@@ -157,6 +158,7 @@
 		A20000010000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000010000000000000024 /* NativeIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIntegrationManager.swift; sourceTree = "<group>"; };
 		D90000010000000000000002 /* HouseholdSoundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdSoundMonitor.swift; sourceTree = "<group>"; };
+		D9000001000000000000000A /* HouseholdSounds.mlmodel */ = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = HouseholdSounds.mlmodel; sourceTree = "<group>"; };
 		D90000010000000000000006 /* SoundClipStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundClipStore.swift; sourceTree = "<group>"; };
 		D90000010000000000000004 /* AlarmPatternDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmPatternDetector.swift; sourceTree = "<group>"; };
 		A20000010000000000000025 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -352,6 +354,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000020 /* Assets.xcassets */,
+				D9000001000000000000000A /* HouseholdSounds.mlmodel */,
 				A20000010000000000000F01 /* Fraunces.ttf */,
 				A20000010000000000000F02 /* Inter.ttf */,
 			);
@@ -644,6 +647,7 @@
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,
 				D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */,
+				D90000010000000000000009 /* HouseholdSounds.mlmodel in Sources */,
 				D90000010000000000000005 /* SoundClipStore.swift in Sources */,
 				D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */,
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,

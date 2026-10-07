@@ -5,6 +5,7 @@ Only clips whose licence allows commercial use go in: FSD50K CC0 and CC BY (by-n
 and Donate-a-Cry (ODbL/DbCL). Files are hard-linked, so this costs no disk space.
 
   python3 prepare.py <fsd50k folder> <donateacry cleaned data folder> <out folder>
+  python3 fetch.py <out folder>/missing.txt      # only if clips are missing; then run prepare.py again
 """
 import csv
 import hashlib
@@ -28,9 +29,14 @@ TARGET_LABELS = set(TARGETS.values()) | {"Crying_and_sobbing"}
 
 random.seed(7)
 counts = {}
+missing = []
+credits = []  # every FSD50K clip used for training, with its author and licence
 
 
 def link(source, split, label):
+    if not source.exists():
+        missing.append(source)
+        return
     folder = out / split / label
     folder.mkdir(parents=True, exist_ok=True)
     destination = folder / source.name
@@ -62,6 +68,8 @@ for name in ("dev", "eval"):
             matched.append("baby_crying")
         if len(matched) == 1:
             link(source, split, matched[0])
+            if split != "test":
+                credits.append((row["fname"], clip["uploader"], clip["license"], matched[0]))
         elif not matched and not labels & TARGET_LABELS:
             hard, other = background[split]
             (hard if labels & HARD_NEGATIVES else other).append(source)
@@ -71,6 +79,8 @@ for name in ("dev", "eval"):
         cap = BACKGROUND_CAP[split]
         for source in hard[: cap * 2 // 3] + other[: cap - min(len(hard), cap * 2 // 3)]:
             link(source, split, "background")
+            if split != "test":
+                credits.append((source.stem, info[source.stem]["uploader"], info[source.stem]["license"], "background"))
 
 # Donate-a-Cry: split by the parent's app id (first five dash-separated parts) so one baby never lands in two splits.
 for path in sorted(cry.rglob("*.wav")):
@@ -78,5 +88,14 @@ for path in sorted(cry.rglob("*.wav")):
     bucket = int(hashlib.sha1(parent.encode()).hexdigest(), 16) % 10
     link(path, "test" if bucket == 0 else "val" if bucket == 1 else "train", "baby_crying")
 
+with open(out / "attribution.csv", "w", newline="") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(["freesound_id", "author", "licence", "used_as"])
+    writer.writerows(sorted(credits))
+    writer.writerow(["donate-a-cry", "Donate-a-Cry contributors", "https://opendatacommons.org/licenses/odbl/1-0/", "baby_crying"])
+
+if missing:
+    (out / "missing.txt").write_text("\n".join(str(path) for path in missing) + "\n")
+    print(f"{len(missing)} clips not on disk; listed in {out / 'missing.txt'} (fetch.py downloads just these)")
 for split in ("train", "val", "test"):
     print(split, {label: n for (s, label), n in sorted(counts.items()) if s == split})

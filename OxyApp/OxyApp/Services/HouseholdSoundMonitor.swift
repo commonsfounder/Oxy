@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import CoreML
 import Foundation
 @preconcurrency import SoundAnalysis
 import UIKit
@@ -57,7 +58,7 @@ struct HouseholdSoundEventEnvelope: Equatable {
 }
 
 struct HouseholdSoundEventFilter {
-    private struct Rule {
+    struct Rule {
         let aliases: [String]
         let threshold: Double
         /// Windows in a row that must agree. Sustained sounds (a crying baby) take two to rule out a blip;
@@ -76,7 +77,14 @@ struct HouseholdSoundEventFilter {
         var lastSeenAt: Date
     }
 
-    private static let rules: [Rule] = [
+    private let rules: [Rule]
+
+    init(rules: [Rule] = HouseholdSoundEventFilter.builtIn) {
+        self.rules = rules
+    }
+
+    /// Rules for Apple's built-in sound model.
+    static let builtIn: [Rule] = [
         // The sound model also calls alarm clocks "smoke detector", so on its own it only says an alarm is
         // sounding. Smoke and carbon monoxide alarms are named from their beep pattern (AlarmPatternDetector).
         Rule(
@@ -136,6 +144,31 @@ struct HouseholdSoundEventFilter {
         )
     ]
 
+    /// Rules for our own household model (HouseholdSounds.mlmodel, trained in test/dev/sound-eval/train).
+    /// The first alias matches the built-in rule's, so the same sound from both models is one event.
+    static let ownModel: [Rule] = builtIn.compactMap { rule in
+        guard let tuned = ownModelTuning[rule.aliases[0]] else { return nil }
+        return Rule(
+            aliases: [rule.aliases[0], tuned.label],
+            threshold: tuned.threshold,
+            hitsRequired: tuned.hits,
+            subject: rule.subject,
+            title: rule.title,
+            body: rule.body,
+            relevance: rule.relevance,
+            urgent: rule.urgent,
+            requiresNow: rule.requiresNow
+        )
+    }
+
+    /// Chosen from test/dev/sound-eval/train/compare.swift on clips the model never trained on.
+    private static let ownModelTuning: [String: (label: String, threshold: Double, hits: Int)] = [
+        "glass_breaking": ("glass_breaking", 0.9, 1),
+        "door_bell": ("doorbell", 0.8, 1),
+        "knock": ("knock", 0.9, 1),
+        "baby_crying": ("baby_crying", 0.9, 2)
+    ]
+
     private var evidence: [String: Evidence] = [:]
     private var lastEmittedAt: [String: Date] = [:]
     private let evidenceWindow: TimeInterval = 6
@@ -145,7 +178,7 @@ struct HouseholdSoundEventFilter {
         for classifications: [SNClassification],
         at now: Date = Date()
     ) -> HouseholdSoundEventEnvelope? {
-        let candidates = Self.rules.compactMap { rule -> (Rule, Double, String)? in
+        let candidates = rules.compactMap { rule -> (Rule, Double, String)? in
             let match = classifications
                 .filter { classification in
                     let identifier = Self.normalized(classification.identifier)
@@ -267,9 +300,16 @@ final class HouseholdSoundMonitor {
     private var analysisPipeline: HouseholdSoundAnalysisPipeline?
     private var sampleRate = 0.0
     private var resultsObserver: HouseholdSoundResultsObserver?
+    private var ownResultsObserver: HouseholdSoundResultsObserver?
+    private var ownFilter = HouseholdSoundEventFilter(rules: HouseholdSoundEventFilter.ownModel)
+    /// Our household model, if this build ships one. It listens alongside Apple's.
+    private static let ownModel: MLModel? = Bundle.main.url(forResource: "HouseholdSounds", withExtension: "mlmodelc")
+        .flatMap { try? MLModel(contentsOf: $0) }
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var filter = HouseholdSoundEventFilter()
     private var lastAlarmAt: [AlarmPatternDetector.Pattern: Date] = [:]
+    /// Both models can hear the same knock; their events share an id, so it is sent once.
+    private var submittedIds: [String] = []
     private let alarmCooldown: TimeInterval = 15 * 60
     private var activeUserId: String?
     private var pausedListening = false
@@ -381,6 +421,18 @@ final class HouseholdSoundMonitor {
                 }
             )
             try streamAnalyzer.add(request, withObserver: observer)
+            if let model = Self.ownModel {
+                let own = try SNClassifySoundRequest(mlModel: model)
+                own.overlapFactor = 0.5
+                let ownObserver = HouseholdSoundResultsObserver(
+                    onResult: { result in
+                        Task { @MainActor in HouseholdSoundMonitor.shared.consume(result, fromOwnModel: true) }
+                    },
+                    onFailure: { _ in }
+                )
+                try streamAnalyzer.add(own, withObserver: ownObserver)
+                ownResultsObserver = ownObserver
+            }
 
             input.installTap(onBus: 0, bufferSize: 8_192, format: format) { [pipeline] buffer, time in
                 pipeline.analyze(buffer, at: time.sampleTime)
@@ -421,11 +473,17 @@ final class HouseholdSoundMonitor {
         analysisPipeline?.stop()
         analysisPipeline = nil
         resultsObserver = nil
+        ownResultsObserver = nil
         filter.resetEvidence()
+        ownFilter.resetEvidence()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func consume(_ result: SNClassificationResult) {
+    private func consume(_ result: SNClassificationResult, fromOwnModel: Bool = false) {
+        if fromOwnModel {
+            if let event = ownFilter.event(for: result.classifications) { submit(event) }
+            return
+        }
         #if DEBUG
         let now = Date()
         if now.timeIntervalSince(lastClassificationLogAt) >= 1 {
@@ -448,7 +506,8 @@ final class HouseholdSoundMonitor {
     }
 
     private func submit(_ event: HouseholdSoundEventEnvelope) {
-        guard let userId = activeUserId, isEnabled, !pausedListening else { return }
+        guard let userId = activeUserId, isEnabled, !pausedListening, !submittedIds.contains(event.id) else { return }
+        submittedIds = Array((submittedIds + [event.id]).suffix(20))
         if SoundClipStore.shared.isEnabled, let samples = analysisPipeline?.recentSamples() {
             SoundClipStore.shared.save(samples: samples, sampleRate: sampleRate, sound: event.sound, title: event.subject, at: event.occurredAt)
         }
