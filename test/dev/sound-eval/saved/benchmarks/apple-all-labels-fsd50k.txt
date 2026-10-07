@@ -1,0 +1,142 @@
+6358 clips scored
+
+Apple label                  FSD50K class                         clips   AUC ESC-50 AUC
+thunder                       Thunder                                25  1.00           
+thunderstorm                  Thunderstorm                           25  1.00       1.00
+applause                      Applause                               18  1.00           
+stream_burbling               Stream                                 18  1.00           
+toilet_flush                  Toilet_flush                           17  1.00       1.00
+siren                         Siren                                  16  1.00       1.00
+bathtub_filling_washing       Bathtub_(filling_or_washing)           19  1.00           
+liquid_filling_container      Fill_(with_liquid)                     13  0.99           
+engine_idling                 Idling                                  8  0.99           
+wind_chime                    Wind_chime                             11  0.99           
+cricket_chirp                 Cricket                                11  0.99           
+church_bell                   Church_bell                            24  0.97       1.00
+train                         Train                                  31  0.96           
+ocean                         Ocean                                  20  0.95           
+sink_filling_washing          Sink_(filling_or_washing)              35  0.95           
+wind                          Wind                                   29  0.95       0.95
+insect                        Insect                                 28  0.95           
+chatter                       Chatter                                31  0.95           
+bus                           Bus                                    15  0.94           
+water_tap_faucet              Water_tap_and_faucet                   68  0.94           
+cat_purr                      Purr                                   14  0.94           
+fire_crackle                 ~Crackle                                26  0.93       1.00
+chime                         Chime                                  25  0.93           
+typing_computer_keyboard      Computer_keyboard                      31  0.92       1.00
+rain                          Rain                                   29  0.91       0.99
+person_running                Run                                    26  0.91           
+motorcycle                    Motorcycle                             18  0.91           
+crying_sobbing                Crying_and_sobbing                     66  0.90           
+baby_crying                  ~Crying_and_sobbing                     66  0.90       1.00
+car_passing_by                Car_passing_by                         13  0.90           
+cheering                      Cheering                               16  0.90           
+liquid_trickle_dribble        Trickle_and_dribble                    21  0.90           
+crowd                         Crowd                                  41  0.90           
+liquid_pouring                Pour                                   22  0.90       1.00
+fly_buzz                     ~Buzz                                    9  0.90           
+engine                        Engine                                 88  0.89       0.98
+clock                         Clock                                  21  0.88           
+water                         Water                                 112  0.88           
+truck                         Truck                                  10  0.87           
+writing                       Writing                                31  0.87           
+door_sliding                  Sliding_door                           51  0.87           
+trumpet                       Trumpet                               110  0.86           
+subway_metro                  Subway_and_metro_and_underground       19  0.86           
+engine_starting               Engine_starting                        11  0.85           
+gurgling                      Gurgling                               18  0.85           
+printer                       Printer                                10  0.83           
+singing                       Singing                                31  0.83           
+drum_kit                      Drum_kit                               59  0.82           
+chewing                       Chewing_and_mastication                13  0.81           
+boom                          Boom                                   13  0.81           
+person_walking                Walk_and_footsteps                     79  0.80       0.98
+glockenspiel                  Glockenspiel                           17  0.80           
+tick_tock                     Tick-tock                               8  0.80           
+fire                          Fire                                   35  0.79           
+dog_bark                      Bark                                   37  0.78       1.00
+crumpling_crinkling           Crumpling_and_crinkling                37  0.78           
+bird                          Bird                                  110  0.77           
+bird_chirp_tweet              Chirp_and_tweet                        35  0.77       1.00
+harp                          Harp                                   34  0.76           
+scissors                      Scissors                               10  0.76           
+harmonica                     Harmonica                              36  0.75           
+dog                           Dog                                    81  0.75           
+piano                         Piano                                 148  0.75           
+liquid_dripping               Drip                                   20  0.75       0.96
+telephone                     Telephone                             104  0.73           
+whispering                    Whispering                             18  0.72           
+door_bell                     Doorbell                              123  0.71           
+yell                          Yell                                   24  0.71           
+squeak                        Squeak                                 72  0.71           
+camera                        Camera                                 22  0.71           
+microwave_oven                Microwave_oven                         32  0.70           
+organ                         Organ                                  48  0.70           
+drill                         Drill                                   8  0.70           
+shout                         Shout                                  33  0.69           
+zipper                        Zipper_(clothing)                      26  0.69           
+music                         Music                                2378  0.69           
+bell                          Bell                                  186  0.68           
+smoke_detector               ~Alarm                                 377  0.67           
+electric_guitar               Electric_guitar                        78  0.67           
+door_slam                     Slam                                   75  0.66           
+laughter                      Laughter                              159  0.65       1.00
+ringtone                      Ringtone                               27  0.65           
+bicycle_bell                  Bicycle_bell                           20  0.63           
+glass_clink                   Chink_and_clink                        89  0.63           
+cat_meow                      Meow                                   32  0.63       1.00
+fireworks                     Fireworks                              36  0.62       1.00
+hammer                        Hammer                                 34  0.62           
+car_horn                      Vehicle_horn_and_car_horn_and_honking    19  0.62           
+keys_jangling                 Keys_jangling                          19  0.61           
+breathing                     Breathing                              34  0.61       0.98
+dog_growl                     Growling                                8  0.60           
+screaming                     Screaming                              22  0.60           
+cymbal                        Cymbal                                138  0.60           
+door                          Door                                  601  0.60           
+gong                          Gong                                   44  0.59           
+rattle_instrument             Rattle_(instrument)                    47  0.58           
+gunshot_gunfire               Gunshot_and_gunfire                    36  0.58           
+liquid_splashing              Splash_and_splatter                    29  0.57           
+cough                         Cough                                  19  0.57       1.00
+drawer_open_close             Drawer_open_or_close                   30  0.57           
+typewriter                    Typewriter                             11  0.57           
+ratchet_and_pawl              Ratchet_and_pawl                        9  0.55           
+speech                        Speech                                305  0.55           
+crushing                      Crushing                               67  0.54           
+coin_dropping                 Coin_(dropping)                        45  0.54           
+tearing                       Tearing                                21  0.53           
+glass_breaking                Shatter                               459  0.53       0.99
+knock                         Knock                                 335  0.52       1.00
+giggling                      Giggle                                 27  0.52           
+tap                           Tap                                    57  0.52           
+thump_thud                    Thump_and_thud                         56  0.51           
+hi_hat                        Hi-hat                                100  0.49           
+clapping                      Clapping                               66  0.48       1.00
+cutlery_silverware            Cutlery_and_silverware                 51  0.46           
+dishes_pots_pans              Dishes_and_pots_and_pans               60  0.42           
+burp                          Burping_and_eructation                 15  0.42           
+tambourine                    Tambourine                             52  0.40           
+whoosh_swoosh_swish           Whoosh_and_swoosh_and_swish            29  0.37           
+drum                          Drum                                  258  0.37           
+cowbell                       Cowbell                                41  0.30           
+snare_drum                    Snare_drum                            183  0.29           
+boiling                       Boiling                                 4   n/a             not enough data
+chicken_cluck                ~Chicken_and_rooster                     7   n/a             not enough data
+frog                          Frog                                    5   n/a             not enough data
+frying_food                   Frying_(food)                           6   n/a             not enough data
+gasp                          Gasp                                    5   n/a             not enough data
+mechanical_fan                Mechanical_fan                          4   n/a             not enough data
+raindrop                      Raindrop                                6   n/a             not enough data
+rooster_crow                 ~Chicken_and_rooster                     7   n/a             not enough data
+saw                           Sawing                                  7   n/a             not enough data
+sigh                          Sigh                                    7   n/a             not enough data
+skateboard                    Skateboard                              6   n/a             not enough data
+sneeze                        Sneeze                                  2   n/a       1.00  not enough data
+tabla                         Tabla                                   6   n/a             not enough data
+tick                          Tick                                    6   n/a             not enough data
+
+135 Apple labels matched to an FSD50K class; 121 have at least 8 clips.
+  strong (AUC >= 0.90): 30   okay (0.80-0.90): 21   weak (< 0.80): 70
+  no FSD50K class to compare against: 168 of Apple's 303 labels

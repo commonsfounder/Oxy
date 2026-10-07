@@ -43,6 +43,13 @@ The scratchpad is temporary: if gone, rebuild with `fetch.py`, `prepare.py`, `au
 5. More sounds: Apple already has ~300 labels. ESC-50 scoring (`train/peaks.swift`, `best_labels.py`) says toilet flush, vacuum, cough, sneeze, snore, dog, typing, footsteps work well out of the box; washing machine and breathing do not (no usable label). Kettle (`boiling`) untested: no clips.
 6. Decision layer idea (Jev / OpenAI Decisions API are text/image only, no audio): feed it text facts about a detected sound, not audio. Not built.
 
+## Apple's 303 labels, scored (2026-10-07)
+`test/dev/sound-eval/all_labels.py` + `peaks_dir.swift` score every Apple label on the 6,358 FSD50K clips on disk; result in
+`saved/benchmarks/apple-all-labels-fsd50k.txt`. 135 labels map to an FSD50K class; 121 have >= 8 clips: 30 strong (AUC >= 0.90),
+21 okay, 70 weak. 168 labels have no FSD50K class (mostly instruments, animals, sports) and are unmeasured. On messy real clips
+Apple is far weaker than on clean ESC-50 for the sounds we trained on (glass 0.53 vs 0.99, knock 0.52 vs 1.00). AUC is
+optimistic for sounds near-always mixed with others and pessimistic for long clips (peak over more windows); use it to rank, not as accuracy.
+
 ## Gotchas
 - Building inside `~/Documents` can break codesign through iCloud xattrs; device installs use `-derivedDataPath /private/tmp/claude-501/oxy-dd-device`.
 - Short sounds (0.5-1 s) must be tested inside a longer stream; a bare short file gives the classifier no full window and scores 0 for every model.
