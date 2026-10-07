@@ -15,6 +15,8 @@ struct Message: Identifiable, Equatable {
     /// request has one inline retry surface instead of a global banner plus a row.
     var turnError: String?
     var sources: [MessageSource]
+    /// Small JPEG/PNG preview of a photo the user sent. The full upload is not kept.
+    var attachmentImage: Data?
 
     enum Role: String, Codable {
         case user
@@ -31,8 +33,10 @@ struct Message: Identifiable, Equatable {
         isStreaming: Bool = false,
         queuedForActiveTask: Bool = false,
         turnError: String? = nil,
-        sources: [MessageSource] = []
+        sources: [MessageSource] = [],
+        attachmentImage: Data? = nil
     ) {
+        self.attachmentImage = attachmentImage
         self.id = id
         self.dbId = dbId
         self.role = role
@@ -53,6 +57,32 @@ struct Message: Identifiable, Equatable {
             && lhs.turnError == rhs.turnError
             && lhs.actions == rhs.actions
             && lhs.sources == rhs.sources
+            && lhs.attachmentImage == rhs.attachmentImage
+    }
+}
+
+/// The text tags that mark a photo on a user turn: "[Image attached]" while sending and
+/// "[Attached image: photo.jpg]" once the server has stored the turn.
+enum AttachmentTag {
+    private static let imageTag = try! NSRegularExpression(
+        pattern: #"\s*\[(?:Image attached|Attached image(?::[^\]]*)?)\]\s*$"#
+    )
+
+    /// The turn's text without a trailing image tag, and whether there was one.
+    static func splitImageTag(_ content: String) -> (text: String, hadTag: Bool) {
+        let range = NSRange(content.startIndex..., in: content)
+        guard let match = imageTag.firstMatch(in: content, range: range),
+              let tagRange = Range(match.range, in: content) else {
+            return (content, false)
+        }
+        return (String(content[..<tagRange.lowerBound]), true)
+    }
+
+    /// Decodes a "data:image/...;base64,..." string into raw image bytes.
+    static func decodeDataURL(_ value: String?) -> Data? {
+        guard let value, value.hasPrefix("data:image/"),
+              let comma = value.firstIndex(of: ",") else { return nil }
+        return Data(base64Encoded: String(value[value.index(after: comma)...]))
     }
 }
 
@@ -562,6 +592,7 @@ struct HistoryEntry: Codable, Identifiable {
     let createdAt: String?
     let actions: [ActionResult]?
     let sources: [MessageSource]?
+    let image: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -569,6 +600,7 @@ struct HistoryEntry: Codable, Identifiable {
         case content
         case actions
         case sources
+        case image
         case createdAt = "created_at"
     }
 

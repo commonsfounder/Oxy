@@ -208,6 +208,7 @@ const { resolveEntityReference, extractReferentialPhrase, hasBareEntityReference
 const { logEntityReference } = require('./services/session-events');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
+const { buildAttachmentMessage } = require('./services/chat-attachments');
 const { describeAction } = require('./services/action-summary');
 const {
   ROUTE_KEYS,
@@ -4881,7 +4882,12 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
 
     const [{ history, useSearch, dynamicSystemPrompt, cachedContentName, modelRoute }] = await Promise.all([
       buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL, { chatStartedAt }),
-      saveMessage(userId, 'user', `${message}\n\n[Attached ${fileLabel}: ${req.file.originalname || fileLabel}]`)
+      saveMessage(userId, 'user', buildAttachmentMessage({
+        message,
+        isImage,
+        label: req.file.originalname || fileLabel,
+        thumbnail: req.body.thumbnail
+      }))
     ]);
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({

@@ -145,6 +145,7 @@ struct ChatService {
         imageData: Data,
         fileName: String,
         mimeType: String,
+        thumbnail: Data? = nil,
         chatStartedAt: String? = nil,
         settings: OxySettings? = nil
     ) async throws -> ImageChatResponse {
@@ -152,6 +153,9 @@ struct ChatService {
             "userId": userId,
             "message": message
         ]
+        if let thumbnail {
+            fields["thumbnail"] = "data:image/jpeg;base64,\(thumbnail.base64EncodedString())"
+        }
         if let chatStartedAt {
             fields["chatStartedAt"] = chatStartedAt
         }
