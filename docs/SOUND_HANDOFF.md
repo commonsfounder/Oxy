@@ -44,6 +44,19 @@ baby clean 53 / 7 vs 103 / 4; 30-min stream (36 each): glass 5 found at 16 false
 Likely fixes, in order: distil from v2/Apple over the ~11k unlabeled-or-weakly-labelled clips on disk (soft labels), a small CNN (needs PyTorch, not
 installed), real BOX-3 microphone recordings, then int8 + TFLite-Micro / ESP-DL on the S3.
 
+## Open pretrained model for the BOX-3: EfficientAT mn04 (2026-10-07)
+Free route instead of Apple's (unavailable): github.com/fschmid56/EfficientAT, MIT, `mn04_as` (0.98M weights, 0.11 GMACs per 10 s of audio, trained on AudioSet).
+Needs PyTorch (installed in `/private/tmp/claude-501/torchenv`, temporary; `pip install torch torchaudio torchvision`). Scripts in `test/dev/sound-eval/tiny/`:
+`extract.py` runs the network once per window and caches embeddings + AudioSet scores (parallel shards), `head.py` trains a 384-128-5 head on the cache and
+scores from the cache (seconds). Zero-shot (no training): baby crying fine, knock ok, glass ~0, doorbell weak. With our head (frozen backbone, 2 s windows):
+30-min stream, 36 of each, at threshold 0.95, found / false alarms per hour: glass 17 / 16, knock 14 / 12, doorbell 7 / 12, baby 20 / 14.
+For comparison phone v2: 16 / 6, 12 / 2, 8 / 0, 20 / 6; Apple: 9 / 0, 12 / 2, 1 / 0, 13 / 0; numpy tiny: 0 / 0, 1 / 4, 1 / 4, 10 / 6.
+Verdict: about as many catches as v2 but 2-6x the false alarms; far better than the numpy model. Same catch-vs-false curve as v2 when thresholds are matched
+(clean glass: v2 at -0.3 104 caught / 19 false, head 99 / 17). Next: fine-tune the backbone (not only the head), add mined negatives, int8 export, measure
+speed on the ESP32-S3 (the 0.11 GMAC figure is per 10 s of 32 kHz audio; the BOX-3 mic is 16 kHz, so audio must be upsampled or the model retrained at 16 kHz).
+Saved: `saved/models/efficientat-mn04-head-v1.pt`, `saved/benchmarks/efficientat-mn04-*`. Embedding caches (`scratchpad/emb/*.pkl`) are not saved; rerun `extract.py` (~15 min with 4 shards).
+Competitor to know: Seeed Sound Event Detection Module D1 (AIZIP model) already does baby cry, glass break, gunshot, T3/T4 alarms and snore locally.
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.

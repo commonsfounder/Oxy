@@ -153,6 +153,7 @@ def train(folder, out):
     np.savez(out, mean=mean, std=std, *best[1])
 
 
+STREAM_WINDOW = 1.0  # seconds of audio each stream window covers
 RULES = {"glass_breaking": 1, "knock": 1, "doorbell": 1, "baby_crying": 2}
 
 
@@ -176,17 +177,19 @@ def fires(p, cls, threshold, hits):
     return False
 
 
-def evaluate(model_path, stress, stream):
-    model = load_model(model_path)
+def evaluate(model_path, stress, stream, thresholds=(0.5, 0.8, 0.95), prob_fn=None):
+    if prob_fn is None:
+        model = load_model(model_path)
+        prob_fn = lambda path: probabilities(model, audio.load(path))
     for condition in ("clean", "noise10", "noise0", "reverb", "blip1s", "hard"):
         clips = []
         for cls in CLASSES:
             for path in sorted((Path(stress) / condition / cls).glob("*.wav")):
-                x = audio.load(path)
-                if x is not None:
-                    clips.append((cls, probabilities(model, x)))
+                p = prob_fn(path)
+                if p is not None:
+                    clips.append((cls, p))
         print(f"\n{condition} ({len(clips)} clips)")
-        for threshold in (0.5, 0.8, 0.95):
+        for threshold in thresholds:
             cells = []
             for cls, hits in RULES.items():
                 pos = [p for c, p in clips if c == cls]
@@ -197,10 +200,10 @@ def evaluate(model_path, stress, stream):
             print(f"  threshold {threshold}: " + "  ".join(cells))
     print("\nstream (10-minute beds, sounds dropped in)")
     beds = sorted(Path(stream).glob("bed*.wav"))
-    probs = [(probabilities(model, audio.load(b)), json.loads(b.with_suffix(".json").read_text())) for b in beds]
+    probs = [(prob_fn(b), json.loads(b.with_suffix(".json").read_text())) for b in beds]
     total = {c: sum(e["sound"] == c for _, truth in probs for e in truth) for c in RULES}
     hours = sum(len(p) * 0.5 for p, _ in probs) / 3600
-    for threshold in (0.8, 0.95):
+    for threshold in thresholds[1:]:
         cells = []
         for cls, hits in RULES.items():
             found, falses = 0, 0
@@ -208,7 +211,7 @@ def evaluate(model_path, stress, stream):
                 col, run, last, times = p[:, CLASSES.index(cls)], 0, -99, []
                 for i, value in enumerate(col):
                     run = run + 1 if value >= threshold else 0
-                    t = i * 0.5 + 1.0
+                    t = i * 0.5 + STREAM_WINDOW
                     if run >= hits and t - last > 30:
                         times.append(t)
                         last = t
