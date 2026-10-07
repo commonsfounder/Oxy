@@ -31,6 +31,26 @@ struct HouseholdSoundEventEnvelope: Equatable {
             "interruptionCost": urgent ? "low" : "normal"
         ]
     }
+
+    /// An alarm recognised by its beep pattern rather than by the sound model.
+    static func alarm(_ pattern: AlarmPatternDetector.Pattern, at now: Date, cooldown: TimeInterval) -> HouseholdSoundEventEnvelope {
+        let (subject, title, body, urgent): (String, String, String, Bool) = switch pattern {
+        case .smoke: ("Smoke alarm", "Smoke alarm heard", "A smoke alarm is sounding nearby.", true)
+        case .carbonMonoxide: ("Carbon monoxide alarm", "Carbon monoxide alarm heard", "A carbon monoxide alarm is sounding nearby.", true)
+        case .sustainedBeeping: ("Alarm", "An alarm is going off", "Something has been beeping for over half a minute.", false)
+        }
+        return HouseholdSoundEventEnvelope(
+            id: "sound:\(pattern.rawValue):\(Int(now.timeIntervalSince1970 / cooldown))",
+            subject: subject,
+            title: title,
+            body: body,
+            confidence: 0.95,
+            relevance: 1,
+            urgent: urgent,
+            requiresNow: true,
+            occurredAt: now
+        )
+    }
 }
 
 struct HouseholdSoundEventFilter {
@@ -54,15 +74,17 @@ struct HouseholdSoundEventFilter {
     }
 
     private static let rules: [Rule] = [
+        // The sound model also calls alarm clocks "smoke detector", so on its own it only says an alarm is
+        // sounding. Smoke and carbon monoxide alarms are named from their beep pattern (AlarmPatternDetector).
         Rule(
             aliases: ["smoke_detector"],
             threshold: 0.65,
             hitsRequired: 2,
-            subject: "Smoke detector",
-            title: "Smoke detector heard",
-            body: "A smoke detector may be sounding nearby.",
-            relevance: 1,
-            urgent: true,
+            subject: "Alarm",
+            title: "An alarm is going off",
+            body: "An alarm may be sounding nearby.",
+            relevance: 0.9,
+            urgent: false,
             requiresNow: true
         ),
         Rule(
@@ -191,16 +213,27 @@ private final class HouseholdSoundResultsObserver: NSObject, SNResultsObserving 
 
 private final class HouseholdSoundAnalysisPipeline: @unchecked Sendable {
     private let analyzer: SNAudioStreamAnalyzer
+    private let alarms: AlarmPatternDetector
+    private let onAlarm: (AlarmPatternDetector.Pattern) -> Void
     private let lock = NSLock()
 
-    init(analyzer: SNAudioStreamAnalyzer) {
+    init(analyzer: SNAudioStreamAnalyzer, sampleRate: Double, onAlarm: @escaping (AlarmPatternDetector.Pattern) -> Void) {
         self.analyzer = analyzer
+        self.alarms = AlarmPatternDetector(sampleRate: sampleRate)
+        self.onAlarm = onAlarm
     }
 
     func analyze(_ buffer: AVAudioPCMBuffer, at position: AVAudioFramePosition) {
         lock.lock()
         defer { lock.unlock() }
         analyzer.analyze(buffer, atAudioFramePosition: position)
+        guard let channel = buffer.floatChannelData?[0] else { return }
+        let samples = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+        if let pattern = alarms.process(samples) {
+            // Start listening afresh so the same alarm can be reported again once the cooldown passes.
+            alarms.reset()
+            onAlarm(pattern)
+        }
     }
 
     func stop() {
@@ -220,6 +253,8 @@ final class HouseholdSoundMonitor {
     private var resultsObserver: HouseholdSoundResultsObserver?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var filter = HouseholdSoundEventFilter()
+    private var lastAlarmAt: [AlarmPatternDetector.Pattern: Date] = [:]
+    private let alarmCooldown: TimeInterval = 15 * 60
     private var activeUserId: String?
     private var pausedForVoiceInput = false
     private var isStarting = false
@@ -309,7 +344,9 @@ final class HouseholdSoundMonitor {
             guard format.sampleRate > 0, format.channelCount > 0 else { return }
 
             let streamAnalyzer = SNAudioStreamAnalyzer(format: format)
-            let pipeline = HouseholdSoundAnalysisPipeline(analyzer: streamAnalyzer)
+            let pipeline = HouseholdSoundAnalysisPipeline(analyzer: streamAnalyzer, sampleRate: format.sampleRate) { pattern in
+                Task { @MainActor in HouseholdSoundMonitor.shared.consume(pattern) }
+            }
             let request = try SNClassifySoundRequest(classifierIdentifier: .version1)
             request.overlapFactor = 0.5
             let observer = HouseholdSoundResultsObserver(
@@ -380,10 +417,19 @@ final class HouseholdSoundMonitor {
             print("[HouseholdSound] observed \(top.joined(separator: ", "))")
         }
         #endif
-        guard let userId = activeUserId,
-              isEnabled,
-              !pausedForVoiceInput,
-              let event = filter.event(for: result.classifications) else { return }
+        guard let event = filter.event(for: result.classifications) else { return }
+        submit(event)
+    }
+
+    private func consume(_ pattern: AlarmPatternDetector.Pattern) {
+        let now = Date()
+        guard lastAlarmAt[pattern].map({ now.timeIntervalSince($0) >= alarmCooldown }) ?? true else { return }
+        lastAlarmAt[pattern] = now
+        submit(.alarm(pattern, at: now, cooldown: alarmCooldown))
+    }
+
+    private func submit(_ event: HouseholdSoundEventEnvelope) {
+        guard let userId = activeUserId, isEnabled, !pausedForVoiceInput else { return }
         Task {
             #if DEBUG
             print("[HouseholdSound] detected id=\(event.id) confidence=\(String(format: "%.3f", event.confidence))")

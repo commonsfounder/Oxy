@@ -26,3 +26,15 @@ Keep the `rules` list in `evaluate.swift` in step with `HouseholdSoundMonitor.sw
 | smoke detector | no test clips; fired on 4 alarm-clock clips | unchanged |
 
 Short sounds (glass, a knock) last about a second, so waiting for two analysis windows in a row missed most of them.
+
+## Smoke and carbon monoxide alarms: `alarm/`
+Apple's model can't tell a smoke alarm from an alarm clock, so `AlarmPatternDetector` listens for the
+international beep patterns instead (smoke: three beeps then a pause; CO: four short beeps then a pause), and
+only calls plain rapid beeping an alarm after 30 s. See the header of `alarm/main.swift` to run it. The real
+recordings are BigSoundBank (CC0) sounds 0800 (smoke, T3), 0925 (CO, T4) and 1153 (rapid beeper), as 16 kHz wavs.
+
+Result, 2026-10-07: all 3 real alarms and all 7 synthetic cases right (including an alarm as loud as the
+room noise, a 520 Hz low-frequency alarm, and an alarm clock switched off after 20 s). Across the 2,000 ESC-50
+clips looped to 45 s: 0 called a smoke alarm, 0 called a CO alarm, and 2 called sustained beeping (both
+alarm clocks). A looped rooster crow once matched the CO timing; beeps must now be a tone inside the band,
+not sound spilling in from its edge.

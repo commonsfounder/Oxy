@@ -67,6 +67,7 @@
 		A10000010000000000000022 /* VoiceInputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000022 /* VoiceInputManager.swift */; };
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
 		D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000002 /* HouseholdSoundMonitor.swift */; };
+		D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000004 /* AlarmPatternDetector.swift */; };
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
 		A10000010000000000000100 /* AgenticHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000100 /* AgenticHomeView.swift */; };
 		A10000010000000000000104 /* GlebAgenticFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000104 /* GlebAgenticFlow.swift */; };
@@ -153,6 +154,7 @@
 		A20000010000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000010000000000000024 /* NativeIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIntegrationManager.swift; sourceTree = "<group>"; };
 		D90000010000000000000002 /* HouseholdSoundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdSoundMonitor.swift; sourceTree = "<group>"; };
+		D90000010000000000000004 /* AlarmPatternDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmPatternDetector.swift; sourceTree = "<group>"; };
 		A20000010000000000000025 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000010000000000000026 /* OxyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OxyApp.entitlements; sourceTree = "<group>"; };
 		A20000010000000000000100 /* AgenticHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenticHomeView.swift; sourceTree = "<group>"; };
@@ -258,6 +260,7 @@
 				A20000010000000000000022 /* VoiceInputManager.swift */,
 				A20000010000000000000024 /* NativeIntegrationManager.swift */,
 				D90000010000000000000002 /* HouseholdSoundMonitor.swift */,
+				D90000010000000000000004 /* AlarmPatternDetector.swift */,
 				A20000010000000000000028 /* PendantAudioBridge.swift */,
 				A20000010000000000000033 /* PendantTelemetryMonitor.swift */,
 				A20000010000000000000030 /* HapticManager.swift */,
@@ -634,6 +637,7 @@
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,
 				D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */,
+				D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */,
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,
 				A10000010000000000000100 /* AgenticHomeView.swift in Sources */,
 				A10000010000000000000104 /* GlebAgenticFlow.swift in Sources */,
