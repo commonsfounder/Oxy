@@ -24,7 +24,7 @@ export default [
         console: 'readonly', __dirname: 'readonly', __filename: 'readonly', Buffer: 'readonly',
         setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly',
         clearInterval: 'readonly', setImmediate: 'readonly', queueMicrotask: 'readonly',
-        fetch: 'readonly', URL: 'readonly', URLSearchParams: 'readonly', AbortController: 'readonly', AbortSignal: 'readonly',
+        fetch: 'readonly', URL: 'readonly', URLSearchParams: 'readonly', AbortController: 'readonly', MutationObserver: 'readonly', AbortSignal: 'readonly',
         TextEncoder: 'readonly', TextDecoder: 'readonly', structuredClone: 'readonly',
         globalThis: 'readonly', performance: 'readonly', crypto: 'readonly',
         FormData: 'readonly', Blob: 'readonly',

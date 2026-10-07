@@ -7202,6 +7202,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'message is required.' });
     }
 
+    // Wake the user's sandbox browser (if they have one) while the model gets going.
+    try { require('./services/browser-sandbox').prewarm(userId); } catch { /* never blocks a chat */ }
+
     const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
     const persistConversation = shouldPersistChatTurn(req.body.persistConversation);
     trace.persistConversation = persistConversation;

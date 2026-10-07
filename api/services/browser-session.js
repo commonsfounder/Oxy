@@ -106,7 +106,7 @@ async function getWarmBrowser() {
 // cannot be reached the task still runs on the local Chromium, loudly, unless strict.
 async function acquireBrowser(userId) {
   const sandboxes = require('./browser-sandbox');
-  if (userId && sandboxes.isEnabled()) {
+  if (userId && sandboxes.isEnabled(userId)) {
     try {
       return await sandboxes.acquire(userId);
     } catch (error) {

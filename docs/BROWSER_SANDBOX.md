@@ -24,7 +24,8 @@ Off by default. With it off, the browser is the local headless Chromium as befor
 | `E2B_API_KEY` | — | required for `e2b` |
 | `OXY_E2B_TEMPLATE` | `oxy-browser` | template name |
 | `OXY_E2B_TIMEOUT_MS` | 900000 | safety net: an abandoned sandbox pauses after this |
-| `OXY_E2B_PAUSE_DELAY_MS` | 90000 | pause this long after the last session closes |
+| `OXY_E2B_PAUSE_DELAY_MS` | 300000 | pause this long after the last session closes |
+| `OXY_BROWSER_SANDBOX_USERS` | all | comma-separated user ids; only these use sandboxes |
 | `OXY_E2B_BOOT_TIMEOUT_MS` | 30000 | wait for Chromium after a cold start |
 | `OXY_BROWSER_BACKEND_STRICT` | off | `1` = never fall back to the local browser |
 
@@ -56,3 +57,15 @@ run against real E2B: the template build, `maskRequestHost`, resume-with-memory,
 noVNC/websockify setup in `sandbox/e2b/start.sh` all need a first run with a key. Whether a
 datacenter-IP sandbox gets past the bot walls (Argos, Nike) is also untested; if not, the
 sandbox's egress needs a residential proxy.
+
+## Speed (measured 2026-10-07, laptop to E2B, ~155 ms per browser round trip)
+
+- Cold start (create sandbox + browser + connect): 37 s -> 8.6 s. Resume after pause: 15 s -> 3.9 s.
+- A step costs one round trip per call to the browser, so steps read the whole page in one call
+  (`perceive` in browser-environment.js) and click at a point measured with the controls
+  (`fastClick`), falling back to Playwright's checked click when a control is off-screen or covered.
+  Click went from 29 browser calls to 7; scroll from 7 to 3. Over the sandbox: scroll 2.6 s -> 0.7 s.
+- Consent-banner search no longer costs ~0.9 s per step when there is no banner.
+- Chat wakes an existing sandbox (`prewarm`) but never creates one.
+- The model is shown each page once and only the newest in full (`agent-context-trim.js`);
+  checkpoint saves run while the model thinks; independent read-only lookups run together.

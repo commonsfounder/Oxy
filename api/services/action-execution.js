@@ -135,7 +135,7 @@ function createActionExecution({
     if (!actions?.length) return [];
     // Delegation changes ownership of the whole goal, so it must never share a
     // parallel batch with sibling effects that would outlive the handoff.
-    const sequential = !!context.sequential || !!context.agentIteration || actions.some(action => action?.type === 'create_agent_task');
+    const sequential = !!context.sequential || (!!context.agentIteration && !context.parallelReads) || actions.some(action => action?.type === 'create_agent_task');
     const previousResults = context.previousResults || [];
     const preparedActions = actions.map(action => prepareActionForExecution(action, context) || action);
     const enrichedActions = preparedActions.map(action => {

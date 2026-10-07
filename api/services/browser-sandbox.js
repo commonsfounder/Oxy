@@ -18,7 +18,7 @@ function envInt(name, fallback) {
 const config = () => ({
   template: process.env.OXY_E2B_TEMPLATE || 'oxy-browser',
   timeoutMs: envInt('OXY_E2B_TIMEOUT_MS', 15 * 60 * 1000),
-  pauseDelayMs: envInt('OXY_E2B_PAUSE_DELAY_MS', 90 * 1000),
+  pauseDelayMs: envInt('OXY_E2B_PAUSE_DELAY_MS', 5 * 60 * 1000),
   bootTimeoutMs: envInt('OXY_E2B_BOOT_TIMEOUT_MS', 30 * 1000),
   connectTimeoutMs: envInt('OXY_E2B_CONNECT_TIMEOUT_MS', 20 * 1000),
 });
@@ -28,8 +28,12 @@ function backendName() {
   return name === 'e2b' ? 'e2b' : 'local';
 }
 
-function isEnabled() {
-  return backendName() === 'e2b' && Boolean(process.env.E2B_API_KEY);
+// OXY_BROWSER_SANDBOX_USERS (comma-separated user ids) limits the sandbox to those users, so it
+// can be tried on one account before everyone. Unset means every user.
+function isEnabled(userId) {
+  if (backendName() !== 'e2b' || !process.env.E2B_API_KEY) return false;
+  const list = String(process.env.OXY_BROWSER_SANDBOX_USERS || '').split(',').map((v) => v.trim()).filter(Boolean);
+  return !list.length || userId === undefined || list.includes(userId);
 }
 
 // E2B is a third party: it gets an opaque tag, never the user id.
@@ -37,10 +41,18 @@ function userTag(userId) {
   return createHash('sha256').update(`adam-sandbox:${userId}`).digest('hex').slice(0, 32);
 }
 
+const TIMING = process.env.OXY_BROWSER_TIMING === '1';
+async function timed(label, fn) {
+  if (!TIMING) return fn();
+  const t = Date.now();
+  try { return await fn(); } finally { console.warn(`[timing] sandbox.${label}: ${Date.now() - t}ms`); }
+}
+
 let sdk = null;
 let endpointFor = (sandbox, port) => `https://${sandbox.getHost(port)}`;
 const entries = new Map(); // userId -> { sandbox, sandboxId, locks, pauseTimer, busy }
 const pending = new Map(); // userId -> Promise, so concurrent opens share one boot
+const warming = new Map();
 
 function getSdk() {
   if (!sdk) sdk = require('e2b').Sandbox;
@@ -62,18 +74,24 @@ async function probeBrowser(sandbox, timeoutMs = 3000) {
   return fetchJson(`${base}/json/version`, trafficHeaders(sandbox), timeoutMs);
 }
 
-// A paused sandbox restores with its processes. A cold boot (or a crashed Chromium) does not,
-// so start the template's script again and wait for the debugging endpoint.
-async function ensureBrowserRunning(sandbox, bootTimeoutMs) {
-  try { return await probeBrowser(sandbox); } catch { /* not up yet */ }
-  await sandbox.commands.run('bash /opt/oxy/start.sh', { background: true });
-  const deadline = Date.now() + bootTimeoutMs;
+// A new or resumed sandbox answers 502 for a moment while its browser is already starting, so
+// poll briefly first. Only when it stays down (a cold boot, or a crashed Chromium) is the
+// template's start script run again, and then we wait for the debugging endpoint.
+async function pollBrowser(sandbox, untilMs) {
+  const deadline = Date.now() + untilMs;
   let lastError;
-  while (Date.now() < deadline) {
-    try { return await probeBrowser(sandbox); } catch (error) { lastError = error; }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Sandbox browser did not start: ${lastError?.message || 'timed out'}`);
+  do {
+    try { return await probeBrowser(sandbox, 1500); } catch (error) { lastError = error; }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+  throw lastError || new Error('timed out');
+}
+
+async function ensureBrowserRunning(sandbox, bootTimeoutMs) {
+  try { return await pollBrowser(sandbox, 4000); } catch { /* still down */ }
+  await sandbox.commands.run('bash /opt/oxy/start.sh', { background: true });
+  try { return await pollBrowser(sandbox, bootTimeoutMs); }
+  catch (error) { throw new Error(`Sandbox browser did not start: ${error.message}`); }
 }
 
 async function findExisting(userId) {
@@ -104,20 +122,40 @@ async function ensureSandbox(userId) {
   if (known) {
     try {
       // connect() resumes a paused sandbox and extends the timeout of a running one.
-      sandbox = await getSdk().connect(known.sandboxId, { timeoutMs: cfg.timeoutMs });
+      sandbox = await timed('resume', () => getSdk().connect(known.sandboxId, { timeoutMs: cfg.timeoutMs }));
     } catch { entries.delete(userId); }
   }
   if (!sandbox) {
-    const found = await findExisting(userId);
+    const found = await timed('find', () => findExisting(userId));
     if (found) {
-      try { sandbox = await getSdk().connect(found.sandboxId, { timeoutMs: cfg.timeoutMs }); }
+      try { sandbox = await timed('resume', () => getSdk().connect(found.sandboxId, { timeoutMs: cfg.timeoutMs })); }
       catch (error) { console.warn('[browser-sandbox] could not resume sandbox, creating a new one:', error.message); }
     }
   }
-  if (!sandbox) sandbox = await createSandbox(userId, cfg);
+  if (!sandbox) sandbox = await timed('create', () => createSandbox(userId, cfg));
 
-  entries.set(userId, { sandbox, sandboxId: sandbox.sandboxId, pauseTimer: null });
+  entries.set(userId, { sandbox, sandboxId: sandbox.sandboxId, pauseTimer: null, inUse: Boolean(known?.inUse) });
   return sandbox;
+}
+
+/**
+ * Wake a sandbox the user already has, ahead of the browser being asked for, so a task that
+ * does need it starts on a running machine. Never creates one, never connects Playwright, and
+ * never throws: a chat message that never touches the browser must not pay for or fail on this.
+ */
+function prewarm(userId) {
+  if (!isEnabled(userId) || pending.has(userId) || warming.has(userId)) return;
+  const run = (async () => {
+    const known = entries.get(userId);
+    if (!known && !(await findExisting(userId))) return;
+    const sandbox = await ensureSandbox(userId);
+    await ensureBrowserRunning(sandbox, config().bootTimeoutMs);
+    // Nothing asked for it yet, so the usual idle timer applies, unless a session took it meanwhile.
+    if (!entries.get(userId)?.inUse) release(userId);
+  })().catch((error) => console.warn('[browser-sandbox] prewarm failed:', error.message))
+    .finally(() => warming.delete(userId));
+  warming.set(userId, run);
+  return run;
 }
 
 /**
@@ -130,17 +168,19 @@ async function acquire(userId) {
   const run = (async () => {
     const cfg = config();
     const sandbox = await ensureSandbox(userId);
-    const version = await ensureBrowserRunning(sandbox, cfg.bootTimeoutMs);
+    const version = await timed('browser-up', () => ensureBrowserRunning(sandbox, cfg.bootTimeoutMs));
     // The reported debugger URL carries the masked host, so build ours from the known endpoint.
     const wsPath = new URL(version.webSocketDebuggerUrl).pathname;
     const base = new URL(endpointFor(sandbox, CDP_PORT));
     base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
     base.pathname = wsPath;
-    const browser = await chromium.connectOverCDP(base.toString(), {
+    const browser = await timed('cdp-connect', () => chromium.connectOverCDP(base.toString(), {
       headers: trafficHeaders(sandbox),
       timeout: cfg.connectTimeoutMs,
-    });
+    }));
     const persistentContext = browser.contexts()[0] || await browser.newContext();
+    const entry = entries.get(userId);
+    if (entry) entry.inUse = true;
     return {
       browser,
       persistentContext,
@@ -157,7 +197,9 @@ async function acquire(userId) {
 // run of quick tasks does not pay a resume each time.
 function release(userId) {
   const entry = entries.get(userId);
-  if (!entry || entry.pauseTimer) return;
+  if (!entry) return;
+  entry.inUse = false;
+  if (entry.pauseTimer) return;
   entry.pauseTimer = setTimeout(() => {
     entry.pauseTimer = null;
     pauseNow(userId).catch((error) => console.warn('[browser-sandbox] pause failed:', error.message));
@@ -200,7 +242,7 @@ function viewTarget(userId) {
 }
 
 module.exports = {
-  isEnabled, backendName, acquire, release, pauseNow, destroyForUser, viewTarget, userTag,
+  isEnabled, backendName, acquire, prewarm, release, pauseNow, destroyForUser, viewTarget, userTag,
   CDP_PORT, VIEW_PORT,
   _setSdk(fake) { sdk = fake; },
   _setEndpoint(fn) { endpointFor = fn; },

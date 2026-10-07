@@ -81,138 +81,198 @@ function renderElementLine(el) {
 // `select` covers native dropdowns, which need the "select" action rather than click/fill.
 const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, select, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
-async function extractClickableElements(page) {
-  // One page.evaluate rather than ~6 CDP calls per element, which costs ~0.8s on a 40-element
-  // page. `locatorIndex` is the querySelectorAll index, matching Playwright's .nth(i) order.
-  return page.evaluate(({ selector, max }) => {
-    const visible = (el) => {
-      const s = window.getComputedStyle(el);
-      if (s.visibility === 'hidden' || s.display === 'none') return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0; // zero-size also catches display:none ancestors
-    };
-    // Full-document order is what Playwright's locator(selector).nth(i) indexes, so the
-    // click/fill site can re-find an element by `locatorIndex`. Keep this list as the source
-    // of truth for indices even when we scope perception to a modal below.
-    const allNodes = Array.from(document.querySelectorAll(selector));
-    // If a modal/dialog covers the page, only its controls matter — badges drawn on the
-    // elements behind it land mis-aligned and the model re-clicks the tile behind the dialog
-    // (the Uber Eats "add item" modal failure). Scope to the largest visible dialog, if any.
-    const vw = window.innerWidth * window.innerHeight;
-    let dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
-      .filter(visible)
-      .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
-      .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
-      .sort((a, b) => b.area - a.area)[0];
-    if (!dialog) {
-      // Some interstitials are plain fixed divs with no dialog role, so badges land on the inert
-      // page behind them. Ask what is physically on top at the viewport centre, and scope
-      // perception to it when that turns out to be an overlay card rather than the app shell.
-      let n = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
-      while (n && n !== document.body && n !== document.documentElement) {
-        const cs = getComputedStyle(n);
-        if (cs.position === 'fixed') {
-          const r = n.getBoundingClientRect();
-          if (r.width >= window.innerWidth * 0.6 && r.height >= window.innerHeight * 0.6) {
-            const controls = n.querySelectorAll(selector).length;
-            if (controls >= 1 && controls <= 12) dialog = { el: n, area: r.width * r.height };
-          }
-          break; // nearest fixed ancestor decides either way
-        }
-        n = n.parentElement;
-      }
-    }
-    let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
-    if (dialog && scope.length === 0) scope = allNodes; // never let scoping blind the model entirely
-    // Commercial pages front-load 20-40 nav controls in DOM order, which eats the element budget
-    // before the first product tile. Order: in-viewport content, then chrome that matters
-    // (search, basket, consent), then the rest of the chrome, then anything off-viewport.
-    if (!dialog) {
-      const inViewport = (el) => {
+// Everything a step needs to know about the page, read in ONE call to the browser. Each call
+// to a remote browser costs a network round trip, so reading controls, text, title and the
+// bot-wall sample separately made a single step cost dozens of them.
+const PERCEIVE_IN_PAGE = ({ selector, max, textLimit }) => {
+  const extract = () => {
+      const visible = (el) => {
+        const s = window.getComputedStyle(el);
+        if (s.visibility === 'hidden' || s.display === 'none') return false;
         const r = el.getBoundingClientRect();
-        return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+        return r.width > 0 && r.height > 0; // zero-size also catches display:none ancestors
       };
-      const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
-      const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept|sign\s?in|log\s?in|account|settings|my\s|continue|next|submit|apply|manage/i;
-      const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
-      // Off-screen content outranks on-screen plain chrome: a product page's buy box is often
-      // below the fold with 20 nav links above it. Key chrome keeps its priority.
-      const content = [], keyChrome = [], chrome = [], offContent = [], offChrome = [];
+      // Full-document order is what Playwright's locator(selector).nth(i) indexes, so the
+      // click/fill site can re-find an element by `locatorIndex`. Keep this list as the source
+      // of truth for indices even when we scope perception to a modal below.
+      const allNodes = Array.from(document.querySelectorAll(selector));
+      // If a modal/dialog covers the page, only its controls matter — badges drawn on the
+      // elements behind it land mis-aligned and the model re-clicks the tile behind the dialog
+      // (the Uber Eats "add item" modal failure). Scope to the largest visible dialog, if any.
+      const vw = window.innerWidth * window.innerHeight;
+      let dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+        .filter(visible)
+        .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
+        .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
+        .sort((a, b) => b.area - a.area)[0];
+      if (!dialog) {
+        // Some interstitials are plain fixed divs with no dialog role, so badges land on the inert
+        // page behind them. Ask what is physically on top at the viewport centre, and scope
+        // perception to it when that turns out to be an overlay card rather than the app shell.
+        let n = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+        while (n && n !== document.body && n !== document.documentElement) {
+          const cs = getComputedStyle(n);
+          if (cs.position === 'fixed') {
+            const r = n.getBoundingClientRect();
+            if (r.width >= window.innerWidth * 0.6 && r.height >= window.innerHeight * 0.6) {
+              const controls = n.querySelectorAll(selector).length;
+              if (controls >= 1 && controls <= 12) dialog = { el: n, area: r.width * r.height };
+            }
+            break; // nearest fixed ancestor decides either way
+          }
+          n = n.parentElement;
+        }
+      }
+      let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
+      if (dialog && scope.length === 0) scope = allNodes; // never let scoping blind the model entirely
+      // Commercial pages front-load 20-40 nav controls in DOM order, which eats the element budget
+      // before the first product tile. Order: in-viewport content, then chrome that matters
+      // (search, basket, consent), then the rest of the chrome, then anything off-viewport.
+      if (!dialog) {
+        const inViewport = (el) => {
+          const r = el.getBoundingClientRect();
+          return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+        };
+        const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
+        const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept|sign\s?in|log\s?in|account|settings|my\s|continue|next|submit|apply|manage/i;
+        const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
+        // Off-screen content outranks on-screen plain chrome: a product page's buy box is often
+        // below the fold with 20 nav links above it. Key chrome keeps its priority.
+        const content = [], keyChrome = [], chrome = [], offContent = [], offChrome = [];
+        for (const el of scope) {
+          const chromeEl = inChrome(el);
+          if (!inViewport(el)) { (chromeEl ? offChrome : offContent).push(el); continue; }
+          if (!chromeEl) { content.push(el); continue; }
+          (KEY_CHROME.test(labelOf(el)) ? keyChrome : chrome).push(el);
+        }
+        scope = [...content, ...keyChrome, ...offContent, ...chrome, ...offChrome];
+      }
+      const out = [];
       for (const el of scope) {
-        const chromeEl = inChrome(el);
-        if (!inViewport(el)) { (chromeEl ? offChrome : offContent).push(el); continue; }
-        if (!chromeEl) { content.push(el); continue; }
-        (KEY_CHROME.test(labelOf(el)) ? keyChrome : chrome).push(el);
+        if (out.length >= max) break;
+        if (!visible(el)) continue;
+        // "Soft hidden": the visually-hidden idiom (1×1 box + clip rect, or opacity:0) keeps
+        // visibility:visible so the plain visible() check passes — M&S/Nike size radios.
+        const softHidden = (n) => {
+          const r = n.getBoundingClientRect();
+          return !visible(n) || r.width <= 2 || r.height <= 2 || getComputedStyle(n).opacity === '0';
+        };
+        let proxyCtl = null;
+        if (el.tagName === 'LABEL') {
+          // Keep a label only when it's the visible face of a hidden control (styled
+          // radio/checkbox chips). A label for a visible control would just duplicate it.
+          const ctl = el.control || (el.htmlFor && document.getElementById(el.htmlFor)) || el.querySelector('input,select,textarea');
+          if (!ctl || !softHidden(ctl)) continue;
+          proxyCtl = ctl;
+        } else if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) {
+          // Mirror of the label rule: when the label is the visible face, drop the hidden
+          // input so each chip appears ONCE (Nike listed every size twice, and the duplicate
+          // burned the element budget before "UK 10" was reached — 2026-07-02).
+          const lab = (el.labels && el.labels[0]) || el.closest('label');
+          if (lab && visible(lab) && softHidden(el)) continue;
+        }
+        // A native <select>'s innerText is every option concatenated, not the selected one, so it
+        // needs its own text: the selected option, plus a capped list to pick an exact value from.
+        const isSelect = el.tagName === 'SELECT';
+        let options = null;
+        if (isSelect) {
+          options = Array.from(el.options)
+            .map((o) => (o.text || '').trim().replace(/\s+/g, ' ').slice(0, 40))
+            .filter(Boolean)
+            .slice(0, 30);
+        }
+        const raw = isSelect
+          ? ((el.options[el.selectedIndex] && el.options[el.selectedIndex].text) || el.getAttribute('aria-label') || '')
+          : (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+        let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+        if (!text) continue;
+        // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
+        // they are off-screen by design and clicking them throws "outside of viewport".
+        if (/^skip\s+(to|the)\b/i.test(text)) continue;
+        // Surface disabled state (out-of-stock size chips, inactive CTAs) so the model can
+        // reason about it instead of clicking a dead control forever (Nike: sold-out sizes
+        // are aria-disabled radios behind styled labels — 2026-07-02, 273s of "UK 10" clicks).
+        const isOff = el.disabled || el.getAttribute('aria-disabled') === 'true'
+          || (proxyCtl && (proxyCtl.disabled || proxyCtl.getAttribute('aria-disabled') === 'true'));
+        if (isOff && !/unavailable|out of stock/i.test(text)) text = `${text} (unavailable)`;
+        const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
+        if (locatorIndex === -1) continue;
+        const r = el.getBoundingClientRect();
+        // A promo banner and a search box can carry equally relevant-sounding text, and on labels
+        // alone the model picks the banner. Only the DOM knows which one accepts typed input.
+        const inputTarget = proxyCtl || el;
+        const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
+        const isInput = (inputTarget.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has((inputTarget.type || 'text').toLowerCase()))
+          || inputTarget.tagName === 'TEXTAREA'
+          || inputTarget.getAttribute('contenteditable') === 'true'
+          || ['searchbox', 'textbox', 'combobox'].includes(inputTarget.getAttribute('role') || '');
+        // box is viewport-relative so it lines up with the screenshot; off-viewport elements
+        // keep their (off-screen) coords and simply get no visible badge, as before.
+        const item = { id: out.length, text, locatorIndex, isInput, box: { x: r.x, y: r.y, width: r.width, height: r.height } };
+        // A click point measured now, only when the control is fully on screen and is what is
+        // physically on top there. That is what lets the click skip Playwright's own checks, each
+        // of which is a round trip to the browser.
+        if (!isSelect && !isInput && r.width >= 2 && r.height >= 2
+          && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight) {
+          const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+          const top = document.elementFromPoint(cx, cy);
+          if (top && (top === el || el.contains(top) || top.contains(el))) item.fastClick = { x: cx, y: cy };
+        }
+        if (isSelect) { item.isSelect = true; item.options = options; }
+        out.push(item);
       }
-      scope = [...content, ...keyChrome, ...offContent, ...chrome, ...offChrome];
-    }
-    const out = [];
-    for (const el of scope) {
-      if (out.length >= max) break;
-      if (!visible(el)) continue;
-      // "Soft hidden": the visually-hidden idiom (1×1 box + clip rect, or opacity:0) keeps
-      // visibility:visible so the plain visible() check passes — M&S/Nike size radios.
-      const softHidden = (n) => {
-        const r = n.getBoundingClientRect();
-        return !visible(n) || r.width <= 2 || r.height <= 2 || getComputedStyle(n).opacity === '0';
-      };
-      let proxyCtl = null;
-      if (el.tagName === 'LABEL') {
-        // Keep a label only when it's the visible face of a hidden control (styled
-        // radio/checkbox chips). A label for a visible control would just duplicate it.
-        const ctl = el.control || (el.htmlFor && document.getElementById(el.htmlFor)) || el.querySelector('input,select,textarea');
-        if (!ctl || !softHidden(ctl)) continue;
-        proxyCtl = ctl;
-      } else if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) {
-        // Mirror of the label rule: when the label is the visible face, drop the hidden
-        // input so each chip appears ONCE (Nike listed every size twice, and the duplicate
-        // burned the element budget before "UK 10" was reached — 2026-07-02).
-        const lab = (el.labels && el.labels[0]) || el.closest('label');
-        if (lab && visible(lab) && softHidden(el)) continue;
-      }
-      // A native <select>'s innerText is every option concatenated, not the selected one, so it
-      // needs its own text: the selected option, plus a capped list to pick an exact value from.
-      const isSelect = el.tagName === 'SELECT';
-      let options = null;
-      if (isSelect) {
-        options = Array.from(el.options)
-          .map((o) => (o.text || '').trim().replace(/\s+/g, ' ').slice(0, 40))
-          .filter(Boolean)
-          .slice(0, 30);
-      }
-      const raw = isSelect
-        ? ((el.options[el.selectedIndex] && el.options[el.selectedIndex].text) || el.getAttribute('aria-label') || '')
-        : (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
-      let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
-      if (!text) continue;
-      // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
-      // they are off-screen by design and clicking them throws "outside of viewport".
-      if (/^skip\s+(to|the)\b/i.test(text)) continue;
-      // Surface disabled state (out-of-stock size chips, inactive CTAs) so the model can
-      // reason about it instead of clicking a dead control forever (Nike: sold-out sizes
-      // are aria-disabled radios behind styled labels — 2026-07-02, 273s of "UK 10" clicks).
-      const isOff = el.disabled || el.getAttribute('aria-disabled') === 'true'
-        || (proxyCtl && (proxyCtl.disabled || proxyCtl.getAttribute('aria-disabled') === 'true'));
-      if (isOff && !/unavailable|out of stock/i.test(text)) text = `${text} (unavailable)`;
-      const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
-      if (locatorIndex === -1) continue;
-      const r = el.getBoundingClientRect();
-      // A promo banner and a search box can carry equally relevant-sounding text, and on labels
-      // alone the model picks the banner. Only the DOM knows which one accepts typed input.
-      const inputTarget = proxyCtl || el;
-      const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
-      const isInput = (inputTarget.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has((inputTarget.type || 'text').toLowerCase()))
-        || inputTarget.tagName === 'TEXTAREA'
-        || inputTarget.getAttribute('contenteditable') === 'true'
-        || ['searchbox', 'textbox', 'combobox'].includes(inputTarget.getAttribute('role') || '');
-      // box is viewport-relative so it lines up with the screenshot; off-viewport elements
-      // keep their (off-screen) coords and simply get no visible badge, as before.
-      const item = { id: out.length, text, locatorIndex, isInput, box: { x: r.x, y: r.y, width: r.width, height: r.height } };
-      if (isSelect) { item.isSelect = true; item.options = options; }
-      out.push(item);
-    }
+
     return out;
-  }, { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS }).catch(() => []);
+  };
+  const elements = extract();
+  const full = (document.body ? document.body.innerText : '') || '';
+  // A wall can also be a DIALOG over an otherwise-fine page, so the biggest visible dialog is
+  // sampled with its own length.
+  let dialogText = '';
+  for (const d of document.querySelectorAll('[role="dialog"],[aria-modal="true"]')) {
+    const st = getComputedStyle(d);
+    const rect = d.getBoundingClientRect();
+    if (st.visibility === 'hidden' || st.display === 'none' || !rect.width || !rect.height) continue;
+    const t = (d.innerText || '').trim();
+    if (t.length > dialogText.length) dialogText = t.slice(0, 1500);
+  }
+  return { elements, text: full.slice(0, textLimit), bodyLen: full.length, title: document.title, dialogText };
+};
+
+async function perceive(page) {
+  const arg = { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS, textLimit: 20000 };
+  const frames = page.frames();
+  // A page that navigates while it is being read throws away the read (its context is gone).
+  // One more try after it has settled recovers that; the title is the fallback signal.
+  const readMain = async () => {
+    try { return await page.evaluate(PERCEIVE_IN_PAGE, arg); } catch { /* retry below */ }
+    await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+    return page.evaluate(PERCEIVE_IN_PAGE, arg).catch(async () => ({
+      elements: [], text: '', bodyLen: 0, title: await page.title().catch(() => ''), dialogText: '',
+    }));
+  };
+  const [main, ...others] = await Promise.all([
+    readMain(),
+    ...frames.filter((frame) => frame !== page.mainFrame())
+      .map((frame) => safeFrameEvaluate(frame, () => ((document.body ? document.body.innerText : '') || '').slice(0, 20000), undefined, '')),
+  ]);
+  const texts = [main?.text || '', ...others].filter(Boolean);
+  return {
+    elements: main?.elements || [],
+    text: texts.join('\n'),
+    title: main?.title || '',
+    wall: { text: (main?.text || '').slice(0, 1500), bodyLen: main?.bodyLen, dialogText: main?.dialogText || '' },
+  };
+}
+
+function wallFrom(perceived) {
+  const { wall } = perceived;
+  return looksLikeBlockWall({ text: wall.text, bodyLen: wall.bodyLen })
+    || (wall.dialogText ? looksLikeBlockWall({ text: wall.dialogText, bodyLen: wall.dialogText.length }) : false);
+}
+
+async function extractClickableElements(page) {
+  return (await perceive(page)).elements;
 }
 
 // Set-of-marks perception: draw a numbered badge on each element, screenshot the
@@ -254,6 +314,21 @@ async function settle(page, pauseMs = 600) {
   await page.waitForTimeout(Math.max(0, pauseMs)).catch(() => {});
 }
 
+// After an action, wait for the page to stop changing rather than for a fixed time: a scroll
+// needs a beat, a click that loads or re-renders needs as long as it takes, up to a cap.
+async function settleAfterAction(page, kind) {
+  await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+  if (kind === 'wait') return page.waitForTimeout(400).catch(() => {});
+  if (kind === 'scroll' || kind === 'back') return page.waitForTimeout(kind === 'scroll' ? 120 : 250).catch(() => {});
+  await page.evaluate(({ quietMs, maxMs }) => new Promise((resolve) => {
+    let timer = setTimeout(done, quietMs);
+    const cap = setTimeout(done, maxMs);
+    const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, quietMs); });
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    function done() { observer.disconnect(); clearTimeout(timer); clearTimeout(cap); resolve(); }
+  }), { quietMs: 150, maxMs: 800 }).catch(() => {});
+}
+
 // A consent wall covers the real page, so the first screenshot is all banner. Clicks the first
 // accept control it recognises — the common frameworks by id, then by text. Cheap and
 // best-effort: with no banner present it is a couple of no-ops.
@@ -276,7 +351,38 @@ const CONSENT_NAMES = [
   /^continue\s+and\s+accept\b/i
 ];
 
+// One in-page look for anything that could be a consent control, in every frame and open
+// shadow root. Without it, finding no banner cost ~0.9s per step in sequential visibility
+// checks; with it, the slow click-by-click search only runs when a candidate actually exists.
+async function consentCandidatePresent(page) {
+  const probe = (patterns) => {
+    const regexes = patterns.map((p) => new RegExp(p, 'i'));
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return false;
+      const st = getComputedStyle(el);
+      return st.visibility !== 'hidden' && st.display !== 'none';
+    };
+    const scan = (root) => {
+      for (const el of root.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')) {
+        const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+        if (t && t.length < 60 && regexes.some((re) => re.test(t)) && visible(el)) return true;
+      }
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot && scan(el.shadowRoot)) return true;
+      return false;
+    };
+    return scan(document);
+  };
+  const sources = CONSENT_NAMES.map((re) => re.source);
+  const selectorCheck = page.evaluate((selectors) => selectors.some((sel) => {
+    try { const el = document.querySelector(sel); return Boolean(el && el.getBoundingClientRect().width); } catch { return false; }
+  }), CONSENT_SELECTORS.filter((sel) => !sel.includes(':has-text'))).catch(() => false);
+  const results = await Promise.all([selectorCheck, ...page.frames().map((frame) => safeFrameEvaluate(frame, probe, sources, false))]);
+  return results.some(Boolean);
+}
+
 async function dismissConsentOnce(page) {
+  if (!(await consentCandidatePresent(page))) return false;
   // Fast path: the common consent frameworks expose a stable id.
   for (const sel of CONSENT_SELECTORS) {
     const el = page.locator(sel).first();
@@ -324,19 +430,17 @@ async function dismissConsentOnce(page) {
 // Some consent managers inject the banner a beat after domcontentloaded, so a single pass right
 // after load loses the race and every later click lands under the modal. One retry after a real
 // wait catches that, and costs nothing when the banner is absent or already dismissed.
-async function dismissConsent(page) {
+async function dismissConsent(page, { retry = true } = {}) {
   if (await dismissConsentOnce(page)) return true;
-  await page.waitForTimeout(700).catch(() => {});
+  if (!retry) return false;
+  await page.waitForTimeout(350).catch(() => {});
   return dismissConsentOnce(page);
 }
 
 async function readPageText(page) {
-  const texts = [];
-  for (const frame of page.frames()) {
-    const body = await safeFrameEvaluate(frame, () => (document.body ? document.body.innerText : '') || '', undefined, '');
-    if (body) texts.push(body.slice(0, 20000));
-  }
-  return texts.join('\n');
+  const bodies = await Promise.all(page.frames().map((frame) =>
+    safeFrameEvaluate(frame, () => (document.body ? document.body.innerText : '') || '', undefined, '')));
+  return bodies.filter(Boolean).map((body) => body.slice(0, 20000)).join('\n');
 }
 // ── Primitive actions ───────────────────────────────────────────────────────────────────
 // Each returns a fresh observation, so the caller acts on what the page shows rather than what
@@ -345,16 +449,18 @@ async function readPageText(page) {
 const OBSERVATION_TEXT_LIMIT = 4000;
 
 async function observePage(page, { includeScreenshot = false } = {}) {
-  const [elements, text] = await Promise.all([
-    extractClickableElements(page).catch(() => []),
-    readPageText(page).catch(() => ''),
-  ]);
+  return observationFrom(page, await perceive(page), { includeScreenshot });
+}
+
+async function observationFrom(page, perceived, { includeScreenshot = false } = {}) {
+  const { elements } = perceived;
   const observation = {
     url: page.url(),
-    title: await page.title().catch(() => ''),
+    title: perceived.title,
     elements,
     elementLines: elements.map(renderElementLine),
-    text: String(text || '').slice(0, OBSERVATION_TEXT_LIMIT),
+    text: String(perceived.text || '').slice(0, OBSERVATION_TEXT_LIMIT),
+    blocked: wallFrom(perceived) || null,
   };
   if (includeScreenshot) {
     observation.screenshot = await captureMarkedScreenshot(page, elements).catch(() => null);
@@ -440,11 +546,9 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
     browser, context, page, release, site: host, goal: objective, workflowId,
     history: [], requestedUrl: url, usedStoredSession: Boolean(storageState),
   });
-  const blocked = await detectBlockWall(page).catch(() => null);
   const observation = await observePage(page);
   return {
     ...observation,
-    blocked: blocked || null,
     usedStoredSession: session.usedStoredSession,
     resolvedVia,
     // What is already known to work on this host, as hints rather than as a script the agent
@@ -472,14 +576,20 @@ function resolveElement(session, elements, elementId) {
 async function act(userId, step = {}) {
   const session = requireSession(userId);
   const page = session.page;
-  const before = { url: page.url(), text: (await readPageText(page).catch(() => '')).slice(0, 2000) };
-  const elements = await extractClickableElements(page).catch(() => []);
+  const seen = await perceive(page);
+  const before = { url: page.url(), text: String(seen.text || '').slice(0, 2000) };
+  const elements = seen.elements;
   const kind = String(step.action || '').toLowerCase();
 
   switch (kind) {
-    case 'click':
-      await resolveElement(session, elements, step.elementId).click({ timeout: 10000 });
+    case 'click': {
+      // A click point measured with the controls skips the actionability checks Playwright
+      // runs, each a round trip; anything not plainly clickable takes the careful path.
+      const point = elements[Number(step.elementId)]?.fastClick;
+      if (point) await page.mouse.click(point.x, point.y);
+      else await resolveElement(session, elements, step.elementId).click({ timeout: 10000 });
       break;
+    }
     case 'type': {
       const target = resolveElement(session, elements, step.elementId);
       await target.fill(String(step.value ?? ''), { timeout: 10000 });
@@ -509,16 +619,26 @@ async function act(userId, step = {}) {
       throw new Error(`Unknown browser action "${step.action}". Use click, type, select, scroll, back, navigate or wait.`);
   }
 
-  await settle(page, Number(step.settleMs) || 400);
-  await dismissConsent(page).catch(() => {});
+  if (step.settleMs) await settle(page, Number(step.settleMs));
+  else await settleAfterAction(page, kind);
+  // A banner that is going to appear does so on a new page, so only look again after one.
+  if (page.url() !== before.url) await dismissConsent(page, { retry: false }).catch(() => {});
   session.history = [...(session.history || []), `${kind}${step.elementId != null ? ` #${step.elementId}` : ''}${step.value ? ` "${step.value}"` : ''}`].slice(-40);
+  const target = elements[Number(step.elementId)];
+  const label = !target?.isInput && !target?.isSelect ? target?.text?.replace(/\s+/g, ' ').trim().slice(0, 80) : null;
+  session.lastAction = {
+    label: kind === 'click' ? `Clicked ${label || 'a control'}`
+      : kind === 'type' ? 'Entered text in a field'
+        : kind === 'select' ? 'Selected an option'
+          : kind === 'scroll' ? `Scrolled ${String(step.direction || 'down') === 'up' ? 'up' : 'down'}`
+            : kind === 'back' ? 'Went back' : kind === 'navigate' ? 'Opened a page' : 'Waited for the page',
+    at: new Date().toISOString()
+  };
 
   const observation = await observePage(page);
-  const blocked = await detectBlockWall(page).catch(() => null);
   await checkpointBrowserState(session, { lastObservation: observation.url });
   return {
     ...observation,
-    blocked: blocked || null,
     changed: {
       url: before.url !== observation.url,
       urlBefore: before.url,

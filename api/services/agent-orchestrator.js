@@ -8,7 +8,8 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 // slow model (retries, checkpointing, resume) is only testable if the brain call can be
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
-const { buildToolsForGemini } = require('../action-contracts');
+const { buildToolsForGemini, getActionContract } = require('../action-contracts');
+const { modelView, compactStaleObservations } = require('./agent-context-trim');
 
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
@@ -95,6 +96,17 @@ async function callGeminiWithTools(modelName, contents, config, trace = null, pr
  * Runs up to maxIterations: generate (with tools), execute any function calls, feed results back as "function" responses, repeat.
  * Returns final spoken text + executed actions + trace.
  */
+// Lookups that only read, asked for together in one turn, depend on nothing but the request, so
+// they can run side by side. Anything that writes, spends, or drives the browser keeps its order.
+const READ_ACTION = /^(search|get|find|list|check|web_search)(_|$)/;
+function areIndependentReads(actions) {
+  if (!Array.isArray(actions) || actions.length < 2) return false;
+  return actions.every((action) => {
+    const contract = READ_ACTION.test(action.type) ? getActionContract(action.type) : null;
+    return Boolean(contract) && contract.risk === 'low' && contract.executionMode !== 'review';
+  });
+}
+
 async function runAgentLoop({
   userId,
   initialMessage,
@@ -198,18 +210,26 @@ async function runAgentLoop({
     }
   }
 
-  async function checkpoint(iteration) {
-    if (!persistedTask) return;
+  // The save runs while the model thinks about the next step instead of before it. Saves are
+  // chained so they land in order, and flushCheckpoints() is awaited wherever the run could
+  // stop (approval parking, handoff, the end) so nothing is left unwritten, and a failed save
+  // still fails the run there.
+  let checkpointChain = Promise.resolve();
+  function checkpoint(iteration) {
+    if (!persistedTask) return checkpointChain;
     const checkpointData = {
         iteration,
         maxIterations,
-        contents: resumedContents,
-        executedActions,
+        contents: JSON.parse(JSON.stringify(resumedContents)),
+        executedActions: executedActions.slice(),
         spoken,
         goal: initialMessage
       };
-    await lifecycle.checkpoint(userId, persistedTask.id, checkpointData, persistedTask.attempt);
+    checkpointChain = checkpointChain.then(() => lifecycle.checkpoint(userId, persistedTask.id, checkpointData, persistedTask.attempt));
+    checkpointChain.catch(() => {});
+    return checkpointChain;
   }
+  const flushCheckpoints = () => checkpointChain;
 
   // No auto-planning pre-pass: a general reasoning loop should not judge a goal's difficulty
   // from its verbs, nor know that travel exists. It plans by iterating — think, act, observe,
@@ -291,7 +311,8 @@ async function runAgentLoop({
         results = await executeActionsFn(userId, actions, {
           ...context,
           agentIteration: i,
-          sequential: true,
+          sequential: !areIndependentReads(actions),
+          parallelReads: areIndependentReads(actions),
           persistedTaskId: persistedTask?.id || null,
           taskGoal: persistedTask?.goal || initialMessage
         }, trace);
@@ -306,7 +327,7 @@ async function runAgentLoop({
     const functionResponses = [];
     results.forEach((r, idx) => {
       const action = actions[idx] || {};
-      const resultText = JSON.stringify(r.result || r || {});
+      const resultText = JSON.stringify(modelView(r.result) || r || {});
       functionResponses.push({
         role: 'function',
         parts: [{ functionResponse: { id: action._toolCallId, name: action.type || 'unknown', response: { result: resultText } } }]
@@ -317,6 +338,7 @@ async function runAgentLoop({
     // Append model turn that led to tools + the function responses
     resumedContents.push({ role: 'model', parts: responseParts.length ? responseParts : [{ text: spoken || '...' }] });
     resumedContents.push(...functionResponses);
+    compactStaleObservations(resumedContents);
 
     logAgentStep(agentTrace, { type: 'observe', results: results.map(r => r.action) });
 
@@ -338,13 +360,14 @@ async function runAgentLoop({
 
     // Written after the actions of this iteration have been executed and recorded, so a
     // crash between iterations resumes at the next one rather than repeating this one.
-    await checkpoint(i);
+    checkpoint(i);
 
     // create_agent_task is an ownership handoff, not another tool result for this
     // foreground run to reason about. Once the child is queued, finish this turn;
     // otherwise a later iteration (or a sibling action batch) can duplicate the goal.
     const delegatedHandoff = results.find(entry => entry.result?.delegatedTask === true);
     if (delegatedHandoff) {
+      await flushCheckpoints();
       spoken = delegatedHandoff.result?.text || 'I queued that as background work.';
       agentTrace.status = 'completed';
       break;
@@ -355,6 +378,7 @@ async function runAgentLoop({
     // it believes failed, and the approval — when it arrives — would have nothing to
     // continue. The checkpoint above is what the approval resumes from.
     if (results.some((r) => r.result?.pending === true)) {
+      await flushCheckpoints();
       logAgentStep(agentTrace, { type: 'awaiting_approval', iteration: i });
       agentTrace.status = 'awaiting_approval';
       break;
@@ -363,6 +387,7 @@ async function runAgentLoop({
     // Safety: if many actions or high risk, may stop early in future
   }
 
+  await flushCheckpoints();
   agentTrace.actionsTaken = executedActions;
   agentTrace.finalSpoken = spoken;
   if (agentTrace.status === 'running') agentTrace.status = 'incomplete';
@@ -525,5 +550,6 @@ module.exports = {
   logAgentStep,
   executePlanWithBranching,
   extractToolCalls,
-  replacePendingToolResult
+  replacePendingToolResult,
+  areIndependentReads
 };

@@ -9,6 +9,7 @@ const sessions = require('../../api/services/browser-session');
 
 const CDP = 9433;
 let chrome;
+const localEndpoint = (_, port) => (port === sandboxes.CDP_PORT ? `http://127.0.0.1:${CDP}` : `http://127.0.0.1:${port}`);
 
 // A fake of the slice of the E2B SDK this code uses, backed by a real Chromium on loopback.
 function fakeSdk({ existing = [] } = {}) {
@@ -27,7 +28,7 @@ function fakeSdk({ existing = [] } = {}) {
 
 test.before(async () => {
   chrome = await chromium.launch({ args: [`--remote-debugging-port=${CDP}`] });
-  sandboxes._setEndpoint((_, port) => (port === sandboxes.CDP_PORT ? `http://127.0.0.1:${CDP}` : `http://127.0.0.1:${port}`));
+  sandboxes._setEndpoint(localEndpoint);
 });
 test.after(async () => { await chrome.close(); });
 test.afterEach(() => {
@@ -227,5 +228,42 @@ test('the live view proxies pages and the VNC socket for the owner only, adding 
     assert.equal(rejected, 'rejected');
   } finally {
     front.close(); upstream.close(); upstreamWs.close();
+    sandboxes._setEndpoint(localEndpoint);
+  }
+});
+
+test('prewarm wakes a sandbox the user already has, never creates one, and never throws', async () => {
+  process.env.OXY_E2B_PAUSE_DELAY_MS = '60';
+  const prior = { backend: process.env.OXY_BROWSER_BACKEND, key: process.env.E2B_API_KEY };
+  process.env.OXY_BROWSER_BACKEND = 'e2b';
+  process.env.E2B_API_KEY = 'test';
+  try {
+    const none = fakeSdk();
+    sandboxes._setSdk(none);
+    await sandboxes.prewarm('newcomer');
+    assert.equal(none.calls.create.length, 0, 'a chat message must not create a sandbox');
+    assert.equal(none.calls.connect.length, 0);
+
+    const has = fakeSdk({ existing: [{ sandboxId: 'sbx-mine', startedAt: new Date(), state: 'paused' }] });
+    sandboxes._setSdk(has);
+    await sandboxes.prewarm('returning');
+    assert.equal(has.calls.connect[0].id, 'sbx-mine');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(has.calls.pause, ['sbx-mine'], 'an unused warm sandbox still pauses on the idle timer');
+
+    const busy = fakeSdk({ existing: [{ sandboxId: 'sbx-busy', startedAt: new Date(), state: 'running' }] });
+    sandboxes._setSdk(busy);
+    const live = await sandboxes.acquire('working');
+    await sandboxes.prewarm('working');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(busy.calls.pause, [], 'prewarm must not schedule a pause under a live session');
+    await live.browser.close();
+
+    sandboxes._setSdk({ list: () => { throw new Error('E2B down'); } });
+    await sandboxes.prewarm('anyone');
+  } finally {
+    for (const [key, value] of [['OXY_BROWSER_BACKEND', prior.backend], ['E2B_API_KEY', prior.key]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   }
 });

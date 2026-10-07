@@ -51,3 +51,14 @@ test('extractToolCalls handles a missing/malformed response', () => {
   assert.deepEqual(extractToolCalls(null), []);
   assert.deepEqual(extractToolCalls({}), []);
 });
+
+test('only batches made entirely of read-only lookups run side by side', () => {
+  const { areIndependentReads } = require('../../api/services/agent-orchestrator');
+  const call = (type) => ({ type, input: {} });
+  assert.equal(areIndependentReads([call('search_flights'), call('search_hotels'), call('get_weather')]), true);
+  assert.equal(areIndependentReads([call('search_flights')]), false, 'a single call has nothing to overlap with');
+  assert.equal(areIndependentReads([call('search_flights'), call('send_email')]), false);
+  assert.equal(areIndependentReads([call('browser_open'), call('get_weather')]), false, 'the browser keeps its order');
+  assert.equal(areIndependentReads([call('get_weather'), call('not_a_real_action')]), false);
+  assert.equal(areIndependentReads([]), false);
+});
