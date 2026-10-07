@@ -1,0 +1,226 @@
+{
+ "Apple|baby_crying|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9997448979591836,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|cough|clean": {
+  "recall_1": 0.95,
+  "recall_5": 1.0,
+  "auc": 0.9984948979591837,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|dog_bark|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 1.0,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|glass_breaking|clean": {
+  "recall_1": 0.95,
+  "recall_5": 0.95,
+  "auc": 0.9877933673469388,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|knock|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9992857142857143,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|siren|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9995025510204082,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Apple|toilet_flush|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 1.0,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Public mn20 as-is|baby_crying|clean": {
+  "recall_1": 0.975,
+  "recall_5": 1.0,
+  "auc": 0.9993367346938775,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 2
+ },
+ "Public mn20 as-is|cough|clean": {
+  "recall_1": 0.825,
+  "recall_5": 0.925,
+  "auc": 0.9915306122448979,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Public mn20 as-is|dog_bark|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9999872448979592,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Public mn20 as-is|glass_breaking|clean": {
+  "recall_1": 0.75,
+  "recall_5": 0.85,
+  "auc": 0.9832908163265306,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Public mn20 as-is|knock|clean": {
+  "recall_1": 0.975,
+  "recall_5": 1.0,
+  "auc": 0.9988265306122449,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Public mn20 as-is|siren|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9993877551020408,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 2
+ },
+ "Public mn20 as-is|toilet_flush|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 1.0,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|baby_crying|clean": {
+  "recall_1": 0.9,
+  "recall_5": 0.95,
+  "auc": 0.9939540816326531,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|cough|clean": {
+  "recall_1": 0.725,
+  "recall_5": 0.95,
+  "auc": 0.986938775510204,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|dog_bark|clean": {
+  "recall_1": 0.95,
+  "recall_5": 0.975,
+  "auc": 0.9959311224489796,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|glass_breaking|clean": {
+  "recall_1": 0.925,
+  "recall_5": 0.975,
+  "auc": 0.9939540816326531,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|knock|clean": {
+  "recall_1": 0.975,
+  "recall_5": 0.975,
+  "auc": 0.9974553571428572,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|siren|clean": {
+  "recall_1": 0.875,
+  "recall_5": 0.95,
+  "auc": 0.9913966836734693,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|toilet_flush|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9992028061224489,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|baby_crying|clean": {
+  "recall_1": 0.9,
+  "recall_5": 0.975,
+  "auc": 0.9960969387755102,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|cough|clean": {
+  "recall_1": 0.9,
+  "recall_5": 1.0,
+  "auc": 0.994891581632653,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|dog_bark|clean": {
+  "recall_1": 0.975,
+  "recall_5": 1.0,
+  "auc": 0.9989859693877551,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|glass_breaking|clean": {
+  "recall_1": 0.975,
+  "recall_5": 0.975,
+  "auc": 0.9978698979591837,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|knock|clean": {
+  "recall_1": 0.975,
+  "recall_5": 0.975,
+  "auc": 0.997436224489796,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ },
+ "Ours mn10 float|siren|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9997385204081632,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 2
+ },
+ "Ours mn10 float|toilet_flush|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 1.0,
+  "pos": 40,
+  "neg": 1960,
+  "rule": 1
+ }
+}

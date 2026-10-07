@@ -82,11 +82,16 @@ def main():
         else:
             name, folder, classes = a.split("=", 2)
             models[name] = (folder, LEGACY if classes == "legacy" else json.loads(Path(classes).read_text()))
+    def key(p):  # clips are matched by their place inside the test folder, so caches made under another root still line up
+        return p.split("/" + stress.name + "/", 1)[-1]
+
     paths = defaultdict(list)  # condition -> [(path, truth)]
     for condition in CONDITIONS:
+        if not (stress / condition).exists():
+            continue
         for cls_dir in sorted((stress / condition).iterdir()):
             for wav in sorted(cls_dir.glob("*.wav")):
-                paths[condition].append((str(wav), cls_dir.name))
+                paths[condition].append((key(str(wav)), cls_dir.name))
 
     scores = {}  # model -> path -> {class: (one, two)}
     if apple_files:
@@ -96,15 +101,15 @@ def main():
                 peaks[clip["file"]] = clip
         table = {}
         for path, clip in peaks.items():
-            table[path] = {cls: (max(clip["peak1"].get(l, 0) for l in labels), max(clip["peak2"].get(l, 0) for l in labels))
-                           for cls, labels in APPLE.items()}
+            table[key(path)] = {cls: (max(clip["peak1"].get(l, 0) for l in labels), max(clip["peak2"].get(l, 0) for l in labels))
+                                for cls, labels in APPLE.items()}
         scores["Apple"] = table
     if phone_files:  # our Core ML model on the phone: its labels are our own class names
         peaks = {}
         for f in phone_files:
             for clip in json.load(open(f)):
                 peaks[clip["file"]] = clip
-        scores["Phone v2"] = {path: {cls: (clip["peak1"].get(cls, 0), clip["peak2"].get(cls, 0)) for cls in ("glass_breaking", "knock", "doorbell", "baby_crying")}
+        scores["Phone v2"] = {key(path): {cls: (clip["peak1"].get(cls, 0), clip["peak2"].get(cls, 0)) for cls in ("glass_breaking", "knock", "doorbell", "baby_crying")}
                               for path, clip in peaks.items()}
     for name, (folder, classes) in models.items():
         cache = {}
@@ -113,7 +118,7 @@ def main():
         table = {}
         for path, (_, p) in cache.items():
             one, two = clip_scores(p.astype(np.float32))
-            table[path] = {cls: (float(one[i]), float(two[i])) for i, cls in enumerate(classes) if cls != "background"}
+            table[key(path)] = {cls: (float(one[i]), float(two[i])) for i, cls in enumerate(classes) if cls != "background"}
         scores[name] = table
 
     if "--common" in args:   # judge every model on exactly the clips all of them were scored on

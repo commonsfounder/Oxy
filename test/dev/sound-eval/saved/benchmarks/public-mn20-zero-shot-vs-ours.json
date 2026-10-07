@@ -1,0 +1,1442 @@
+{
+ "Apple|alarm|clean": {
+  "recall_1": 0.06666666666666667,
+  "recall_5": 0.30666666666666664,
+  "auc": 0.6946298427311085,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|alarm|noise0": {
+  "recall_1": 0.13333333333333333,
+  "recall_5": 0.32,
+  "auc": 0.6965784426543921,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|alarm|hard": {
+  "recall_1": 0.09333333333333334,
+  "recall_5": 0.22666666666666666,
+  "auc": 0.661150747986191,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|baby_crying|clean": {
+  "recall_1": 0.8727272727272727,
+  "recall_5": 0.9818181818181818,
+  "auc": 0.9802536046630534,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|baby_crying|noise0": {
+  "recall_1": 0.6181818181818182,
+  "recall_5": 0.8363636363636363,
+  "auc": 0.9404744861437775,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|baby_crying|hard": {
+  "recall_1": 0.509090909090909,
+  "recall_5": 0.7454545454545455,
+  "auc": 0.9135596686777789,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|cough|clean": {
+  "recall_1": 0.6964285714285714,
+  "recall_5": 0.75,
+  "auc": 0.8862210424710425,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Apple|cough|noise0": {
+  "recall_1": 0.4642857142857143,
+  "recall_5": 0.6607142857142857,
+  "auc": 0.8498230373230373,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Apple|cough|hard": {
+  "recall_1": 0.4107142857142857,
+  "recall_5": 0.6428571428571429,
+  "auc": 0.814028314028314,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Apple|dog_bark|clean": {
+  "recall_1": 0.7611940298507462,
+  "recall_5": 0.8059701492537313,
+  "auc": 0.8544563386034479,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Apple|dog_bark|noise0": {
+  "recall_1": 0.6268656716417911,
+  "recall_5": 0.6716417910447762,
+  "auc": 0.8217464558620807,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Apple|dog_bark|hard": {
+  "recall_1": 0.5223880597014925,
+  "recall_5": 0.6417910447761194,
+  "auc": 0.812641467690056,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Apple|door_slam|clean": {
+  "recall_1": 0.3333333333333333,
+  "recall_5": 0.5866666666666667,
+  "auc": 0.6566244725738397,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|door_slam|noise0": {
+  "recall_1": 0.05333333333333334,
+  "recall_5": 0.18666666666666668,
+  "auc": 0.5434062140391255,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|door_slam|hard": {
+  "recall_1": 0.04,
+  "recall_5": 0.16,
+  "auc": 0.514361334867664,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|doorbell|clean": {
+  "recall_1": 0.38461538461538464,
+  "recall_5": 0.6153846153846154,
+  "auc": 0.8328513591671486,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Apple|doorbell|noise0": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.23076923076923078,
+  "auc": 0.7544410476741303,
+  "pos": 13,
+  "neg": 931,
+  "rule": 2
+ },
+ "Apple|doorbell|hard": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.23076923076923078,
+  "auc": 0.7472527472527473,
+  "pos": 13,
+  "neg": 931,
+  "rule": 2
+ },
+ "Apple|glass_breaking|clean": {
+  "recall_1": 0.6,
+  "recall_5": 0.6181818181818182,
+  "auc": 0.6793946211269046,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|glass_breaking|noise0": {
+  "recall_1": 0.32727272727272727,
+  "recall_5": 0.43636363636363634,
+  "auc": 0.6385110952040086,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|glass_breaking|hard": {
+  "recall_1": 0.07272727272727272,
+  "recall_5": 0.23636363636363636,
+  "auc": 0.5934758155230596,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Apple|gunshot|clean": {
+  "recall_1": 0.4716981132075472,
+  "recall_5": 0.5283018867924528,
+  "auc": 0.6186180462910023,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Apple|gunshot|noise0": {
+  "recall_1": 0.24528301886792453,
+  "recall_5": 0.32075471698113206,
+  "auc": 0.5541579315164221,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Apple|gunshot|hard": {
+  "recall_1": 0.07547169811320754,
+  "recall_5": 0.11320754716981132,
+  "auc": 0.48796137475382756,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Apple|knock|clean": {
+  "recall_1": 0.5714285714285714,
+  "recall_5": 0.6666666666666666,
+  "auc": 0.7565176657117634,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Apple|knock|noise0": {
+  "recall_1": 0.31746031746031744,
+  "recall_5": 0.5396825396825397,
+  "auc": 0.7245734464803705,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Apple|knock|hard": {
+  "recall_1": 0.09523809523809523,
+  "recall_5": 0.31746031746031744,
+  "auc": 0.6683602688142983,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Apple|microwave|clean": {
+  "recall_1": 0.5862068965517241,
+  "recall_5": 0.6896551724137931,
+  "auc": 0.7911814584511023,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Apple|microwave|noise0": {
+  "recall_1": 0.20689655172413793,
+  "recall_5": 0.41379310344827586,
+  "auc": 0.7521009986809873,
+  "pos": 29,
+  "neg": 915,
+  "rule": 2
+ },
+ "Apple|microwave|hard": {
+  "recall_1": 0.20689655172413793,
+  "recall_5": 0.3448275862068966,
+  "auc": 0.74136046730733,
+  "pos": 29,
+  "neg": 915,
+  "rule": 2
+ },
+ "Apple|phone_ring|clean": {
+  "recall_1": 0.25,
+  "recall_5": 0.46875,
+  "auc": 0.5764117324561403,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Apple|phone_ring|noise0": {
+  "recall_1": 0.21875,
+  "recall_5": 0.375,
+  "auc": 0.5568462171052632,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Apple|phone_ring|hard": {
+  "recall_1": 0.1875,
+  "recall_5": 0.375,
+  "auc": 0.5172012061403509,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Apple|scream|clean": {
+  "recall_1": 0.38461538461538464,
+  "recall_5": 0.5192307692307693,
+  "auc": 0.5792083477061055,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Apple|scream|noise0": {
+  "recall_1": 0.17307692307692307,
+  "recall_5": 0.38461538461538464,
+  "auc": 0.5559028975508796,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Apple|scream|hard": {
+  "recall_1": 0.11538461538461539,
+  "recall_5": 0.28846153846153844,
+  "auc": 0.5458994480855467,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Apple|siren|clean": {
+  "recall_1": 0.8604651162790697,
+  "recall_5": 0.9069767441860465,
+  "auc": 0.9432671708437653,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Apple|siren|noise0": {
+  "recall_1": 0.813953488372093,
+  "recall_5": 0.8604651162790697,
+  "auc": 0.912138967039207,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Apple|siren|hard": {
+  "recall_1": 0.7209302325581395,
+  "recall_5": 0.8604651162790697,
+  "auc": 0.9012724879333041,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Apple|toilet_flush|clean": {
+  "recall_1": 0.9803921568627451,
+  "recall_5": 1.0,
+  "auc": 0.9992973673231891,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Apple|toilet_flush|noise0": {
+  "recall_1": 0.45098039215686275,
+  "recall_5": 0.7450980392156863,
+  "auc": 0.9496519772522671,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Apple|toilet_flush|hard": {
+  "recall_1": 0.27450980392156865,
+  "recall_5": 0.6274509803921569,
+  "auc": 0.9301319631996136,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Apple|water_running|clean": {
+  "recall_1": 0.7866666666666666,
+  "recall_5": 0.9066666666666666,
+  "auc": 0.9441350210970464,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Apple|water_running|noise0": {
+  "recall_1": 0.5866666666666667,
+  "recall_5": 0.72,
+  "auc": 0.8897276563099348,
+  "pos": 75,
+  "neg": 869,
+  "rule": 2
+ },
+ "Apple|water_running|hard": {
+  "recall_1": 0.28,
+  "recall_5": 0.5466666666666666,
+  "auc": 0.8758573072497123,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|alarm|clean": {
+  "recall_1": 0.06666666666666667,
+  "recall_5": 0.30666666666666664,
+  "auc": 0.7595397008055236,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|alarm|noise0": {
+  "recall_1": 0.06666666666666667,
+  "recall_5": 0.16,
+  "auc": 0.7557268891446106,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|alarm|hard": {
+  "recall_1": 0.13333333333333333,
+  "recall_5": 0.22666666666666666,
+  "auc": 0.6971614883007288,
+  "pos": 75,
+  "neg": 869,
+  "rule": 2
+ },
+ "Public mn20 as-is|baby_crying|clean": {
+  "recall_1": 0.8545454545454545,
+  "recall_5": 0.9818181818181818,
+  "auc": 0.9804785765415687,
+  "pos": 55,
+  "neg": 889,
+  "rule": 2
+ },
+ "Public mn20 as-is|baby_crying|noise0": {
+  "recall_1": 0.6727272727272727,
+  "recall_5": 0.8727272727272727,
+  "auc": 0.9528683914510686,
+  "pos": 55,
+  "neg": 889,
+  "rule": 2
+ },
+ "Public mn20 as-is|baby_crying|hard": {
+  "recall_1": 0.43636363636363634,
+  "recall_5": 0.6909090909090909,
+  "auc": 0.9400961243480929,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Public mn20 as-is|cough|clean": {
+  "recall_1": 0.7321428571428571,
+  "recall_5": 0.8214285714285714,
+  "auc": 0.9664977477477478,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Public mn20 as-is|cough|noise0": {
+  "recall_1": 0.4642857142857143,
+  "recall_5": 0.6964285714285714,
+  "auc": 0.8931688384813384,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Public mn20 as-is|cough|hard": {
+  "recall_1": 0.3392857142857143,
+  "recall_5": 0.625,
+  "auc": 0.8963260135135135,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Public mn20 as-is|dog_bark|clean": {
+  "recall_1": 0.8805970149253731,
+  "recall_5": 0.9402985074626866,
+  "auc": 0.9762504467400739,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Public mn20 as-is|dog_bark|noise0": {
+  "recall_1": 0.6268656716417911,
+  "recall_5": 0.8208955223880597,
+  "auc": 0.9459231777259653,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Public mn20 as-is|dog_bark|hard": {
+  "recall_1": 0.6119402985074627,
+  "recall_5": 0.7761194029850746,
+  "auc": 0.9375074456678977,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Public mn20 as-is|door_slam|clean": {
+  "recall_1": 0.3333333333333333,
+  "recall_5": 0.8,
+  "auc": 0.9603835826620637,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|door_slam|noise0": {
+  "recall_1": 0.02666666666666667,
+  "recall_5": 0.21333333333333335,
+  "auc": 0.7991637897967012,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|door_slam|hard": {
+  "recall_1": 0.02666666666666667,
+  "recall_5": 0.18666666666666668,
+  "auc": 0.7563482930571538,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|doorbell|clean": {
+  "recall_1": 0.46153846153846156,
+  "recall_5": 0.6923076923076923,
+  "auc": 0.9432372139139057,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Public mn20 as-is|doorbell|noise0": {
+  "recall_1": 0.07692307692307693,
+  "recall_5": 0.15384615384615385,
+  "auc": 0.8056267041229447,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Public mn20 as-is|doorbell|hard": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.23076923076923078,
+  "auc": 0.7949268776336446,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Public mn20 as-is|glass_breaking|clean": {
+  "recall_1": 0.6727272727272727,
+  "recall_5": 0.8,
+  "auc": 0.9409244299008078,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Public mn20 as-is|glass_breaking|noise0": {
+  "recall_1": 0.38181818181818183,
+  "recall_5": 0.4909090909090909,
+  "auc": 0.7884650782288578,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Public mn20 as-is|glass_breaking|hard": {
+  "recall_1": 0.23636363636363636,
+  "recall_5": 0.32727272727272727,
+  "auc": 0.7434195725534308,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Public mn20 as-is|gunshot|clean": {
+  "recall_1": 0.5849056603773585,
+  "recall_5": 0.8679245283018868,
+  "auc": 0.9469538148783432,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Public mn20 as-is|gunshot|noise0": {
+  "recall_1": 0.05660377358490566,
+  "recall_5": 0.32075471698113206,
+  "auc": 0.7624462655909197,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Public mn20 as-is|gunshot|hard": {
+  "recall_1": 0.07547169811320754,
+  "recall_5": 0.1509433962264151,
+  "auc": 0.6826652266903839,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Public mn20 as-is|knock|clean": {
+  "recall_1": 0.6507936507936508,
+  "recall_5": 0.873015873015873,
+  "auc": 0.9721456497846963,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Public mn20 as-is|knock|noise0": {
+  "recall_1": 0.20634920634920634,
+  "recall_5": 0.4126984126984127,
+  "auc": 0.8747905518620616,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Public mn20 as-is|knock|hard": {
+  "recall_1": 0.06349206349206349,
+  "recall_5": 0.2698412698412698,
+  "auc": 0.7892816604507864,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Public mn20 as-is|microwave|clean": {
+  "recall_1": 0.4827586206896552,
+  "recall_5": 0.5517241379310345,
+  "auc": 0.8569059732428868,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Public mn20 as-is|microwave|noise0": {
+  "recall_1": 0.13793103448275862,
+  "recall_5": 0.2413793103448276,
+  "auc": 0.7400602977199925,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Public mn20 as-is|microwave|hard": {
+  "recall_1": 0.10344827586206896,
+  "recall_5": 0.2413793103448276,
+  "auc": 0.7311098549086112,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Public mn20 as-is|phone_ring|clean": {
+  "recall_1": 0.59375,
+  "recall_5": 0.71875,
+  "auc": 0.9291735197368421,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Public mn20 as-is|phone_ring|noise0": {
+  "recall_1": 0.28125,
+  "recall_5": 0.625,
+  "auc": 0.833093475877193,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Public mn20 as-is|phone_ring|hard": {
+  "recall_1": 0.125,
+  "recall_5": 0.46875,
+  "auc": 0.7929173519736842,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Public mn20 as-is|scream|clean": {
+  "recall_1": 0.7307692307692307,
+  "recall_5": 0.9615384615384616,
+  "auc": 0.9857170576060711,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Public mn20 as-is|scream|noise0": {
+  "recall_1": 0.40384615384615385,
+  "recall_5": 0.7115384615384616,
+  "auc": 0.9366591928251121,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Public mn20 as-is|scream|hard": {
+  "recall_1": 0.3269230769230769,
+  "recall_5": 0.5769230769230769,
+  "auc": 0.9242087788892721,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Public mn20 as-is|siren|clean": {
+  "recall_1": 0.8372093023255814,
+  "recall_5": 0.9534883720930233,
+  "auc": 0.9930309991482332,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Public mn20 as-is|siren|noise0": {
+  "recall_1": 0.6744186046511628,
+  "recall_5": 0.8372093023255814,
+  "auc": 0.9170430787497096,
+  "pos": 43,
+  "neg": 901,
+  "rule": 2
+ },
+ "Public mn20 as-is|siren|hard": {
+  "recall_1": 0.7209302325581395,
+  "recall_5": 0.8604651162790697,
+  "auc": 0.9233668017448313,
+  "pos": 43,
+  "neg": 901,
+  "rule": 2
+ },
+ "Public mn20 as-is|toilet_flush|clean": {
+  "recall_1": 0.9607843137254902,
+  "recall_5": 0.9607843137254902,
+  "auc": 0.9969259820389522,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Public mn20 as-is|toilet_flush|noise0": {
+  "recall_1": 0.35294117647058826,
+  "recall_5": 0.6470588235294118,
+  "auc": 0.9332279384318117,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Public mn20 as-is|toilet_flush|hard": {
+  "recall_1": 0.19607843137254902,
+  "recall_5": 0.43137254901960786,
+  "auc": 0.8877654085150297,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Public mn20 as-is|water_running|clean": {
+  "recall_1": 0.5733333333333334,
+  "recall_5": 0.8266666666666667,
+  "auc": 0.9732336018411968,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Public mn20 as-is|water_running|noise0": {
+  "recall_1": 0.36,
+  "recall_5": 0.72,
+  "auc": 0.8989719984656693,
+  "pos": 75,
+  "neg": 869,
+  "rule": 2
+ },
+ "Public mn20 as-is|water_running|hard": {
+  "recall_1": 0.08,
+  "recall_5": 0.38666666666666666,
+  "auc": 0.8404142692750287,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|alarm|clean": {
+  "recall_1": 0.16,
+  "recall_5": 0.5066666666666667,
+  "auc": 0.9043421557345608,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|alarm|noise0": {
+  "recall_1": 0.08,
+  "recall_5": 0.29333333333333333,
+  "auc": 0.8020790180283851,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|alarm|hard": {
+  "recall_1": 0.02666666666666667,
+  "recall_5": 0.25333333333333335,
+  "auc": 0.8005523590333717,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|baby_crying|clean": {
+  "recall_1": 0.8727272727272727,
+  "recall_5": 0.9636363636363636,
+  "auc": 0.9891911238367931,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|baby_crying|noise0": {
+  "recall_1": 0.2909090909090909,
+  "recall_5": 0.6181818181818182,
+  "auc": 0.9050720932610696,
+  "pos": 55,
+  "neg": 889,
+  "rule": 2
+ },
+ "Ours mn04 8-bit|baby_crying|hard": {
+  "recall_1": 0.32727272727272727,
+  "recall_5": 0.6727272727272727,
+  "auc": 0.9282441967481337,
+  "pos": 55,
+  "neg": 889,
+  "rule": 2
+ },
+ "Ours mn04 8-bit|cough|clean": {
+  "recall_1": 0.8035714285714286,
+  "recall_5": 0.8392857142857143,
+  "auc": 0.9826657014157014,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|cough|noise0": {
+  "recall_1": 0.4642857142857143,
+  "recall_5": 0.75,
+  "auc": 0.9402047136422137,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|cough|hard": {
+  "recall_1": 0.4107142857142857,
+  "recall_5": 0.75,
+  "auc": 0.9358912483912484,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|dog_bark|clean": {
+  "recall_1": 0.8208955223880597,
+  "recall_5": 0.8955223880597015,
+  "auc": 0.9769397028540309,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|dog_bark|noise0": {
+  "recall_1": 0.5671641791044776,
+  "recall_5": 0.7313432835820896,
+  "auc": 0.9579723957181028,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|dog_bark|hard": {
+  "recall_1": 0.5970149253731343,
+  "recall_5": 0.7611940298507462,
+  "auc": 0.9495311356558144,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|door_slam|clean": {
+  "recall_1": 0.49333333333333335,
+  "recall_5": 0.8,
+  "auc": 0.9571001150747986,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|door_slam|noise0": {
+  "recall_1": 0.02666666666666667,
+  "recall_5": 0.26666666666666666,
+  "auc": 0.7643421557345608,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|door_slam|hard": {
+  "recall_1": 0.04,
+  "recall_5": 0.28,
+  "auc": 0.8396317606444189,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|doorbell|clean": {
+  "recall_1": 0.38461538461538464,
+  "recall_5": 0.6153846153846154,
+  "auc": 0.9136164587292407,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|doorbell|noise0": {
+  "recall_1": 0.07692307692307693,
+  "recall_5": 0.15384615384615385,
+  "auc": 0.8083946129058911,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|doorbell|hard": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.15384615384615385,
+  "auc": 0.7620011567379988,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|glass_breaking|clean": {
+  "recall_1": 0.8363636363636363,
+  "recall_5": 0.9454545454545454,
+  "auc": 0.9927088659372124,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|glass_breaking|noise0": {
+  "recall_1": 0.43636363636363634,
+  "recall_5": 0.6909090909090909,
+  "auc": 0.9168319869107271,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|glass_breaking|hard": {
+  "recall_1": 0.38181818181818183,
+  "recall_5": 0.6909090909090909,
+  "auc": 0.9364045403415482,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|gunshot|clean": {
+  "recall_1": 0.660377358490566,
+  "recall_5": 0.8867924528301887,
+  "auc": 0.9760709823602906,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|gunshot|noise0": {
+  "recall_1": 0.20754716981132076,
+  "recall_5": 0.4716981132075472,
+  "auc": 0.8549012133917794,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|gunshot|hard": {
+  "recall_1": 0.1509433962264151,
+  "recall_5": 0.3584905660377358,
+  "auc": 0.8334603900641636,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|knock|clean": {
+  "recall_1": 0.8412698412698413,
+  "recall_5": 0.9047619047619048,
+  "auc": 0.974397780300164,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|knock|noise0": {
+  "recall_1": 0.5238095238095238,
+  "recall_5": 0.7142857142857143,
+  "auc": 0.9180584833252257,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|knock|hard": {
+  "recall_1": 0.5873015873015873,
+  "recall_5": 0.7619047619047619,
+  "auc": 0.9350215303677278,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|microwave|clean": {
+  "recall_1": 0.5517241379310345,
+  "recall_5": 0.7586206896551724,
+  "auc": 0.9520633126059921,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|microwave|noise0": {
+  "recall_1": 0.20689655172413793,
+  "recall_5": 0.3448275862068966,
+  "auc": 0.7774448841153194,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|microwave|hard": {
+  "recall_1": 0.2413793103448276,
+  "recall_5": 0.4827586206896552,
+  "auc": 0.8611456566798568,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|phone_ring|clean": {
+  "recall_1": 0.34375,
+  "recall_5": 0.78125,
+  "auc": 0.9477624725877193,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|phone_ring|noise0": {
+  "recall_1": 0.15625,
+  "recall_5": 0.3125,
+  "auc": 0.8394325657894737,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|phone_ring|hard": {
+  "recall_1": 0.09375,
+  "recall_5": 0.34375,
+  "auc": 0.8262061403508771,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|scream|clean": {
+  "recall_1": 0.7115384615384616,
+  "recall_5": 0.9230769230769231,
+  "auc": 0.9820088823732321,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|scream|noise0": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.6730769230769231,
+  "auc": 0.9373167471541911,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|scream|hard": {
+  "recall_1": 0.28846153846153844,
+  "recall_5": 0.6730769230769231,
+  "auc": 0.923260175922732,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|siren|clean": {
+  "recall_1": 0.7209302325581395,
+  "recall_5": 0.8837209302325582,
+  "auc": 0.9791059030018325,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|siren|noise0": {
+  "recall_1": 0.4883720930232558,
+  "recall_5": 0.6511627906976745,
+  "auc": 0.8720543065844153,
+  "pos": 43,
+  "neg": 901,
+  "rule": 2
+ },
+ "Ours mn04 8-bit|siren|hard": {
+  "recall_1": 0.5813953488372093,
+  "recall_5": 0.7441860465116279,
+  "auc": 0.8822367911622745,
+  "pos": 43,
+  "neg": 901,
+  "rule": 2
+ },
+ "Ours mn04 8-bit|toilet_flush|clean": {
+  "recall_1": 0.9803921568627451,
+  "recall_5": 1.0,
+  "auc": 0.9984080978416002,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|toilet_flush|noise0": {
+  "recall_1": 0.4117647058823529,
+  "recall_5": 0.6862745098039216,
+  "auc": 0.9435588345080473,
+  "pos": 51,
+  "neg": 893,
+  "rule": 2
+ },
+ "Ours mn04 8-bit|toilet_flush|hard": {
+  "recall_1": 0.6666666666666666,
+  "recall_5": 0.7843137254901961,
+  "auc": 0.9725094965197725,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|water_running|clean": {
+  "recall_1": 0.6933333333333334,
+  "recall_5": 0.9466666666666667,
+  "auc": 0.9819946298427311,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|water_running|noise0": {
+  "recall_1": 0.4666666666666667,
+  "recall_5": 0.76,
+  "auc": 0.9627464518603759,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn04 8-bit|water_running|hard": {
+  "recall_1": 0.4533333333333333,
+  "recall_5": 0.68,
+  "auc": 0.9423705408515535,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|alarm|clean": {
+  "recall_1": 0.30666666666666664,
+  "recall_5": 0.6666666666666666,
+  "auc": 0.9174990410433448,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|alarm|noise0": {
+  "recall_1": 0.13333333333333333,
+  "recall_5": 0.29333333333333333,
+  "auc": 0.8247717683160721,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|alarm|hard": {
+  "recall_1": 0.05333333333333334,
+  "recall_5": 0.36,
+  "auc": 0.8219946298427311,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|baby_crying|clean": {
+  "recall_1": 0.8909090909090909,
+  "recall_5": 0.9818181818181818,
+  "auc": 0.9822272215973004,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn10 float|baby_crying|noise0": {
+  "recall_1": 0.4909090909090909,
+  "recall_5": 0.7272727272727273,
+  "auc": 0.9516412721137131,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn10 float|baby_crying|hard": {
+  "recall_1": 0.45454545454545453,
+  "recall_5": 0.7272727272727273,
+  "auc": 0.9324368544840986,
+  "pos": 55,
+  "neg": 889,
+  "rule": 2
+ },
+ "Ours mn10 float|cough|clean": {
+  "recall_1": 0.8035714285714286,
+  "recall_5": 0.9642857142857143,
+  "auc": 0.9883667149292149,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn10 float|cough|noise0": {
+  "recall_1": 0.6607142857142857,
+  "recall_5": 0.7857142857142857,
+  "auc": 0.9496661840411841,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn10 float|cough|hard": {
+  "recall_1": 0.5892857142857143,
+  "recall_5": 0.7857142857142857,
+  "auc": 0.949867277992278,
+  "pos": 56,
+  "neg": 888,
+  "rule": 1
+ },
+ "Ours mn10 float|dog_bark|clean": {
+  "recall_1": 0.8955223880597015,
+  "recall_5": 0.9701492537313433,
+  "auc": 0.9874061845844891,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn10 float|dog_bark|noise0": {
+  "recall_1": 0.6268656716417911,
+  "recall_5": 0.835820895522388,
+  "auc": 0.9600912200684151,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn10 float|dog_bark|hard": {
+  "recall_1": 0.7014925373134329,
+  "recall_5": 0.8507462686567164,
+  "auc": 0.9620653857281438,
+  "pos": 67,
+  "neg": 877,
+  "rule": 1
+ },
+ "Ours mn10 float|door_slam|clean": {
+  "recall_1": 0.5733333333333334,
+  "recall_5": 0.8533333333333334,
+  "auc": 0.9642884541618719,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|door_slam|noise0": {
+  "recall_1": 0.04,
+  "recall_5": 0.38666666666666666,
+  "auc": 0.8143690065209053,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|door_slam|hard": {
+  "recall_1": 0.02666666666666667,
+  "recall_5": 0.38666666666666666,
+  "auc": 0.8489835059455313,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|doorbell|clean": {
+  "recall_1": 0.5384615384615384,
+  "recall_5": 0.8461538461538461,
+  "auc": 0.9511691316202594,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Ours mn10 float|doorbell|noise0": {
+  "recall_1": 0.15384615384615385,
+  "recall_5": 0.46153846153846156,
+  "auc": 0.8474345203668512,
+  "pos": 13,
+  "neg": 931,
+  "rule": 1
+ },
+ "Ours mn10 float|doorbell|hard": {
+  "recall_1": 0.23076923076923078,
+  "recall_5": 0.46153846153846156,
+  "auc": 0.743245476328183,
+  "pos": 13,
+  "neg": 931,
+  "rule": 2
+ },
+ "Ours mn10 float|glass_breaking|clean": {
+  "recall_1": 0.8727272727272727,
+  "recall_5": 0.9818181818181818,
+  "auc": 0.995858472236425,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn10 float|glass_breaking|noise0": {
+  "recall_1": 0.45454545454545453,
+  "recall_5": 0.7272727272727273,
+  "auc": 0.9314756110031701,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn10 float|glass_breaking|hard": {
+  "recall_1": 0.34545454545454546,
+  "recall_5": 0.7090909090909091,
+  "auc": 0.9395745986297167,
+  "pos": 55,
+  "neg": 889,
+  "rule": 1
+ },
+ "Ours mn10 float|gunshot|clean": {
+  "recall_1": 0.7924528301886793,
+  "recall_5": 0.9433962264150944,
+  "auc": 0.9894437032801813,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn10 float|gunshot|noise0": {
+  "recall_1": 0.32075471698113206,
+  "recall_5": 0.5471698113207547,
+  "auc": 0.880079622217987,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn10 float|gunshot|hard": {
+  "recall_1": 0.2641509433962264,
+  "recall_5": 0.4528301886792453,
+  "auc": 0.8632763695656778,
+  "pos": 53,
+  "neg": 891,
+  "rule": 1
+ },
+ "Ours mn10 float|knock|clean": {
+  "recall_1": 0.8571428571428571,
+  "recall_5": 0.9206349206349206,
+  "auc": 0.9772354647496532,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn10 float|knock|noise0": {
+  "recall_1": 0.49206349206349204,
+  "recall_5": 0.8571428571428571,
+  "auc": 0.9407509503990775,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn10 float|knock|hard": {
+  "recall_1": 0.5873015873015873,
+  "recall_5": 0.8253968253968254,
+  "auc": 0.9427328252526891,
+  "pos": 63,
+  "neg": 881,
+  "rule": 1
+ },
+ "Ours mn10 float|microwave|clean": {
+  "recall_1": 0.6551724137931034,
+  "recall_5": 0.7931034482758621,
+  "auc": 0.978047861315244,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn10 float|microwave|noise0": {
+  "recall_1": 0.20689655172413793,
+  "recall_5": 0.4827586206896552,
+  "auc": 0.8333898624458262,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn10 float|microwave|hard": {
+  "recall_1": 0.3793103448275862,
+  "recall_5": 0.6206896551724138,
+  "auc": 0.8788957980026381,
+  "pos": 29,
+  "neg": 915,
+  "rule": 1
+ },
+ "Ours mn10 float|phone_ring|clean": {
+  "recall_1": 0.5,
+  "recall_5": 0.84375,
+  "auc": 0.9432908442982456,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn10 float|phone_ring|noise0": {
+  "recall_1": 0.4375,
+  "recall_5": 0.59375,
+  "auc": 0.9088370339912281,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn10 float|phone_ring|hard": {
+  "recall_1": 0.15625,
+  "recall_5": 0.40625,
+  "auc": 0.8520936129385965,
+  "pos": 32,
+  "neg": 912,
+  "rule": 1
+ },
+ "Ours mn10 float|scream|clean": {
+  "recall_1": 0.6538461538461539,
+  "recall_5": 0.9807692307692307,
+  "auc": 0.9905678682304243,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn10 float|scream|noise0": {
+  "recall_1": 0.40384615384615385,
+  "recall_5": 0.6346153846153846,
+  "auc": 0.9353979820627802,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn10 float|scream|hard": {
+  "recall_1": 0.3269230769230769,
+  "recall_5": 0.6538461538461539,
+  "auc": 0.9273348568471886,
+  "pos": 52,
+  "neg": 892,
+  "rule": 1
+ },
+ "Ours mn10 float|siren|clean": {
+  "recall_1": 0.8372093023255814,
+  "recall_5": 0.9069767441860465,
+  "auc": 0.9829130423560385,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Ours mn10 float|siren|noise0": {
+  "recall_1": 0.627906976744186,
+  "recall_5": 0.7906976744186046,
+  "auc": 0.9455514544562889,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Ours mn10 float|siren|hard": {
+  "recall_1": 0.5581395348837209,
+  "recall_5": 0.7674418604651163,
+  "auc": 0.9474356657976925,
+  "pos": 43,
+  "neg": 901,
+  "rule": 1
+ },
+ "Ours mn10 float|toilet_flush|clean": {
+  "recall_1": 1.0,
+  "recall_5": 1.0,
+  "auc": 0.9998023845596469,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Ours mn10 float|toilet_flush|noise0": {
+  "recall_1": 0.5294117647058824,
+  "recall_5": 0.8431372549019608,
+  "auc": 0.9652526184045847,
+  "pos": 51,
+  "neg": 893,
+  "rule": 2
+ },
+ "Ours mn10 float|toilet_flush|hard": {
+  "recall_1": 0.6862745098039216,
+  "recall_5": 0.9411764705882353,
+  "auc": 0.988165030849966,
+  "pos": 51,
+  "neg": 893,
+  "rule": 1
+ },
+ "Ours mn10 float|water_running|clean": {
+  "recall_1": 0.76,
+  "recall_5": 0.92,
+  "auc": 0.98819332566168,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|water_running|noise0": {
+  "recall_1": 0.48,
+  "recall_5": 0.8,
+  "auc": 0.9738626774069812,
+  "pos": 75,
+  "neg": 869,
+  "rule": 1
+ },
+ "Ours mn10 float|water_running|hard": {
+  "recall_1": 0.49333333333333335,
+  "recall_5": 0.72,
+  "auc": 0.9117453011123897,
+  "pos": 75,
+  "neg": 869,
+  "rule": 2
+ }
+}

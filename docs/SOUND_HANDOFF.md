@@ -106,6 +106,14 @@ Per condition for mn10 float: clean .73, noise 10 dB .61, echo .64, 1 s blip .51
 Public models: EfficientAT publishes bigger AudioSet networks (`mn20_as` 17.9M weights, `mn40_as_ext` 68M, 48.7 mAP; BEATs reports 50.6, PaSST is public too; licences of BEATs/PaSST not checked). A zero-shot test on our subset was started (`extract.py` with `ZS_CLASSES`, `CONDITIONS`, `EVERY`; `eval15.py --common`) but stopped at ~7 min because the Mac was swapping; rerun after a restart.
 Machine notes: swap hit 16 of 18 GB; run one GPU job at a time, quit Safari, restart the Mac before long runs, and keep `caffeinate` on for jobs longer than its timeout.
 
+## Outside benchmark: ESC-50 (7 shared sounds, 2000 clips, clean) and the public-model test (2026-10-07)
+ESC-50 (never trained on; dog, cough, toilet, siren, glass, knock, baby; negatives = the other 1,720 clips). Mean recall at 1% false alarms / AUC:
+Apple .986/.998; our mn10 float .961/.998; public mn20 as released .932/.996; our mn04 8-bit .907/.994. **On clean standard data Apple is the best; everything is near ceiling.**
+Our advantage is only in hard conditions (stress2: noise, echo, faint, short): there Apple collapses and ours hold. Caveats: ESC-50 and FSD50K both come from Freesound, so some overlap with our training data is possible; Apple's training data is unknown and may include these clips.
+Public mn20 zero-shot on a stress2 subset (clean, noise 0 dB, everything at once; common clips): Apple .395/.748, public mn20 as released .396/.875, our mn04 8-bit .432/.912, our mn10 float .508/.929.
+Honest position: not SOTA; compact fine-tuned models beat Apple only under hard conditions on our own test. mn40_as_ext zero-shot was not run (froze the Mac). FSD50K official eval-set mAP not run (needs the 10k-clip eval set, ~85 min of rate-limited download).
+Competitors: Alexa Guard (smoke/CO/glass), Google Home/Nest (smoke/CO/glass; cameras add dog bark), Apple Sound Recognition (~15-20 sounds incl. doorbell, knock, kettle, water running, baby, cough) - none publish accuracy.
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.

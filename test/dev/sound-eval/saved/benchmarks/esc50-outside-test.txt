@@ -1,0 +1,11 @@
+sound            test clips                   Apple       Public mn20 as-is         Ours mn04 8-bit         Ours mn10 float
+                               clean/hard  avg  AUC    clean/hard  avg  AUC    clean/hard  avg  AUC    clean/hard  avg  AUC
+baby_crying              40    1.00/nan  1.00  1.00    0.97/nan  0.97  1.00    0.90/nan  0.90  0.99    0.90/nan  0.90  1.00
+cough                    40    0.95/nan  0.95  1.00    0.82/nan  0.82  0.99    0.72/nan  0.72  0.99    0.90/nan  0.90  0.99
+dog_bark                 40    1.00/nan  1.00  1.00    1.00/nan  1.00  1.00    0.95/nan  0.95  1.00    0.97/nan  0.97  1.00
+glass_breaking           40    0.95/nan  0.95  0.99    0.75/nan  0.75  0.98    0.93/nan  0.93  0.99    0.97/nan  0.97  1.00
+knock                    40    1.00/nan  1.00  1.00    0.97/nan  0.97  1.00    0.97/nan  0.97  1.00    0.97/nan  0.97  1.00
+siren                    40    1.00/nan  1.00  1.00    1.00/nan  1.00  1.00    0.88/nan  0.88  0.99    1.00/nan  1.00  1.00
+toilet_flush             40    1.00/nan  1.00  1.00    1.00/nan  1.00  1.00    1.00/nan  1.00  1.00    1.00/nan  1.00  1.00
+
+recall at 1% false alarms; avg = mean over the six conditions; AUC = mean over the six conditions
