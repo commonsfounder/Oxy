@@ -38,3 +38,22 @@ room noise, a 520 Hz low-frequency alarm, and an alarm clock switched off after 
 clips looped to 45 s: 0 called a smoke alarm, 0 called a CO alarm, and 2 called sustained beeping (both
 alarm clocks). A looped rooster crow once matched the CO timing; beeps must now be a tone inside the band,
 not sound spilling in from its edge.
+
+## Hard conditions and long recordings (train/)
+Clean 5-second clips flatter every model. `train/stress.py` rebuilds the held-out clips in 8 conditions (household
+noise at two levels, faint, echo, a 1 s or 0.5 s sound inside 6 s of room noise, and everything at once) and
+`train/stress.swift` scores Apple's model and ours on all of them with the app's settings. `train/stream.py` +
+`stream.swift` do the same on 10-minute recordings with sounds dropped in at random times (-3 to +12 dB against the
+background), counting false alarms per hour. `train/augment.py` mixes the same conditions into the training set.
+A bare 0.5 s or 1 s file gives these models no full window, so short sounds are always tested inside a stream.
+
+Result, 2026-10-07 (caught / 112 glass, 128 knock, 110 baby; false alarms in brackets). Apple | ours trained on clean clips | ours trained with the conditions mixed in:
+| | clean | noise 10 dB | noise 0 dB | echo | all at once |
+|---|---|---|---|---|---|
+| glass | 40 (0) / 97 (5) / 93 (1) | 30 (0) / 77 (25) / 73 (9) | 21 (0) / 49 (27) / 48 (6) | 0 (0) / 63 (12) / 55 (4) | 1 (0) / 24 (20) / 24 (6) |
+| knock | 66 (3) / 98 (4) / 100 (2) | 38 (0) / 57 (0) / 70 (1) | 23 (0) / 37 (2) / 38 (1) | 3 (0) / 51 (4) / 63 (6) | 1 (0) / 13 (3) / 16 (2) |
+| baby | 73 (0) / 91 (1) / 103 (4) | 44 (0) / 62 (3) / 91 (4) | 24 (0) / 44 (3) / 68 (5) | 41 (0) / 66 (0) / 93 (2) | 8 (0) / 32 (2) / 60 (5) |
+
+In 30 minutes of realistic recording (36 of each sound): glass 9 / 16 / 16 found, false alarms per hour 0 / 10 / 6;
+knock 12 / 11 / 12 found; doorbell 1 / 8 / 8 found; baby 13 / 16 / 20 found, false alarms per hour 0 / 4 / 6.
+Everything is weaker in a noisy room than on clean clips, and doorbell is still weak (27 test clips).
