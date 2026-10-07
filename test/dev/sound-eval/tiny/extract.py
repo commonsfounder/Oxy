@@ -47,7 +47,13 @@ if FT and ACT:
     for _n, _m in model.named_modules():
         if _n in _scales:
             _m.register_forward_hook(_quant(_n))
-dev = torch.device("mps" if FT and torch.backends.mps.is_available() else "cpu")
+ZS = os.environ.get("ZS_CLASSES")  # zero-shot: a public AudioSet network as it is, scores read from the AudioSet classes matching ours
+ZS_IDS = None
+if ZS:
+    import json as _json3
+    from audioset_map import AUDIOSET
+    ZS_IDS = [[labels.index(n) for n in AUDIOSET.get(c, []) if n in labels] for c in _json3.loads(Path(ZS).read_text())]
+dev = torch.device("mps" if (FT or ZS) and torch.backends.mps.is_available() else "cpu")
 model = model.to(dev).eval()
 to_mel = frontend.make()
 SECONDS = 2.0
@@ -61,7 +67,10 @@ def run(windows16):
         for i in range(0, len(windows16), 128):
             w = torch.from_numpy(windows16[i:i + 128])
             preds, features = model(to_mel(w).unsqueeze(1).to(dev))
-            if FT:
+            if ZS_IDS is not None:
+                p = torch.sigmoid(preds.float()).cpu().numpy()
+                scores.append(np.stack([p[:, ids].max(axis=1) if ids else np.zeros(len(p), dtype=np.float32) for ids in ZS_IDS], axis=1))
+            elif FT:
                 p = torch.softmax(preds.float(), dim=1).cpu().numpy()
                 scores.append(p)
             else:
@@ -92,9 +101,10 @@ import tiny as t  # noqa: E402,F811
 audio = t.audio
 jobs = []
 if mode == "eval":
-    for condition in ("clean", "noise10", "noise0", "reverb", "blip1s", "hard"):
-        jobs += sorted((Path(folder) / condition).rglob("*.wav"))
-    jobs += sorted(Path(stream).glob("bed*.wav"))
+    for condition in os.environ.get("CONDITIONS", "clean,noise10,noise0,reverb,blip1s,hard").split(","):
+        jobs += sorted((Path(folder) / condition).rglob("*.wav"))[::int(os.environ.get("EVERY", "1"))]
+    if not os.environ.get("CONDITIONS"):
+        jobs += sorted(Path(stream).glob("bed*.wav"))
 else:
     for split in ("train", "val"):
         jobs += sorted((Path(folder) / split).rglob("*.wav"))

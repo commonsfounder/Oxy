@@ -146,20 +146,29 @@ def augment(m):
 
 
 def validate():
+    """Checkpoint score = mean over the sounds of how well each is told apart from everything else (AUC), not plain
+    accuracy: accuracy is dominated by the look-alike background windows and peaks early (it picked a worse model once)."""
     net = ema.module if ema is not None else model
     net.eval()
-    correct = 0
+    probs = []
     with torch.no_grad():
         for i in range(0, len(va), 128):
-            idx = va[i:i + 128]
             if GPU_DATA:
                 logits = net(Xg[va_t[i:i + 128]].float().unsqueeze(1))[0]
-                correct += int((logits.argmax(1) == Yg[va_t[i:i + 128]]).sum())
             else:
-                logits = net(torch.from_numpy(X[idx].astype(np.float32)).unsqueeze(1).to(dev))[0]
-                correct += int((logits.argmax(1).cpu().numpy() == Y[idx]).sum())
+                logits = net(torch.from_numpy(X[va[i:i + 128]].astype(np.float32)).unsqueeze(1).to(dev))[0]
+            probs.append(torch.softmax(logits.float(), dim=1).cpu().numpy())
     model.train()
-    return correct / len(va)
+    p, y = np.concatenate(probs), Y[va]
+    validate.accuracy = float((p.argmax(1) == y).mean())
+    aucs = []
+    for c in range(1, len(CLASSES)):  # class 0 is background
+        pos, neg = p[y == c, c], p[y != c, c]
+        if len(pos) and len(neg):
+            order = np.argsort(np.concatenate([pos, neg]), kind="stable")
+            ranks = np.empty(len(order)); ranks[order] = np.arange(1, len(order) + 1)
+            aucs.append((ranks[:len(pos)].sum() - len(pos) * (len(pos) + 1) / 2) / (len(pos) * len(neg)))
+    return float(np.mean(aucs))
 
 
 GPU_DATA = os.environ.get("GPU_DATA", "1") == "1" and dev.type == "mps"
@@ -194,6 +203,7 @@ if os.environ.get("TEACHER"):
     teacher = teacher.to(dev).eval()
 KD_T, KD_W = float(os.environ.get("KD_T", "2.0")), float(os.environ.get("KD_W", "0.5"))
 best, started = (0.0, None), time.time()
+PATIENCE, stale = int(os.environ.get("PATIENCE", "10")), 0   # checks (100 steps each) without improvement before stopping; 0 = never
 model.train()
 for step in range(steps):
     idx = rng.choice(tr, batch, p=prob)
@@ -213,9 +223,15 @@ for step in range(steps):
     if ema is not None:
         ema.update_parameters(model)
     if step % 100 == 99 or step == steps - 1:
-        accuracy = validate()
-        if accuracy > best[0]:
-            best = (accuracy, {k: v.detach().cpu().clone() for k, v in (ema.module if ema is not None else model).state_dict().items()})
+        score = validate()
+        if score > best[0]:
+            best = (score, {k: v.detach().cpu().clone() for k, v in (ema.module if ema is not None else model).state_dict().items()})
             torch.save(best[1], out)
-        print(f"step {step + 1}/{steps}: loss {loss.item():.3f}, val accuracy {accuracy:.3f} (best {best[0]:.3f}), {int(time.time() - started)}s", flush=True)
-print(f"done, best val accuracy {best[0]:.3f}")
+            stale = 0
+        else:
+            stale += 1
+        print(f"step {step + 1}/{steps}: loss {loss.item():.3f}, val AUC {score:.3f} (best {best[0]:.3f}), accuracy {validate.accuracy:.3f}, {int(time.time() - started)}s", flush=True)
+        if PATIENCE and stale >= PATIENCE:  # validation stopped improving: the saved best is the answer, the rest only over-trains
+            print(f"stopping early at step {step + 1}")
+            break
+print(f"done, best val AUC {best[0]:.3f}")

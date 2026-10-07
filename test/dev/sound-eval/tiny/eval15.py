@@ -67,6 +67,8 @@ def main():
     apple_files, phone_files, models = [], [], {}
     mode = None
     for a in args[2:]:
+        if a == "--common":
+            continue
         if a == "--apple":
             mode = "apple"
         elif a == "--phone":
@@ -114,6 +116,10 @@ def main():
             table[path] = {cls: (float(one[i]), float(two[i])) for i, cls in enumerate(classes) if cls != "background"}
         scores[name] = table
 
+    if "--common" in args:   # judge every model on exactly the clips all of them were scored on
+        shared = set.intersection(*[set(t) for t in scores.values()])
+        for cond in paths:
+            paths[cond] = [(p, t) for p, t in paths[cond] if p in shared]
     sounds = sorted({truth for cond in paths.values() for _, truth in cond} - {"background"})
     result = {}
     for model, table in scores.items():

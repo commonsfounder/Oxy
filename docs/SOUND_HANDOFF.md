@@ -98,6 +98,14 @@ largest layer output 414 KB (needs external RAM on the BOX-3); mn04 is 0.72 MB, 
 Weights `saved/models/efficientat-mn10-16k-15sounds-float16.pt` (stored as float16, loads into the float32 network).
 Speed notes: the Mac GPU is the limit (about 200 windows/s for mn04 training); on-GPU data path, bf16/fp16 and bigger batches gave no speed-up; keep other jobs off the GPU while training; plug in, quit heavy apps; sleep pauses jobs (`caffeinate`).
 
+## Experiments after the capacity test (2026-10-07): what did NOT help, and the 8-bit big network
+Mean recall at 1% false alarms (stress2, 15 sounds, six conditions) / mean AUC: Apple .433/.776; plain mn04 float .494/.925, int8 .473/.922; mn10 float .556/.936, **int8 .539/.933** (quantising the big network costs 0.017).
+Tried on mn04 and found no better than the plain recipe: head warm start + weight averaging + checkpoint by AUC (A) .469; same + mn10 as teacher (B) .474; first distillation attempt (checkpoint by val accuracy, which peaked at step 900) .436.
+Lessons: val-window accuracy is a bad checkpoint criterion here (background look-alikes dominate; it peaked early and picked a worse model); `finetune.py` now selects by mean per-sound AUC and stops after 10 checks without improvement (`PATIENCE`).
+Per condition for mn10 float: clean .73, noise 10 dB .61, echo .64, 1 s blip .51, noise 0 dB .42, everything at once .41. Per-sound clean recall is above .9 only for baby, toilet, glass, dog.
+Public models: EfficientAT publishes bigger AudioSet networks (`mn20_as` 17.9M weights, `mn40_as_ext` 68M, 48.7 mAP; BEATs reports 50.6, PaSST is public too; licences of BEATs/PaSST not checked). A zero-shot test on our subset was started (`extract.py` with `ZS_CLASSES`, `CONDITIONS`, `EVERY`; `eval15.py --common`) but stopped at ~7 min because the Mac was swapping; rerun after a restart.
+Machine notes: swap hit 16 of 18 GB; run one GPU job at a time, quit Safari, restart the Mac before long runs, and keep `caffeinate` on for jobs longer than its timeout.
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.
