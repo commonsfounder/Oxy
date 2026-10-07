@@ -36,6 +36,14 @@ v2 77 / 13, v3 76 / 13). So mining only moved the operating point. v2 stays in t
 stream are not fixed by more negatives; next levers: a model not limited to Apple's frozen features, a hit rule or cooldown for glass,
 or a second opinion on flagged clips. Results: `saved/benchmarks/stress-v2-v3-*`, `stress-apple-v2-v3.txt`, `stream-apple-v2-v3.txt`.
 
+## From-scratch small model for the BOX-3 (2026-10-07, baseline only)
+`test/dev/sound-eval/tiny/tiny.py`: pure numpy, log-mel (32 bands x 32 steps, per-band median removed) -> 1024-64-32-5, ~68k weights (68 KB int8),
+trained on the same `soundset_aug` data as the phone model. Saved: `saved/models/tiny-numpy-v1.npz`, `saved/benchmarks/tiny-numpy-v1-eval.txt`.
+Result: clearly worse than the Apple-feature model. Same stress set, thresholds 0.8 vs v2 at app thresholds: glass clean 58 caught / 21 false vs v2 93 / 1;
+baby clean 53 / 7 vs 103 / 4; 30-min stream (36 each): glass 5 found at 16 false/h vs v2 16 found at 6/h. Not exported to C yet.
+Likely fixes, in order: distil from v2/Apple over the ~11k unlabeled-or-weakly-labelled clips on disk (soft labels), a small CNN (needs PyTorch, not
+installed), real BOX-3 microphone recordings, then int8 + TFLite-Micro / ESP-DL on the S3.
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.

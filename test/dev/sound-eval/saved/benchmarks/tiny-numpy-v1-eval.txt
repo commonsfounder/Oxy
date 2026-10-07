@@ -1,0 +1,34 @@
+
+clean (677 clips)
+  threshold 0.5: glass 100/112 (119)  knock 109/128 (69)  doorb 6/27 (34)  baby_ 86/110 (15)
+  threshold 0.8: glass 58/112 (21)  knock 92/128 (26)  doorb 5/27 (8)  baby_ 53/110 (7)
+  threshold 0.95: glass 22/112 (2)  knock 45/128 (10)  doorb 0/27 (3)  baby_ 34/110 (3)
+
+noise10 (677 clips)
+  threshold 0.5: glass 63/112 (123)  knock 90/128 (81)  doorb 8/27 (61)  baby_ 67/110 (24)
+  threshold 0.8: glass 26/112 (18)  knock 43/128 (19)  doorb 3/27 (13)  baby_ 40/110 (5)
+  threshold 0.95: glass 4/112 (3)  knock 11/128 (5)  doorb 1/27 (2)  baby_ 18/110 (2)
+
+noise0 (677 clips)
+  threshold 0.5: glass 53/112 (120)  knock 70/128 (86)  doorb 6/27 (54)  baby_ 54/110 (31)
+  threshold 0.8: glass 19/112 (16)  knock 29/128 (18)  doorb 3/27 (8)  baby_ 28/110 (4)
+  threshold 0.95: glass 2/112 (2)  knock 8/128 (5)  doorb 0/27 (0)  baby_ 11/110 (2)
+
+reverb (677 clips)
+  threshold 0.5: glass 100/112 (151)  knock 77/128 (22)  doorb 6/27 (44)  baby_ 90/110 (17)
+  threshold 0.8: glass 56/112 (30)  knock 22/128 (5)  doorb 3/27 (7)  baby_ 57/110 (5)
+  threshold 0.95: glass 25/112 (4)  knock 1/128 (0)  doorb 2/27 (0)  baby_ 25/110 (1)
+
+blip1s (677 clips)
+  threshold 0.5: glass 68/112 (194)  knock 79/128 (131)  doorb 8/27 (57)  baby_ 42/110 (32)
+  threshold 0.8: glass 26/112 (35)  knock 38/128 (45)  doorb 2/27 (24)  baby_ 14/110 (6)
+  threshold 0.95: glass 4/112 (3)  knock 9/128 (13)  doorb 1/27 (3)  baby_ 6/110 (1)
+
+hard (677 clips)
+  threshold 0.5: glass 59/112 (121)  knock 38/128 (56)  doorb 8/27 (67)  baby_ 59/110 (28)
+  threshold 0.8: glass 24/112 (13)  knock 8/128 (13)  doorb 2/27 (8)  baby_ 25/110 (4)
+  threshold 0.95: glass 2/112 (2)  knock 1/128 (3)  doorb 1/27 (0)  baby_ 12/110 (2)
+
+stream (10-minute beds, sounds dropped in)
+  threshold 0.8: glass 5/36 (16/h)  knock 6/36 (16/h)  doorb 3/36 (18/h)  baby_ 13/36 (14/h)
+  threshold 0.95: glass 0/36 (0/h)  knock 1/36 (4/h)  doorb 1/36 (4/h)  baby_ 10/36 (6/h)
