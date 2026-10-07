@@ -185,6 +185,12 @@ const PERCEIVE_IN_PAGE = ({ selector, max, textLimit }) => {
           ? ((el.options[el.selectedIndex] && el.options[el.selectedIndex].text) || el.getAttribute('aria-label') || '')
           : (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
         let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+        if (!text && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+          && !['hidden', 'button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file'].includes((el.type || 'text').toLowerCase())) {
+          // A text box with no label or placeholder (Wikipedia's search) still has to be typeable.
+          const tied = el.labels && el.labels[0] ? el.labels[0].innerText : '';
+          text = `${(tied || el.title || el.name || el.id || '').trim().replace(/\s+/g, ' ').slice(0, 40)} ${el.type === 'search' ? 'search field' : 'text field'}`.trim();
+        }
         if (!text) continue;
         // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
         // they are off-screen by design and clicking them throws "outside of viewport".

@@ -48,6 +48,16 @@ test('an explicit web URL reaches the shared browsing capability instead of rely
   assert.equal(inferDeterministicAction('I found https://www.gov.uk/apply-first-provisional-driving-licence yesterday.'), null);
 });
 
+test('a link plus a request to act on the page goes to the model, which can use the real browser', () => {
+  for (const message of [
+    'Use the browser to go to https://www.wikipedia.org, type "Paris" into the search box and submit it.',
+    'Open https://shop.example/basket and click checkout.',
+    'Open https://bank.example and log in, then tell me my balance.',
+    'In the browser, open https://example.com/form and fill in my details.',
+  ]) assert.equal(inferDeterministicAction(message), null, message);
+  assert.ok(inferDeterministicAction('Read https://example.com/news and summarise it.'), 'a plain read keeps the shortcut');
+});
+
 test('an explicit uppercase ticker price reaches stocks rather than weather or forecast', () => {
   assert.deepEqual(
     inferDeterministicAction('What is the current price of AAPL?'),

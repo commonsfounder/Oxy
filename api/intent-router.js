@@ -14,13 +14,16 @@ function trimTrailingPunctuation(value) {
 
 const EXPLICIT_WEB_URL = /https?:\/\/[^\s<>"'`]+/i;
 const EXPLICIT_WEB_REQUEST = /\b(open|browse|read|look at|check|summari[sz]e)\b/i;
+// A plain fetch can only read. A request to act on the page (or to use a real browser) needs the
+// browser tools, and choosing between them is the model's job.
+const WEB_INTERACTION = /\b(click|tap|type|typing|enter|fill|submit|log ?in|sign ?in|select|choose|scroll|press|book|buy|order|purchase|add to|check ?out|download|upload|search (?:for|box|bar)|use the browser|in the browser|real browser|like a person)\b/i;
 const STOCK_REQUEST = /\b(?:stock|share|current)\s+price\b|\b(?:price|quote)\s+(?:of|for)\b/i;
 const PLAY_TRIVIA_REQUEST = /\b(?:let['’]?s|can we|could we|we should|i want to|i['’]d like to|please)?\s*(?:play|start|begin|do|have)\s+(?:a\s+)?(?:quick\s+|little\s+|fun\s+)?(?:trivia|quiz|game)\b/i;
 
 function inferExplicitWebBrowseAction(message) {
   const text = normalizeText(message);
   const match = text.match(EXPLICIT_WEB_URL);
-  if (!match || !EXPLICIT_WEB_REQUEST.test(text)) return null;
+  if (!match || !EXPLICIT_WEB_REQUEST.test(text) || WEB_INTERACTION.test(text)) return null;
 
   const url = match[0].replace(/[),.!?;:]+$/, '');
   const query = normalizeText(text

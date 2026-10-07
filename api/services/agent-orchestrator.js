@@ -98,6 +98,7 @@ async function callGeminiWithTools(modelName, contents, config, trace = null, pr
  */
 // Lookups that only read, asked for together in one turn, depend on nothing but the request, so
 // they can run side by side. Anything that writes, spends, or drives the browser keeps its order.
+const BROWSER_ITERATION_CEILING = 14;
 const READ_ACTION = /^(search|get|find|list|check|web_search)(_|$)/;
 function areIndependentReads(actions) {
   if (!Array.isArray(actions) || actions.length < 2) return false;
@@ -185,7 +186,7 @@ async function runAgentLoop({
   const startIteration = Number.isFinite(resumeFrom?.iteration) ? resumeFrom.iteration + 1 : 0;
   // Approval may arrive after the run parked on its final allowed iteration. Give
   // the resumed goal at least one model turn instead of falling through as completed.
-  const effectiveMaxIterations = Math.max(
+  let effectiveMaxIterations = Math.max(
     Number.isFinite(resumeFrom?.maxIterations) ? resumeFrom.maxIterations : maxIterations,
     startIteration + 1
   );
@@ -322,6 +323,11 @@ async function runAgentLoop({
     }
 
     executedActions.push(...results);
+    // Driving a page takes as many steps as the page needs (open, search, pick, confirm), so a
+    // browser that is still making progress keeps the run going, within a hard ceiling.
+    if (results.some((r) => String(r.action || '').startsWith('browser_') && r.result?.success !== false)) {
+      effectiveMaxIterations = Math.max(effectiveMaxIterations, Math.min(BROWSER_ITERATION_CEILING, i + 3));
+    }
 
     // Feed results back into conversation for next think
     const functionResponses = [];

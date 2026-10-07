@@ -62,3 +62,26 @@ test('only batches made entirely of read-only lookups run side by side', () => {
   assert.equal(areIndependentReads([call('get_weather'), call('not_a_real_action')]), false);
   assert.equal(areIndependentReads([]), false);
 });
+
+test('a browser that keeps making progress keeps the run going, up to a ceiling; other tools do not', async (t) => {
+  const brainProvider = require('../../api/services/brain-provider');
+  const { runAgentLoop } = require('../../api/services/agent-orchestrator');
+  const real = brainProvider.callToolsBrain;
+  t.after(() => { brainProvider.callToolsBrain = real; });
+  const call = (name) => async () => ({
+    text: '', functionCalls: [{ id: 'c', name, args: {} }],
+    candidates: [{ content: { role: 'model', parts: [{ functionCall: { id: 'c', name, args: {} } }] } }],
+  });
+  let calls = 0;
+  const exec = async (_u, actions) => { calls += 1; return actions.map((a) => ({ action: a.type, result: { success: true, text: 'ok' } })); };
+  const counting = call;
+
+  brainProvider.callToolsBrain = counting('browser_act');
+  await runAgentLoop({ userId: 'u', initialMessage: 'keep clicking', maxIterations: 2, executeActionsFn: exec });
+  assert.equal(calls, 14, 'browser steps extend the run to the ceiling and no further');
+
+  calls = 0;
+  brainProvider.callToolsBrain = counting('get_weather');
+  await runAgentLoop({ userId: 'u', initialMessage: 'weather again', maxIterations: 2, executeActionsFn: exec });
+  assert.equal(calls, 2, 'a non-browser tool keeps the normal cap');
+});

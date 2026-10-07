@@ -18,7 +18,7 @@ const PAGES = {
 let server;
 let base;
 test.before(async () => {
-  server = http.createServer((req, res) => { res.setHeader('content-type', 'text/html'); res.end(PAGES[req.url] || 'missing'); });
+  server = http.createServer((req, res) => { res.setHeader('content-type', 'text/html'); res.end(PAGES[req.url.split('?')[0]] || 'missing'); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -54,4 +54,14 @@ test('one read returns controls, text, title and the bot-wall verdict together',
   assert.equal(seen.blocked, null);
   const walled = env.looksLikeBlockWall({ text: 'Access Denied', bodyLen: 20 });
   assert.equal(walled, true);
+});
+
+test('a text box with no label or placeholder is still offered, so it can be typed into', async () => {
+  PAGES['/bare-search'] = '<title>Bare</title><form action="/a"><input type="search" name="search" id="searchInput"><button>Go</button></form>';
+  const seen = await env.open('clicker', { url: `${base}/bare-search` });
+  const box = seen.elements.find((el) => el.isInput);
+  assert.ok(box, 'the unlabelled search box is listed');
+  assert.match(box.text, /search/i);
+  const typed = await env.act('clicker', { action: 'type', elementId: box.id, value: 'Paris' });
+  assert.equal(typed.title, 'Alpha page', 'typing and Enter submitted the form');
 });
