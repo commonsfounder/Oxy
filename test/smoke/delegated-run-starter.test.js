@@ -54,7 +54,7 @@ function makeStarter(overrides = {}) {
     },
     resolveRoute: async (...args) => {
       calls.push(['route', ...args]);
-      return { provider: 'openai', model: 'gpt-5.6-luna' };
+      return { provider: 'openai', model: 'gpt-6-luna' };
     },
     buildSystemPrompt: async userId => {
       calls.push(['prompt', userId]);
@@ -123,7 +123,7 @@ test('starter uses the claimed row even when a post-claim read would fail', asyn
     },
     routeHandlers: { run: async () => ({ status: 200, body: {}, claimed }) },
     ensureRuntime: async () => ({ id: 'runtime-1' }),
-    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-5.6-luna' }),
+    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-6-luna' }),
     buildSystemPrompt: async () => 'prompt',
     runLoop: async () => {},
     executeActions: async () => [],
@@ -149,7 +149,7 @@ test('starter does not launch after cancellation wins the owner fence', async ()
     },
     routeHandlers: { run: async () => ({ status: 200, body: {}, claimed }) },
     ensureRuntime: async () => ({ id: 'runtime-1' }),
-    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-5.6-luna' }),
+    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-6-luna' }),
     buildSystemPrompt: async () => 'prompt',
     runLoop: async () => { loops += 1; },
     executeActions: async () => [],
@@ -172,7 +172,7 @@ test('starter interrupts a claimed task when runtime setup fails', async () => {
     },
     routeHandlers: { run: async () => ({ status: 200, body: {}, claimed: { ...task, status: 'running', attempt: 5 } }) },
     ensureRuntime: async () => ({ id: 'runtime-1' }),
-    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-5.6-luna' }),
+    resolveRoute: async () => ({ provider: 'openai', model: 'gpt-6-luna' }),
     buildSystemPrompt: async () => 'prompt',
     runLoop: async () => {},
     executeActions: async () => [],

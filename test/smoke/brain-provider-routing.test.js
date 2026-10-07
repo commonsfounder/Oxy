@@ -91,15 +91,17 @@ test('OpenAI-compatible providers do not inherit the reasoning-tier request shap
 
   await withCapturedFetch(async (seen) => {
     await callToolsBrain({ provider: 'openai', ...ARGS, config }).catch(() => {});
-    assert.equal(seen.body.reasoning_effort, 'none', 'OpenAI tool turns still pin reasoning_effort to none');
-    assert.ok(seen.body.max_completion_tokens > 0);
+    assert.ok(seen.url.endsWith('/responses'), 'OpenAI tool turns go to /responses so they can reason');
+    assert.equal(seen.body.tools?.[0]?.name, 'find_place');
+    assert.ok(seen.body.reasoning?.effort && seen.body.reasoning.effort !== 'none');
+    assert.ok(seen.body.max_output_tokens > 0);
   });
 });
 
 test('the provider seam replaces a stale cross-provider model before sending it', async () => {
   await withCapturedFetch(async (seen) => {
     await generateBrain({ provider: 'openai', ...ARGS, model: 'gemini-3-flash-preview' }).catch(() => {});
-    assert.equal(seen.body.model, 'gpt-5.6-luna');
+    assert.equal(seen.body.model, 'gpt-6-luna');
   });
 });
 

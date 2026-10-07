@@ -98,12 +98,12 @@ function defaultModelForProvider(provider, role = 'reasoning', env = process.env
   if (candidate && modelMatchesProvider(normalised, candidate)) return candidate;
 
   switch (normalised) {
-    case 'openai': return 'gpt-5.6-luna';
+    case 'openai': return 'gpt-6-luna';
     case 'anthropic': return 'claude-sonnet-5';
     case 'gemini': return role === 'fast' ? 'gemini-2.5-flash' : 'gemini-2.5-flash';
     case 'groq': return 'llama-3.3-70b-versatile';
     case 'local': return 'llama3.2';
-    default: return 'gpt-5.6-luna';
+    default: return 'gpt-6-luna';
   }
 }
 

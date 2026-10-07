@@ -4,7 +4,7 @@ const test = require('node:test');
 const {
   getBrainProvider,
   toOpenAIMessages,
-  openAIRequestFromConfig
+  openAIResponsesBody
 } = require('../../api/services/brain-provider');
 
 test('getBrainProvider defaults to openai and is case-insensitive', () => {
@@ -79,16 +79,15 @@ test('toOpenAIMessages keeps an image turn that has no text', () => {
   ]);
 });
 
-// Reasoning models spend max_completion_tokens on reasoning before emitting text, so
-// the chat path's 32-token quick-turn cap would return an empty string. Pin the floor.
-test('openAIRequestFromConfig floors tiny maxOutputTokens and omits temperature', () => {
-  const body = openAIRequestFromConfig({ maxOutputTokens: 32, temperature: 0.1, topK: 20 });
-  assert.ok(body.max_completion_tokens >= 768, 'quick-turn cap must be floored');
+// Reasoning tokens count against max_output_tokens before any visible text, so the 32-token
+// quick-turn cap would return an empty string. Pin the floor plus effort headroom.
+test('openAIResponsesBody floors tiny maxOutputTokens and omits temperature', () => {
+  const body = openAIResponsesBody({ model: 'm', messages: [{ role: 'user', content: 'hi' }], config: { maxOutputTokens: 32, temperature: 0.1, topK: 20 } });
+  assert.ok(body.max_output_tokens >= 768, 'quick-turn cap must be floored');
   assert.equal('temperature' in body, false, 'reasoning models reject temperature');
-  assert.equal('max_tokens' in body, false, 'legacy max_tokens errors on gpt-5.x');
 });
 
-test('openAIRequestFromConfig respects a larger explicit cap', () => {
-  const body = openAIRequestFromConfig({ maxOutputTokens: 4096 });
-  assert.equal(body.max_completion_tokens, 4096);
+test('openAIResponsesBody adds reasoning headroom on top of an explicit cap', () => {
+  const body = openAIResponsesBody({ model: 'm', messages: [], config: { maxOutputTokens: 4096 } });
+  assert.ok(body.max_output_tokens > 4096);
 });

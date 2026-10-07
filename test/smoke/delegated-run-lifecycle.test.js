@@ -330,7 +330,7 @@ test('scheduled and recipe metadata deltas preserve provenance through settlemen
     const lifecycle = createDelegatedRunLifecycle({ taskStore: store });
     const claimed = await lifecycle.claimStart('user-1', 'task-1');
     const controlled = await lifecycle.updateControls('user-1', 'task-1', {
-      metadata: { modelRoute: { provider: 'openai', model: 'gpt-5.6-luna' }, runtimeSessionId: 'runtime-1' }
+      metadata: { modelRoute: { provider: 'openai', model: 'gpt-6-luna' }, runtimeSessionId: 'runtime-1' }
     });
     assert.deepEqual(controlled.metadata.fromRecipe || controlled.metadata.scheduledTaskId,
       metadata.fromRecipe || metadata.scheduledTaskId);

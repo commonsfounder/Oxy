@@ -1,6 +1,6 @@
 // Phase 1: native function calling on the plain-chat path.
 //
-// Before this, /chat and /process-audio sent `useAgentTools: false`, openAIRequestFromConfig
+// Before this, /chat and /process-audio sent `useAgentTools: false`, the OpenAI request builder
 // dropped tool declarations, and streamChatCompletionSSE never read delta.tool_calls — so the
 // classic path had no working action mechanism and answered "I can't set reminders directly
 // here" for tools the user has connected. These tests pin each link of that chain.
@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  openAIRequestFromConfig,
+  openAIResponsesBody,
   streamChatCompletionSSE,
   geminiToolsToOpenAI
 } = require('../../api/services/brain-provider');
@@ -61,30 +61,29 @@ async function drain(res) {
   return chunks;
 }
 
-// ── 9. Provider rejection if tools ride with an unsupported reasoning effort ───────────────
-// Verified live 2026-08-06: gpt-5.6-luna 400s on tools + effort 'low' AND on tools + effort
-// omitted. 'none' must be set explicitly, which is what this asserts.
-test('openAIRequestFromConfig forces reasoning_effort none whenever tools are attached', () => {
+// ── 9. Tools and reasoning together ───────────────────────────────────────────────────────
+// Verified live 2026-10-07: gpt-6-luna 400s on tools + any effort except 'none' on
+// /chat/completions; /responses accepts both, which is why OpenAI calls go there.
+test('openAIResponsesBody keeps the configured effort when tools are attached', () => {
   const saved = process.env.OXY_CHAT_REASONING_EFFORT;
   process.env.OXY_CHAT_REASONING_EFFORT = 'high';
 
-  const withTools = openAIRequestFromConfig({ tools: buildToolsForGemini(false) });
-  assert.equal(withTools.reasoning_effort, 'none', 'tools + any other effort is a hard 400');
+  const withTools = openAIResponsesBody({ model: 'm', messages: [], config: { tools: buildToolsForGemini(false) } });
+  assert.equal(withTools.reasoning.effort, 'high');
   assert.equal(withTools.tool_choice, 'auto');
   assert.ok(withTools.tools.length > 0);
-  assert.ok(withTools.tools.every((t) => t.type === 'function' && t.function?.name));
+  assert.ok(withTools.tools.every((t) => t.type === 'function' && t.name && t.strict === false));
 
   if (saved === undefined) delete process.env.OXY_CHAT_REASONING_EFFORT;
   else process.env.OXY_CHAT_REASONING_EFFORT = saved;
 });
 
 // ── 1. Ordinary conversation — no tools requested means no tool fields on the wire ────────
-test('openAIRequestFromConfig omits tool fields entirely when no tools are configured', () => {
+test('openAIResponsesBody omits tool fields entirely when no tools are configured', () => {
   for (const config of [{}, { tools: [] }, { tools: [{ functionDeclarations: [] }] }]) {
-    const body = openAIRequestFromConfig(config);
+    const body = openAIResponsesBody({ model: 'm', messages: [], config });
     assert.equal('tools' in body, false, JSON.stringify(config));
     assert.equal('tool_choice' in body, false);
-    assert.notEqual(body.reasoning_effort, 'none', 'tool-free turns keep their configured effort');
   }
 });
 

@@ -160,7 +160,7 @@ test('plain factual search prompts stay on the fast streaming path', () => {
 // models are the same id (the OpenAI path), an identity-only check would match the main
 // chat model and silently drop every parsed action — so it must disarm instead.
 test('model-authored actions are trusted when fast and primary tiers are the same model', () => {
-  assert.equal(shouldIgnoreModelAuthoredActions('gpt-5.6-luna'), false);
+  assert.equal(shouldIgnoreModelAuthoredActions('gpt-6-luna'), false);
   assert.equal(shouldIgnoreModelAuthoredActions('anything-else'), false);
 });
 

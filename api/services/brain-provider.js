@@ -5,8 +5,7 @@
 const { GoogleGenAI } = require('@google/genai');
 const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
 
-// Reasoning models bill reasoning tokens against max_completion_tokens before any visible
-// text, so a low cap returns an empty string. Floor it.
+// Minimum output cap so short-answer callers still get visible text.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
 
 let _gemini = null;
@@ -58,20 +57,100 @@ function toOpenAIMessages(contents, systemInstruction) {
   return messages;
 }
 
-// Gemini config -> OpenAI request fields. Reasoning models reject `temperature` and renamed
-// max_tokens; reasoning_effort must be 'none' whenever tools are attached or the call 400s.
-function openAIRequestFromConfig(config = {}) {
+// OpenAI reasoning models only accept tools and thinking together on /responses, so every
+// OpenAI call goes there; Groq and local hosts keep chat/completions.
+const REASONING_HEADROOM = { none: 0, minimal: 1000, low: 2000, medium: 4000, high: 8000, xhigh: 16000 };
+
+function openAIEffort() {
+  return process.env.OXY_CHAT_REASONING_EFFORT || 'high';
+}
+
+// chat-style messages -> Responses API instructions + input items.
+function chatMessagesToResponsesInput(messages) {
+  const instructions = [];
+  const input = [];
+  for (const m of messages || []) {
+    if (m.role === 'system') { instructions.push(m.content); continue; }
+    if (m.role === 'tool') {
+      input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: m.content });
+      continue;
+    }
+    if (Array.isArray(m.content)) {
+      input.push({
+        role: m.role,
+        content: m.content.map((c) => (c.type === 'image_url'
+          ? { type: 'input_image', image_url: c.image_url.url }
+          : { type: m.role === 'assistant' ? 'output_text' : 'input_text', text: c.text }))
+      });
+    } else if (m.content) {
+      input.push({ role: m.role, content: m.content });
+    }
+    for (const tc of m.tool_calls || []) {
+      input.push({ type: 'function_call', call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments });
+    }
+  }
+  return { instructions: instructions.join('\n\n'), input };
+}
+
+// Reasoning tokens count against max_output_tokens before any visible text, so the cap gets
+// headroom for the configured effort on top of what the caller asked for.
+function openAIResponsesBody({ model, messages, config = {}, stream = false }) {
+  const effort = openAIEffort();
+  const { instructions, input } = chatMessagesToResponsesInput(messages);
   const body = {
-    max_completion_tokens: Math.max(config.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS),
-    reasoning_effort: process.env.OXY_CHAT_REASONING_EFFORT || 'low'
+    model,
+    input,
+    store: false,
+    reasoning: { effort },
+    max_output_tokens: Math.max(config.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS)
+      + (REASONING_HEADROOM[effort] ?? REASONING_HEADROOM.xhigh)
   };
+  if (instructions) body.instructions = instructions;
+  if (stream) body.stream = true;
   const tools = geminiToolsToOpenAI(config.tools);
   if (tools.length) {
-    body.tools = tools;
+    // strict defaults to true on /responses, which our loose schemas would fail.
+    body.tools = tools.map(({ function: f }) => ({
+      type: 'function', name: f.name, description: f.description, parameters: f.parameters, strict: false
+    }));
     body.tool_choice = 'auto';
-    body.reasoning_effort = 'none';
   }
   return body;
+}
+
+async function postOpenAIResponses(body) {
+  const res = await fetch(`${openAIBaseURL()}/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return res;
+}
+
+function responsesText(json) {
+  return (json.output || [])
+    .filter((item) => item.type === 'message')
+    .flatMap((item) => item.content || [])
+    .filter((c) => c.type === 'output_text')
+    .map((c) => c.text)
+    .join('');
+}
+
+function responsesCallsToChatShape(text, calls) {
+  return {
+    choices: [{
+      message: {
+        content: text,
+        tool_calls: calls.map((c) => ({ id: c.call_id, function: { name: c.name, arguments: c.arguments } }))
+      }
+    }]
+  };
+}
+
+function responsesToGeminiShape(json) {
+  const calls = (json.output || []).filter((item) => item.type === 'function_call');
+  return openAIResponseToGeminiShape(responsesCallsToChatShape(responsesText(json), calls));
 }
 
 // Stream Groq (OpenAI-compatible SSE), re-shaped to look like a Gemini stream.
@@ -97,10 +176,39 @@ async function* groqStream({ model, contents, config }) {
 
 // Shared OpenAI-style SSE reader, yielding Gemini-shaped chunks. Tool calls arrive
 // fragmented across frames, so they are accumulated by `index` and emitted as one final chunk.
-async function* streamChatCompletionSSE(res) {
+async function* sseData(res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (line.startsWith('data:')) yield line.slice(5).trim();
+    }
+  }
+}
+
+// Responses API stream -> Gemini-shaped chunks; function calls arrive whole in output_item.done.
+async function* streamResponsesSSE(res) {
+  const calls = [];
+  for await (const data of sseData(res)) {
+    let ev;
+    try { ev = JSON.parse(data); } catch { continue; }
+    if (ev.type === 'response.output_text.delta' && ev.delta) yield { text: ev.delta, candidates: [] };
+    else if (ev.type === 'response.output_item.done' && ev.item?.type === 'function_call') calls.push(ev.item);
+    else if (ev.type === 'response.failed' || ev.type === 'error') {
+      throw new Error(`OpenAI stream failed: ${ev.response?.error?.message || ev.message || ev.type}`);
+    }
+  }
+  if (calls.length) yield openAIResponseToGeminiShape(responsesCallsToChatShape('', calls));
+}
+
+async function* streamChatCompletionSSE(res) {
   const pending = [];
 
   const collectToolCalls = (deltaToolCalls) => {
@@ -138,28 +246,14 @@ async function* streamChatCompletionSSE(res) {
     };
   };
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') {
-        const tail = finalToolCallChunk();
-        if (tail) yield tail;
-        return;
-      }
-      try {
-        const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta || {};
-        if (delta.content) yield { text: delta.content, candidates: [] };
-        if (delta.tool_calls) collectToolCalls(delta.tool_calls);
-      } catch { /* keepalive / partial frame */ }
-    }
+  for await (const data of sseData(res)) {
+    if (data === '[DONE]') break;
+    try {
+      const json = JSON.parse(data);
+      const delta = json.choices?.[0]?.delta || {};
+      if (delta.content) yield { text: delta.content, candidates: [] };
+      if (delta.tool_calls) collectToolCalls(delta.tool_calls);
+    } catch { /* keepalive / partial frame */ }
   }
   const tail = finalToolCallChunk();
   if (tail) yield tail;
@@ -212,11 +306,8 @@ function compatibleHeaders(provider) {
   };
 }
 
-// Only OpenAI's reasoning tier renames max_tokens -> max_completion_tokens and takes
-// reasoning_effort. Groq and local OpenAI-compatible hosts reject both, so they must NOT
-// inherit the reasoning-tier body shape just because they share the endpoint path.
-function compatibleRequestFromConfig(provider, config = {}) {
-  if (provider === 'openai') return openAIRequestFromConfig(config);
+// Groq and local hosts take the plain chat/completions shape (OpenAI goes via /responses).
+function compatibleRequestFromConfig(config = {}) {
   const body = { max_tokens: Math.max(config?.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS) };
   if (typeof config?.temperature === 'number') body.temperature = config.temperature;
   return body;
@@ -224,6 +315,11 @@ function compatibleRequestFromConfig(provider, config = {}) {
 
 async function* compatibleStream({ provider, model, contents, config }) {
   const resolvedModel = resolveBrainModel(provider, model);
+  if (provider === 'openai') {
+    const messages = toOpenAIMessages(contents, config?.systemInstruction);
+    yield* streamResponsesSSE(await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config, stream: true })));
+    return;
+  }
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
     headers: compatibleHeaders(provider),
@@ -231,7 +327,7 @@ async function* compatibleStream({ provider, model, contents, config }) {
       model: compatibleModel(provider, resolvedModel),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
       stream: true,
-      ...compatibleRequestFromConfig(provider, config)
+      ...compatibleRequestFromConfig(config)
     })
   });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -240,13 +336,18 @@ async function* compatibleStream({ provider, model, contents, config }) {
 
 async function compatibleGenerate({ provider, model, contents, config }) {
   const resolvedModel = resolveBrainModel(provider, model);
+  if (provider === 'openai') {
+    const messages = toOpenAIMessages(contents, config?.systemInstruction);
+    const res = await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config }));
+    return responsesToGeminiShape(await res.json());
+  }
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
     headers: compatibleHeaders(provider),
     body: JSON.stringify({
       model: compatibleModel(provider, resolvedModel),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
-      ...compatibleRequestFromConfig(provider, config)
+      ...compatibleRequestFromConfig(config)
     })
   });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -392,27 +493,13 @@ async function generateBrain({ provider, model, contents, config }) {
 async function webSearchBrain({ model, prompt, provider }) {
   const p = provider || getBrainProvider();
   if (p === 'openai') {
-    const res = await fetch(`${openAIBaseURL()}/responses`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
-      body: JSON.stringify({
-        model,
-        input: prompt,
-        tools: [{ type: 'web_search' }],
-        reasoning: { effort: process.env.OXY_CHAT_REASONING_EFFORT || 'low' }
-      })
+    const res = await postOpenAIResponses({
+      model,
+      input: prompt,
+      tools: [{ type: 'web_search' }],
+      reasoning: { effort: openAIEffort() }
     });
-    if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const json = await res.json();
-    // The Responses API returns a typed output array; the prose lives in output_text
-    // parts of `message` items, alongside non-message items like web_search_call.
-    const text = (json.output || [])
-      .filter((item) => item.type === 'message')
-      .flatMap((item) => item.content || [])
-      .filter((c) => c.type === 'output_text')
-      .map((c) => c.text)
-      .join('')
-      .trim();
+    const text = responsesText(await res.json()).trim();
     return text;
   }
   // Anthropic/Groq/local cannot ground, so this one lookup borrows Gemini — with a real
@@ -557,18 +644,20 @@ async function callToolsBrain({ provider, model, contents, config }) {
   // silent cross-provider hop that contradicts this module's no-fallback contract.
   if (!OPENAI_COMPATIBLE.has(p)) throw new Error(`Unknown brain provider: ${p}`);
 
+  if (p === 'openai') {
+    const messages = toOpenAIToolMessages(contents, config?.systemInstruction);
+    const res = await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config }));
+    return responsesToGeminiShape(await res.json());
+  }
   const tools = geminiToolsToOpenAI(config?.tools);
   const body = {
     model: compatibleModel(p, resolvedModel),
     messages: toOpenAIToolMessages(contents, config?.systemInstruction),
-    ...compatibleRequestFromConfig(p, config)
+    ...compatibleRequestFromConfig(config)
   };
   if (tools.length) {
     body.tools = tools;
     body.tool_choice = 'auto';
-    // chat/completions rejects function tools unless reasoning_effort is 'none'. Only the
-    // reasoning tier takes the field at all; Groq/local reject it.
-    if (p === 'openai') body.reasoning_effort = 'none';
   }
   const res = await fetch(`${compatibleBaseURL(p)}/chat/completions`, {
     method: 'POST',
@@ -592,5 +681,7 @@ module.exports = {
   geminiToolsToOpenAI,
   geminiToolsToAnthropic,
   openAIResponseToGeminiShape,
-  openAIRequestFromConfig
+  openAIResponsesBody,
+  chatMessagesToResponsesInput,
+  streamResponsesSSE
 };

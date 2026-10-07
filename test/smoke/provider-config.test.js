@@ -16,7 +16,7 @@ test('provider defaults do not send a Gemini model to OpenAI', () => {
   process.env.OXY_REASONING_MODEL = 'gemini-3-flash-preview';
   delete process.env.OXY_OPENAI_MODEL;
 
-  assert.equal(defaultModelForProvider('openai'), 'gpt-5.6-luna');
+  assert.equal(defaultModelForProvider('openai'), 'gpt-6-luna');
   assert.equal(modelMatchesProvider('openai', 'gemini-3-flash-preview'), false);
 
   if (savedProvider === undefined) delete process.env.OXY_BRAIN_PROVIDER;
