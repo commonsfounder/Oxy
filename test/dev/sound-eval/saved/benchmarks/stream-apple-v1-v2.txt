@@ -1,0 +1,7 @@
+0.5 hours of audio
+
+sound           Apple                                   base                                    aug                                     
+glass_breaking  found 9/36, 0.0 false/h, delay 2.8s     found 16/36, 10.0 false/h, delay 0.9s   found 16/36, 6.0 false/h, delay 0.9s    
+knock           found 12/36, 2.0 false/h, delay 2.0s    found 11/36, 2.0 false/h, delay 0.9s    found 12/36, 2.0 false/h, delay 1.2s    
+doorbell        found 1/36, 0.0 false/h, delay 4.0s     found 8/36, 0.0 false/h, delay 1.2s     found 8/36, 0.0 false/h, delay 2.0s     
+baby_crying     found 13/36, 0.0 false/h, delay 4.5s    found 16/36, 4.0 false/h, delay 4.1s    found 20/36, 6.0 false/h, delay 3.0s    
