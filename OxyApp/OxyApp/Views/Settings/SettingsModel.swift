@@ -62,7 +62,9 @@ struct BackendURLEditorSheet: View {
 }
 
 struct PairedDisplaysView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var systemDismiss
+    @Environment(\.revealClose) private var revealClose
+    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
     @State private var displays: [PairedDisplay] = []
     @State private var pairingName = ""
     @State private var challenge: DisplayPairingChallenge?
@@ -74,7 +76,7 @@ struct PairedDisplaysView: View {
     @State private var copied = false
 
     var body: some View {
-        SettingsPage(title: "Displays") {
+        SettingsPage(title: "Displays", isRoot: true) {
             if let errorMessage {
                 ErrorBanner(message: errorMessage, onRetry: { Task { await loadDisplays() } })
             }

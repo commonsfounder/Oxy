@@ -2,7 +2,9 @@ import SwiftUI
 
 struct PaymentsView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var systemDismiss
+    @Environment(\.revealClose) private var revealClose
+    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
 
     @State private var balance: Double?
     @State private var card: LinkedCard?
@@ -18,7 +20,7 @@ struct PaymentsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Payment methods", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Payment methods", onBack: revealClose == nil ? { dismiss() } : nil)
 
                     if isLoading {
                         VStack(spacing: 12) {

@@ -5,16 +5,45 @@ struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
     @State private var opened: ThreadMenuChoice?
+    @State private var openedFrom: CGPoint?
 
     private var background: ThreadBackground { ThreadBackground(rawValue: backgroundRaw) ?? .automatic }
 
     var body: some View {
-        ChatView(onMenuChoice: { opened = $0 })
+        ChatView(onMenuChoice: { choice, hub in
+            openedFrom = hub
+            opened = choice
+        })
             .tint(Color.appAccent)
             .preferredColorScheme(background.scheme)
             .id(accentColor + backgroundRaw)
-            .sheet(item: $opened) { choice in
-                Group {
+            .overlay { revealOverlay }
+            .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { _ in
+                opened = nil
+            }
+            .onAppear {
+                HapticManager.shared.prepare()
+                #if DEBUG
+                if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN"],
+                   let choice = ThreadMenuChoice(rawValue: raw) {
+                    opened = choice
+                }
+                #endif
+            }
+    }
+
+    private static var statusBarHeight: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }.first ?? 59
+    }
+
+    @ViewBuilder
+    private var revealOverlay: some View {
+        if let choice = opened {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .global)
+                let hub = openedFrom.map { CGPoint(x: $0.x - frame.minX, y: $0.y - frame.minY) }
+                    ?? CGPoint(x: proxy.size.width - 34, y: Self.statusBarHeight + 28)
+                CornerReveal(origin: hub, onClosed: { opened = nil }) {
                     switch choice {
                     case .activity: AdamActivityView()
                     case .home: YourHomeView()
@@ -26,18 +55,9 @@ struct MainTabView: View {
                     case .settings, .privateChat: AdamYouView()
                     }
                 }
-                .presentationDragIndicator(.visible)
             }
-            .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { _ in
-                opened = nil
-            }
-            .onAppear {
-                HapticManager.shared.prepare()
-                #if DEBUG
-                if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN"],
-                   let choice = ThreadMenuChoice(rawValue: raw) { opened = choice }
-                #endif
-            }
+            .ignoresSafeArea()
+        }
     }
 }
 
@@ -205,7 +225,7 @@ private struct AdamYouView: View {
             .task { await contextModel.load(isDemo: appState.isDemoSession) }
         }
         .fullScreenCover(item: $destination) { item in
-            destinationView(item).swipeToDismiss()
+            destinationView(item).swipeToDismiss().environment(\.revealClose, nil)
         }
         #if DEBUG
         .fullScreenCover(isPresented: $showsIndicatorPreview) {

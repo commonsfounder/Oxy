@@ -104,14 +104,17 @@ struct AdamDot: View {
 
 struct SettingsPage<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.revealClose) private var revealClose
     let title: String
+    /// A screen opened straight from the menu button closes with that button's cross, so it shows no back arrow.
+    var isRoot = false
     @ViewBuilder var content: Content
 
     var body: some View {
         ZStack {
             Color.appBackground.ignoresSafeArea()
             VStack(spacing: 0) {
-                ScreenHeaderView(title: title, onBack: { dismiss() })
+                ScreenHeaderView(title: title, onBack: isRoot && revealClose != nil ? nil : { dismiss() })
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) { content }
                         .padding(.horizontal, AppSpacing.margin)

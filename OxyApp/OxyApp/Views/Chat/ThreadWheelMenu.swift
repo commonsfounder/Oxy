@@ -122,6 +122,7 @@ struct ThreadWheelMenu: View {
     @State private var dragBase: (angle: Double, spin: Double)?
     @State private var lastDetent = 0
     @State private var mounted = false
+    @State private var closesAtOnce = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Four items share one quarter circle: 5°, 33°, 61°, 89° from straight down.
@@ -157,6 +158,10 @@ struct ThreadWheelMenu: View {
                 if reduceMotion { progress = 1 } else {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.8)) { progress = 1 }
                 }
+            } else if closesAtOnce {
+                closesAtOnce = false
+                progress = 0
+                mounted = false
             } else {
                 HapticManager.shared.impact(.light)
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.95)) { progress = 0 }
@@ -279,11 +284,9 @@ struct ThreadWheelMenu: View {
     private func choose(_ choice: ThreadMenuChoice) {
         guard lifted == nil, Date().timeIntervalSince(lastDrop) > 0.4 else { return }
         HapticManager.shared.impact(.light)
+        closesAtOnce = true
         isOpen = false
-        Task {
-            try? await Task.sleep(for: .milliseconds(220))
-            onChoose(choice)
-        }
+        onChoose(choice)
     }
 }
 
@@ -313,7 +316,7 @@ private struct WheelLayout: View, Animatable {
                 Rectangle().fill(.ultraThinMaterial)
                 Color.appBackground.opacity(0.6)
             }
-            .opacity(Double(min(max(progress, 0), 1)))
+            .opacity(pow(Double(min(max(progress, 0), 1)), 3))
             .ignoresSafeArea()
             .onTapGesture(perform: onClose)
             .accessibilityAddTraits(.isButton)

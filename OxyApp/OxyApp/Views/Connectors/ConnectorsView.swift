@@ -6,7 +6,9 @@ import UIKit
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var systemDismiss
+    @Environment(\.revealClose) private var revealClose
+    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
     
@@ -26,7 +28,7 @@ struct ConnectorsView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Apps", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Apps", onBack: revealClose == nil ? { dismiss() } : nil)
 
                     if isLoading {
                         VStack(spacing: 12) {

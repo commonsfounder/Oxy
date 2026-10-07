@@ -11,7 +11,7 @@ struct ChatView: View {
     var initialReviewAction: ActionResult? = nil
     var startFresh: Bool = false
     var onMenu: (() -> Void)? = nil
-    var onMenuChoice: ((ThreadMenuChoice) -> Void)? = nil
+    var onMenuChoice: ((ThreadMenuChoice, CGPoint) -> Void)? = nil
 
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -234,7 +234,7 @@ struct ChatView: View {
                 }
             }
         } else {
-            onMenuChoice?(choice)
+            onMenuChoice?(choice, hubCenter)
         }
     }
 

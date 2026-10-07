@@ -104,6 +104,7 @@ struct YouPage: View {
                 }
             }
             .swipeToDismiss()
+            .environment(\.revealClose, nil)
             .environment(\.colorScheme, colorScheme)
         }
     }
@@ -310,6 +311,7 @@ struct ConnectionsPage: View {
                 }
             }
             .swipeToDismiss()
+            .environment(\.revealClose, nil)
             .environment(\.colorScheme, colorScheme)
         }
     }
@@ -321,6 +323,7 @@ struct PreferencesPage: View {
     @AppStorage(HouseholdSoundMonitor.preferenceKey) private var soundAwarenessEnabled = false
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
     @AppStorage(ThreadMenuChoice.orderKey) private var wheelOrderRaw = ""
+    @AppStorage(RevealStyle.storageKey) private var revealStyleRaw = RevealStyle.bounce.rawValue
     @State private var settings = SettingsStore.load()
     @State private var showsWheelEditor = false
     @State private var showsSoundClips = false
@@ -362,6 +365,14 @@ struct PreferencesPage: View {
                     }
                 }
                 .settingsSurface()
+            }
+
+            SettingsGroup(title: "Opening style") {
+                AppSegmented(
+                    options: RevealStyle.allCases.map(\.rawValue),
+                    labels: RevealStyle.allCases.map(\.title),
+                    selection: $revealStyleRaw
+                )
             }
 
             SettingsGroup(title: "Open directions in") {

@@ -2,7 +2,9 @@ import SwiftUI
 import LocalAuthentication
 
 struct VaultView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var systemDismiss
+    @Environment(\.revealClose) private var revealClose
+    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
 
     @State private var credentials: [VaultCredentialSummary] = []
     @State private var grants: [VaultGrantSummary] = []
@@ -19,7 +21,7 @@ struct VaultView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Saved logins", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Saved logins", onBack: revealClose == nil ? { dismiss() } : nil)
 
                     if !isUnlocked {
                         lockedState

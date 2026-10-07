@@ -955,40 +955,44 @@ struct SettingsToggle: View {
 /// `options` holds the stored values; pass `labels` when the display text differs.
 extension Collection { subscript(safe i: Index) -> Element? { indices.contains(i) ? self[i] : nil } }
 
-/// Mutually-exclusive selection with an unmistakable filled-capsule selected state.
-/// Selected = gold accent fill + on-accent text; unselected = muted on clear.
-struct AppSegmented: View {
+/// A choice among a few options, shown as a dropdown: the current choice with an up-down caret.
+struct AppDropdown: View {
     let options: [String]
     var labels: [String]? = nil
     @Binding var selection: String
     private func label(_ i: Int) -> String { labels?[safe: i] ?? options[i] }
+    private var current: String {
+        options.firstIndex(of: selection).map(label) ?? label(0)
+    }
+
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(options.enumerated()), id: \.element) { i, option in
-                let isSel = selection == option
-                Button {
-                    withAnimation(.appStandard) { selection = option }
-                    HapticManager.shared.impact(.light)
-                } label: {
-                    Text(label(i))
-                        .font(.appBody(14, weight: isSel ? .semibold : .regular))
-                        .foregroundStyle(isSel ? Color.appOnAccent : Color.appMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .frame(maxWidth: .infinity).frame(minHeight: 40)
-                        .background(Capsule().fill(isSel ? Color.appAccent : Color.clear))
-                        .contentShape(Capsule())
+        Menu {
+            Picker(selection: $selection) {
+                ForEach(Array(options.enumerated()), id: \.element) { i, option in
+                    Text(label(i)).tag(option)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSel ? [.isSelected, .isButton] : .isButton)
+            } label: { EmptyView() }
+        } label: {
+            HStack(spacing: 10) {
+                Text(current)
+                    .font(.appBody(15, weight: .medium))
+                    .foregroundStyle(Color.appInk)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                AppIcon("chevron-updown", size: 14)
+                    .foregroundStyle(Color.appMuted)
             }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(Capsule().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.06)))
+            .contentShape(Capsule())
         }
-        .padding(4)
-        .background(Capsule().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.06)))
+        .accessibilityValue(current)
     }
 }
 
-typealias SettingsSegmentedControl = AppSegmented
+typealias AppSegmented = AppDropdown
+typealias SettingsSegmentedControl = AppDropdown
 
 /// Shared raised surface for grouped content.
 struct TodayCard<Content: View>: View {

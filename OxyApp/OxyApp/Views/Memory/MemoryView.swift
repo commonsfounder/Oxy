@@ -2,7 +2,9 @@ import SwiftUI
 
 struct MemoryView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var systemDismiss
+    @Environment(\.revealClose) private var revealClose
+    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
     @State private var items: [MemoryItem] = []
     @State private var isLoading = true
     @State private var isSaving = false
@@ -42,7 +44,7 @@ struct MemoryView: View {
 
             VStack(spacing: 0) {
                 if !embedded {
-                    ScreenHeaderView(title: "Memory", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Memory", onBack: revealClose == nil ? { dismiss() } : nil)
                 }
                 // A real List, not a hand-rolled ScrollView, so swipe-to-delete is the
                 // native, reliable gesture instead of a custom drag (which rendered a
