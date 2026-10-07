@@ -1,0 +1,56 @@
+
+blip05 (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  17/112 caught, 0 false    84/112 caught, 53 false   72/112 caught, 37 false   
+  knock           35/128 caught, 3 false    80/128 caught, 17 false   70/128 caught, 6 false    
+  doorbell        2/27 caught, 1 false      9/27 caught, 34 false     5/27 caught, 14 false     
+  baby_crying     1/110 caught, 0 false     53/110 caught, 25 false   47/110 caught, 17 false   
+
+blip1s (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  30/112 caught, 0 false    89/112 caught, 40 false   82/112 caught, 19 false   
+  knock           59/128 caught, 2 false    92/128 caught, 14 false   77/128 caught, 4 false    
+  doorbell        4/27 caught, 1 false      13/27 caught, 27 false    10/27 caught, 13 false    
+  baby_crying     12/110 caught, 0 false    87/110 caught, 22 false   81/110 caught, 10 false   
+
+clean (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  40/112 caught, 0 false    104/112 caught, 19 false  100/112 caught, 11 false  
+  knock           66/128 caught, 3 false    106/128 caught, 17 false  100/128 caught, 5 false   
+  doorbell        4/27 caught, 0 false      18/27 caught, 10 false    16/27 caught, 6 false     
+  baby_crying     73/110 caught, 0 false    108/110 caught, 7 false   107/110 caught, 6 false   
+
+hard (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  1/112 caught, 0 false     49/112 caught, 45 false   45/112 caught, 26 false   
+  knock           1/128 caught, 0 false     42/128 caught, 16 false   20/128 caught, 5 false    
+  doorbell        0/27 caught, 1 false      13/27 caught, 33 false    11/27 caught, 17 false    
+  baby_crying     8/110 caught, 0 false     88/110 caught, 22 false   76/110 caught, 13 false   
+
+noise0 (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  21/112 caught, 0 false    74/112 caught, 51 false   62/112 caught, 36 false   
+  knock           23/128 caught, 0 false    60/128 caught, 13 false   48/128 caught, 3 false    
+  doorbell        0/27 caught, 1 false      13/27 caught, 26 false    8/27 caught, 16 false     
+  baby_crying     24/110 caught, 0 false    93/110 caught, 21 false   87/110 caught, 15 false   
+
+noise10 (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  30/112 caught, 0 false    94/112 caught, 42 false   85/112 caught, 24 false   
+  knock           38/128 caught, 0 false    92/128 caught, 11 false   80/128 caught, 5 false    
+  doorbell        1/27 caught, 0 false      15/27 caught, 24 false    13/27 caught, 15 false    
+  baby_crying     44/110 caught, 0 false    103/110 caught, 15 false  100/110 caught, 9 false   
+
+quiet (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  34/112 caught, 0 false    99/112 caught, 33 false   91/112 caught, 17 false   
+  knock           48/128 caught, 1 false    96/128 caught, 10 false   93/128 caught, 5 false    
+  doorbell        1/27 caught, 0 false      16/27 caught, 13 false    11/27 caught, 7 false     
+  baby_crying     42/110 caught, 0 false    103/110 caught, 12 false  101/110 caught, 8 false   
+
+reverb (677 clips)
+  sound           Apple                     v2                        v3                        
+  glass_breaking  0/112 caught, 0 false     97/112 caught, 36 false   74/112 caught, 13 false   
+  knock           3/128 caught, 0 false     87/128 caught, 19 false   60/128 caught, 6 false    
+  doorbell        7/27 caught, 0 false      17/27 caught, 9 false     11/27 caught, 3 false     
+  baby_crying     41/110 caught, 0 false    102/110 caught, 9 false   95/110 caught, 3 false    

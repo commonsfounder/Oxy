@@ -14,6 +14,8 @@ let apple: [String: (label: String, threshold: Double, hits: Int)] = [
     "glass_breaking": ("glass_breaking", 0.7, 1), "knock": ("knock", 0.8, 1),
     "doorbell": ("door_bell", 0.7, 2), "baby_crying": ("baby_crying", 0.72, 2)
 ]
+// OURS_DELTA=-0.2 lowers every threshold of ours by 0.2, to compare models at the same false-alarm level.
+let delta = Double(ProcessInfo.processInfo.environment["OURS_DELTA"] ?? "") ?? 0
 let ours: [String: (label: String, threshold: Double, hits: Int)] = [
     "glass_breaking": ("glass_breaking", 0.9, 1), "knock": ("knock", 0.9, 1),
     "doorbell": ("doorbell", 0.8, 1), "baby_crying": ("baby_crying", 0.9, 2)
@@ -82,7 +84,7 @@ for condition in conditions {
         guard !positives.isEmpty else { continue }
         var cells: [String] = []
         for index in names.indices {
-            let rule = index == 0 ? apple[sound]! : ours[sound]!
+            let rule = index == 0 ? apple[sound]! : (ours[sound]!.label, ours[sound]!.threshold + delta, ours[sound]!.hits)
             let caught = positives.filter { fires($0.windows[index], rule) }.count
             let false_ = negatives.filter { fires($0.windows[index], rule) }.count
             cells.append("\(caught)/\(positives.count) caught, \(false_) false".padding(toLength: 26, withPad: " ", startingAt: 0))

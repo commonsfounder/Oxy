@@ -27,13 +27,14 @@ Classes: glass_breaking, knock, doorbell, baby_crying, background. Data: commerc
 - Weak spots: doorbell (only 79 train / 27 test clips), glass false alarms (6/h is too many), anything buried in a noisy room (over half missed).
 - Thresholds were chosen after looking at the same data, so ESC-50 numbers are slightly optimistic. Only 40 clips per sound there.
 
-## In progress when this was written
-Mining the model's own mistakes ("retrain on false alarms"): `train/mine_select.py` picked 2,400 look-alike household clips,
-`train/fetch.py` is downloading them to the scratchpad (`fsd50k/FSD50K.dev_audio`). Next: `train/mine.py prepare`, run
-`train/mine.swift` (compiled to `sound-mine`) over them with the v2 model, `mine.py apply` to add the mistakes to
-`soundset_aug/train/background`, retrain with `train/train.swift`, compare with `train/stress.swift` and `stream.swift`
-(add `v3=<model>.mlmodelc` as another argument). Ship only if glass false alarms fall without losing catches.
-The scratchpad is temporary: if gone, rebuild with `fetch.py`, `prepare.py`, `augment.py` (see `test/dev/sound-eval/README.md`).
+## Mining the model's mistakes: done, no gain (2026-10-07)
+Scanned 2,310 look-alike household clips (9,240 variants) with v2; 1,099 fooled it (baby 522, glass 319, doorbell 141, knock 117).
+Added them x3 as background and retrained: `saved/models/household-v3-mined-NOT-SHIPPED.mlmodel`. At the app's thresholds v3 had about half the
+false alarms but lost many catches (knock in echo 63 -> 11). Rerun with thresholds lowered 0.15 and 0.3 (`OURS_DELTA` in `train/stress.swift`),
+v3 sits on the same catch-versus-false-alarm curve as v2 (e.g. glass in echo: v2 78 caught / 15 false, v3 74 / 13; baby, everything at once:
+v2 77 / 13, v3 76 / 13). So mining only moved the operating point. v2 stays in the app. The 6 glass false alarms an hour in the 30-minute
+stream are not fixed by more negatives; next levers: a model not limited to Apple's frozen features, a hit rule or cooldown for glass,
+or a second opinion on flagged clips. Results: `saved/benchmarks/stress-v2-v3-*`, `stress-apple-v2-v3.txt`, `stream-apple-v2-v3.txt`.
 
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
