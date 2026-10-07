@@ -476,7 +476,7 @@ function safeParse(value) {
   try { return JSON.parse(value); } catch { return value; }
 }
 
-function createUserDataLifecycle({ db, storage = null, clearCaches = () => {}, signUrl = null, signedUrlTtlSeconds = 15 * 60, resources = USER_DATA_RESOURCES } = {}) {
+function createUserDataLifecycle({ db, storage = null, clearCaches = () => {}, externalCleanup = null, signUrl = null, signedUrlTtlSeconds = 15 * 60, resources = USER_DATA_RESOURCES } = {}) {
   if (!db || typeof db.from !== 'function') throw new TypeError('createUserDataLifecycle requires a database client');
   validateRegistry(resources);
   const resourceByName = new Map(resources.map(resource => [resource.name, resource]));
@@ -566,6 +566,12 @@ function createUserDataLifecycle({ db, storage = null, clearCaches = () => {}, s
       await readResourceRows(db, resource, userId, rowsByName, resourceByName);
     }
     await removeBlobObjects(userId, rowsByName);
+    // Data held by outside services (a sandbox browser's profile and logins) goes before the
+    // rows do: a failure here must leave the account in place so the deletion can be retried.
+    if (externalCleanup) {
+      try { await externalCleanup(userId); }
+      catch (error) { throw new UserDataLifecycleError('Could not remove data held outside the database', { code: 'DELETE_EXTERNAL_FAILED', cause: error, deletedResources: [], incomplete: true }); }
+    }
     const ordered = resources
       .filter(resource => resource.ownership.kind !== 'global')
       .slice()

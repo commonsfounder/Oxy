@@ -375,3 +375,20 @@ test('the live schema auditor catches tables the database is actually missing', 
     liveTables: [...registryNames.filter(name => name !== 'purchases'), 'mystery_table']
   }), /purchases/);
 });
+
+test('data held outside the database is removed first, and a failure there leaves the account intact', async () => {
+  const db = fakeDb({ users: [{ user_id: 'u1' }], conversations: [{ id: 'c', user_id: 'u1' }] });
+  const removed = [];
+  let fail = true;
+  const lifecycle = createUserDataLifecycle({
+    db,
+    externalCleanup: async userId => { if (fail) throw new Error('sandbox service down'); removed.push(userId); }
+  });
+  await assert.rejects(() => lifecycle.deleteUserData('u1'), error => error.code === 'DELETE_EXTERNAL_FAILED' && error.details.incomplete === true);
+  assert.equal(db.calls.some(call => call.type === 'db-delete'), false);
+  assert.equal(db.rows.users.length, 1);
+  fail = false;
+  assert.equal((await lifecycle.deleteUserData('u1')).success, true);
+  assert.deepEqual(removed, ['u1']);
+  assert.deepEqual(db.rows.users, []);
+});

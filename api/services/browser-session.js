@@ -102,8 +102,19 @@ async function getWarmBrowser() {
   return browser;
 }
 
-async function acquireBrowser() {
-  return { browser: await getWarmBrowser() };
+// With the sandbox backend on, a user's browser is their own persistent E2B machine. If it
+// cannot be reached the task still runs on the local Chromium, loudly, unless strict.
+async function acquireBrowser(userId) {
+  const sandboxes = require('./browser-sandbox');
+  if (userId && sandboxes.isEnabled()) {
+    try {
+      return await sandboxes.acquire(userId);
+    } catch (error) {
+      console.warn(`[browser-session] sandbox browser unavailable (${error.message})`);
+      if (process.env.OXY_BROWSER_BACKEND_STRICT === '1') throw error;
+    }
+  }
+  return { browser: await getWarmBrowser(), backend: 'local' };
 }
 
 // A one-shot script has no "next turn" to claim the spare, so its process would hang open
@@ -138,12 +149,20 @@ function getSession(userId) {
   const session = liveSessions.get(userId);
   if (!session) return null;
   if (Date.now() - session.lastActivityAt > SESSION_IDLE_MS) {
-    liveSessions.delete(userId);
-    session.browser.close().catch(() => {});
+    closeSession(userId).catch(() => {});
     return null;
   }
   return session;
 }
+
+// getSession only notices idleness when asked, so an abandoned session (and its sandbox)
+// would otherwise stay up until the next request from that user.
+const sweeper = setInterval(() => {
+  for (const [userId, session] of liveSessions) {
+    if (Date.now() - session.lastActivityAt > SESSION_IDLE_MS) closeSession(userId).catch(() => {});
+  }
+}, 60 * 1000);
+sweeper.unref();
 
 function touchSession(userId) {
   const session = liveSessions.get(userId);
@@ -166,6 +185,10 @@ async function closeSession(userId) {
       console.warn(`[browser-session] chromium pid ${pid} still alive after close(), force-killing`);
       process.kill(pid, 'SIGKILL');
     } catch { /* already exited */ }
+  }
+  // A sandbox browser is only disconnected above; releasing lets its machine pause.
+  if (typeof session.release === 'function') {
+    try { session.release(); } catch (error) { console.warn('[browser-session] release failed:', error.message); }
   }
 }
 

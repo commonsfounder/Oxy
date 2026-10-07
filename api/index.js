@@ -800,6 +800,9 @@ app.use((req, res, next) => {
   if (publicDisplayRoute) {
     return next();
   }
+  // The live browser's page loads inside a viewer that cannot send our auth header, so its
+  // URL carries a short-lived signed link instead; the handler verifies it.
+  if (req.method === 'GET' && req.path.startsWith('/agent/browser/live/')) return next();
 
   // requireSessionAuth verifies signature + expiry, then we check token_version for revocation
   return requireSessionAuth(req, res, async () => {
@@ -967,6 +970,10 @@ const userDataLifecycle = createUserDataLifecycle({
   db: supabase,
   storage: supabase.storage,
   clearCaches: userId => contextCache.delete(userId),
+  externalCleanup: async userId => {
+    await require('./services/browser-session').closeSession(userId);
+    await require('./services/browser-sandbox').destroyForUser(userId);
+  },
   signUrl: (storagePath, expiresInSeconds) => supabase.storage.from('documents').createSignedUrl(storagePath, expiresInSeconds)
 });
 const userDataRoutes = createUserDataRouteHandlers({ lifecycle: userDataLifecycle, requireMatchingUser, logger: console });
@@ -9374,6 +9381,17 @@ app.delete('/agent/scheduled-tasks/:id', requireSessionAuth, async (req, res) =>
     res.status(500).json({ error: 'Could not stop watching that.' });
   }
 });
+
+app.post('/agent/browser/live', requireSessionAuth, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const link = require('./services/browser-live-view').createLink(getAuthenticatedUserId(req));
+    if (!link) return res.status(404).json({ error: 'There is no live browser to open.' });
+    res.json(link);
+  } catch { res.status(503).json({ error: 'The live view is unavailable.' }); }
+});
+
+app.get('/agent/browser/live/*path', (req, res) => require('./services/browser-live-view').proxyHttp(req, res));
 
 app.get('/agent/tasks/:id/runtime', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);

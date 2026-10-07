@@ -27,6 +27,9 @@ abstraction is wrong — see the architecture rule below.
   - `api/services/browser-session.js` / `browser-environment.js` — the browser as an
     environment: sessions, perception, and the primitives (open, observe, click, type, select,
     scroll, back, navigate, upload, download, close)
+  - `api/services/browser-sandbox.js` — optional per-user E2B sandbox browser (persistent
+    profile, pause/resume, live-view proxy); off unless `OXY_BROWSER_BACKEND=e2b`. See
+    `docs/BROWSER_SANDBOX.md`
   - `api/services/playbooks.js` — optional domain guidance, never domain machinery
   - `api/services/money-guard.js`, `pending-review.js`, `credential-grants.js` — deterministic authority
   - `api/services/transaction.js` — prepare → authorize → verify, for any page asking for

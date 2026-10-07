@@ -397,7 +397,7 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
   const existing = getSession(userId);
   if (existing) await closeSession(userId);
 
-  const { browser } = await acquireBrowser();
+  const { browser, persistentContext, release } = await acquireBrowser(userId);
   const host = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, host).catch(() => null);
 
@@ -411,15 +411,33 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
       site: host, taskId: null, outcome: 'used', reason: 'stored_session',
     }).catch(() => {});
   }
-  const context = await browser.newContext({ viewport: VIEWPORT, ...(storageState ? { storageState } : {}) });
+  // A sandbox browser keeps its own profile, so logins already live there; a session the user
+  // imported is still honoured by loading its cookies into that profile.
+  const context = persistentContext
+    || await browser.newContext({ viewport: VIEWPORT, ...(storageState ? { storageState } : {}) });
+  if (persistentContext && storageState?.cookies?.length) {
+    await context.addCookies(storageState.cookies).catch(() => {});
+  }
+  const stalePages = persistentContext ? context.pages() : [];
   const page = await context.newPage();
-  await gotoBrowserPage(page, url);
+  if (persistentContext) {
+    await page.setViewportSize(VIEWPORT).catch(() => {});
+    await Promise.all(stalePages.map((old) => old.close().catch(() => {})));
+  }
+  try {
+    await gotoBrowserPage(page, url);
+  } catch (error) {
+    // No session exists yet to close later, so give the browser back here.
+    await browser.close().catch(() => {});
+    if (typeof release === 'function') release();
+    throw error;
+  }
   await settle(page, 150);
   await dismissConsent(page).catch(() => {});
   await settle(page, 100);
 
   const session = createSession(userId, {
-    browser, context, page, site: host, goal: objective, workflowId,
+    browser, context, page, release, site: host, goal: objective, workflowId,
     history: [], requestedUrl: url, usedStoredSession: Boolean(storageState),
   });
   const blocked = await detectBlockWall(page).catch(() => null);
