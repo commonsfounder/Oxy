@@ -21,7 +21,7 @@ sys.path.insert(0, repo)
 import tiny  # noqa: E402
 from helpers.utils import NAME_TO_WIDTH, labels  # noqa: E402
 from models.mn.model import get_model  # noqa: E402
-from models.preprocess import AugmentMelSTFT  # noqa: E402
+import frontend  # noqa: E402
 
 MAP = {"glass_breaking": ["Shatter"], "knock": ["Knock"], "doorbell": ["Doorbell", "Ding-dong"], "baby_crying": ["Baby cry, infant cry"]}
 IDS = {cls: [labels.index(n) for n in names] for cls, names in MAP.items()}
@@ -31,11 +31,25 @@ torch.set_num_threads(2)
 model = get_model(width_mult=NAME_TO_WIDTH(name), pretrained_name=name, strides=[2, 2, 2, 2], head_type="mlp")
 FT = os.environ.get("FT_WEIGHTS")  # a fine-tuned network (finetune.py): scores become our 5 class probabilities
 if FT:
-    model.classifier[5] = torch.nn.Linear(512, 5)
+    import json as _json
+    model.classifier[5] = torch.nn.Linear(512, len(_json.loads(Path(os.environ["FT_CLASSES"]).read_text())) if os.environ.get("FT_CLASSES") else 5)
     model.load_state_dict(torch.load(FT))
+ACT = os.environ.get("ACT_SCALES")  # qat.py output: round every layer's output to 8 bits, as the chip would
+if FT and ACT:
+    import json as _json2
+    _scales = _json2.loads(Path(ACT).read_text())
+
+    def _quant(name):
+        def hook(module, inputs, output):
+            s = max(_scales[name], 1e-8)
+            return torch.round(output / s).clamp(-128, 127) * s
+        return hook
+    for _n, _m in model.named_modules():
+        if _n in _scales:
+            _m.register_forward_hook(_quant(_n))
 dev = torch.device("mps" if FT and torch.backends.mps.is_available() else "cpu")
 model = model.to(dev).eval()
-mel = AugmentMelSTFT(n_mels=128, sr=32000, win_length=800, hopsize=320).eval()
+to_mel = frontend.make()
 SECONDS = 2.0
 WIN = int(SECONDS * 16000)
 
@@ -45,8 +59,8 @@ def run(windows16):
     embs, scores = [], []
     with torch.no_grad():
         for i in range(0, len(windows16), 128):
-            w = torchaudio.functional.resample(torch.from_numpy(windows16[i:i + 128]), 16000, 32000)
-            preds, features = model(mel(w).unsqueeze(1).to(dev))
+            w = torch.from_numpy(windows16[i:i + 128])
+            preds, features = model(to_mel(w).unsqueeze(1).to(dev))
             if FT:
                 p = torch.softmax(preds.float(), dim=1).cpu().numpy()
                 scores.append(p)

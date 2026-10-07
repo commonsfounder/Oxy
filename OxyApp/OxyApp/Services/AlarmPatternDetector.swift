@@ -155,7 +155,16 @@ final class AlarmPatternDetector {
         }
         let sorted = currentPitches.sorted()
         let pitch = currentOn && !sorted.isEmpty ? sorted[sorted.count / 2] : 0
-        runs.append((currentOn, currentLength, pitch))
+        var length = currentLength, runPitch = pitch
+        // A long beep can lose a few hundredths of a second to a distant room's echo; close that dropout. Short beeps
+        // (carbon monoxide, rapid beeping) are never merged, because their real gaps are that short.
+        if currentOn, runs.count >= 2, !runs[runs.count - 1].on, runs[runs.count - 1].length <= 0.06,
+           runs[runs.count - 2].on, runs[runs.count - 2].length >= 0.3 {
+            let gap = runs.removeLast(), earlier = runs.removeLast()
+            length = earlier.length + gap.length + currentLength
+            runPitch = earlier.pitch
+        }
+        runs.append((currentOn, length, runPitch))
         previousPitches = currentPitches
         if runs.count > 40 { runs.removeFirst(runs.count - 40) }
         currentOn = beep

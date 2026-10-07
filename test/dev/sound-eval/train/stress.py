@@ -23,7 +23,8 @@ import audiolib as audio
 
 soundset, esc, out = (Path(p) for p in sys.argv[1:4])
 rng = np.random.default_rng(11)
-ESC_TARGETS = {"glass_breaking": "glass_breaking", "door_wood_knock": "knock", "crying_baby": "baby_crying"}
+ESC_TARGETS = {"glass_breaking": "glass_breaking", "door_wood_knock": "knock", "crying_baby": "baby_crying", "dog": "dog_bark",
+               "coughing": "cough", "toilet_flush": "toilet_flush", "siren": "siren"}
 
 noise_pool = [x for x in (audio.load(p) for p in sorted((soundset / "val" / "background").glob("*.wav"))) if x is not None and len(x) > audio.RATE]
 pool = []  # (label, name, samples)

@@ -22,9 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tiny  # noqa: E402
 from helpers.utils import NAME_TO_WIDTH  # noqa: E402
 from models.mn.model import get_model  # noqa: E402
-from models.preprocess import AugmentMelSTFT  # noqa: E402
+import frontend  # noqa: E402
 
-CLASSES = tiny.CLASSES
+CLASSES = tiny.CLASSES  # replaced by classes.json when the dataset has one (prep writes it)
 WIN = 32000  # 2 s at 16 kHz
 
 
@@ -39,16 +39,19 @@ def train_windows(x, is_target, rng):
     return np.stack([x[s:s + WIN] for s in sorted(starts)]).astype(np.float32)
 
 
-def build():
+def build(classes=None):
+    classes = classes or CLASSES
     model = get_model(width_mult=NAME_TO_WIDTH("mn04_as"), pretrained_name="mn04_as", strides=[2, 2, 2, 2], head_type="mlp")
-    model.classifier[5] = torch.nn.Linear(512, len(CLASSES))
+    model.classifier[5] = torch.nn.Linear(512, len(classes))
     return model
 
 
 if mode == "prep":
     folder, out, shard, shards = Path(sys.argv[3]), Path(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
+    if (folder / "train" / "background").exists() and len(list((folder / "train").iterdir())) > 5:
+        CLASSES = ["background"] + sorted(p.name for p in (folder / "train").iterdir() if p.is_dir() and p.name != "background")
     torch.set_num_threads(2)
-    mel = AugmentMelSTFT(n_mels=128, sr=32000, win_length=800, hopsize=320).eval()
+    to_mel = frontend.make()
     jobs = [p for split in ("train", "val") for p in sorted((folder / split).rglob("*.wav"))]
     jobs = [p for i, p in enumerate(jobs) if i % shards == shard]
     rng = np.random.default_rng(shard)
@@ -59,25 +62,30 @@ if mode == "prep":
             continue
         w = train_windows(x, path.parent.name != "background", rng)
         with torch.no_grad():
-            m = mel(torchaudio.functional.resample(torch.from_numpy(w), 16000, 32000))
+            m = to_mel(torch.from_numpy(w))
         xs.append(m.numpy().astype(np.float16))
         ys += [CLASSES.index(path.parent.name)] * len(w)
         sp += [1 if path.parent.parent.name == "val" else 0] * len(w)
         if n % 500 == 499:
             print(f"shard {shard}: {n + 1}/{len(jobs)}", flush=True)
     out.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    (out / "classes.json").write_text(_json.dumps(CLASSES))
     np.savez(out / f"mel-{shard}.npz", x=np.concatenate(xs), y=np.array(ys), split=np.array(sp))
     print(f"shard {shard} done", flush=True)
     sys.exit()
 
 folder = Path(sys.argv[3])
+if (folder / "classes.json").exists():
+    import json as _json
+    CLASSES = _json.loads((folder / "classes.json").read_text())
 arrays = [np.load(f) for f in sorted(folder.glob("mel-*.npz"))]
 X = np.concatenate([a["x"] for a in arrays]); Y = np.concatenate([a["y"] for a in arrays]); SP = np.concatenate([a["split"] for a in arrays])
 tr, va = np.where(SP == 0)[0], np.where(SP == 1)[0]
 print(f"{len(tr)} train windows {np.bincount(Y[tr]).tolist()}, {len(va)} val windows, mel {X.shape[1:]}", flush=True)
 torch.set_num_threads(10)
 dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-model = build().to(dev)
+model = build(CLASSES).to(dev)
 batch = 64
 
 if mode == "bench":

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds long household recordings with sounds dropped in at random moments, and the answer key.
 
-  python3 stream.py <soundset folder> <out folder> [beds=3] [minutes=10]
+  python3 stream.py <soundset folder> <out folder> [beds=3] [minutes=10] [events per sound per bed=12] [all|even|odd] [seed=100]
 
 Each bed is ordinary household noise (speech, music, appliances from the validation split) at a steady level.
 Held-out target sounds are placed at random times with a random loudness from 3 dB below the bed to 12 dB
@@ -18,25 +18,33 @@ import audiolib as audio
 soundset, out = Path(sys.argv[1]), Path(sys.argv[2])
 beds = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 minutes = float(sys.argv[4]) if len(sys.argv) > 4 else 10
+PER_CLASS = int(sys.argv[5]) if len(sys.argv) > 5 else 12  # events of each sound per bed
 out.mkdir(parents=True, exist_ok=True)
 
 noise_pool = [x for x in (audio.load(p) for p in sorted((soundset / "val" / "background").glob("*.wav"))) if x is not None and len(x) > audio.RATE]
+PARITY = sys.argv[6] if len(sys.argv) > 6 else "all"
+SEED = int(sys.argv[7]) if len(sys.argv) > 7 else 100
 events_pool = {}
-for sound in ("glass_breaking", "knock", "doorbell", "baby_crying"):
-    clips = [audio.load(p) for p in sorted((soundset / "test" / sound).glob("*.wav"))]
-    events_pool[sound] = [audio.loudest(x, 6.0) for x in clips if x is not None and len(x) > audio.RATE // 4]
+for folder in sorted((soundset / "test").iterdir()):
+    if folder.name == "background":
+        continue
+    files = sorted(folder.glob("*.wav"))
+    if PARITY in ("even", "odd"):  # tune and judge on different clips of each sound
+        files = files[0::2] if PARITY == "even" else files[1::2]
+    clips = [audio.load(p) for p in files]
+    events_pool[folder.name] = [audio.loudest(x, 6.0) for x in clips if x is not None and len(x) > audio.RATE // 4]
 
 for bed_index in range(beds):
-    rng = np.random.default_rng(100 + bed_index)
+    rng = np.random.default_rng(SEED + bed_index)
     length = int(minutes * 60 * audio.RATE)
     bed = audio.noise_like(noise_pool, length, rng) * 0.03
     truth, taken = [], []
     for sound, clips in events_pool.items():
-        for _ in range(12):
+        for _ in range(PER_CLASS):
             clip = clips[rng.integers(len(clips))]
             for _attempt in range(50):
                 start = int(rng.uniform(10, minutes * 60 - 12) * audio.RATE)
-                if all(abs(start - other) > 10 * audio.RATE for other in taken):
+                if all(abs(start - other) > 8 * audio.RATE for other in taken):
                     break
             taken.append(start)
             local = audio.rms(bed[max(0, start - audio.RATE):start + len(clip)])

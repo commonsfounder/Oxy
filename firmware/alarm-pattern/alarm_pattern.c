@@ -221,14 +221,25 @@ static alarm_kind_t step(alarm_pattern_t *d, int beep) {
         }
         return ALARM_NONE;
     }
+    float length = d->current_length;
+    float pitch = d->current_on ? median(d->current_pitches, d->current_pitch_count) : 0.f;
+    // A long beep can lose a few hundredths of a second to a distant room's echo; close that dropout. Short beeps
+    // (carbon monoxide, rapid beeping) are never merged, because their real gaps are that short.
+    if (d->current_on && d->run_count >= 2 && !d->runs[d->run_count - 1].on && d->runs[d->run_count - 1].length <= 0.06f &&
+        d->runs[d->run_count - 2].on && d->runs[d->run_count - 2].length >= 0.3f) {
+        alarm_run_t gap = d->runs[--d->run_count];
+        alarm_run_t earlier = d->runs[--d->run_count];
+        length = earlier.length + gap.length + d->current_length;
+        pitch = earlier.pitch;
+    }
     if (d->run_count == ALARM_RUNS) {
         memmove(d->runs, d->runs + 1, (ALARM_RUNS - 1) * sizeof(alarm_run_t));
         d->run_count--;
     }
     alarm_run_t *run = &d->runs[d->run_count++];
     run->on = d->current_on;
-    run->length = d->current_length;
-    run->pitch = d->current_on ? median(d->current_pitches, d->current_pitch_count) : 0.f;
+    run->length = length;
+    run->pitch = pitch;
     memcpy(d->previous_pitches, d->current_pitches, (size_t)d->current_pitch_count * sizeof(float));
     d->previous_pitch_count = d->current_pitch_count;
     d->current_on = beep != 0;

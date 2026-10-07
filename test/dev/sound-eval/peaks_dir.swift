@@ -3,6 +3,7 @@
 //
 //   swiftc -O peaks_dir.swift -o /tmp/sound-peaks-dir
 //   /tmp/sound-peaks-dir <out.json> <shard> <shards> <folder> [folder...]
+import CoreML
 import Foundation
 import SoundAnalysis
 
@@ -21,14 +22,19 @@ let shard = Int(arguments[2])!, shards = Int(arguments[3])!
 var files: [URL] = []
 for folder in arguments.dropFirst(4) {
     let url = URL(fileURLWithPath: folder)
-    files += try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".wav") }.sorted().map { url.appendingPathComponent($0) }
+    let walker = FileManager.default.enumerator(atPath: folder)
+    var found: [String] = []
+    while let relative = walker?.nextObject() as? String { if relative.hasSuffix(".wav") { found.append(relative) } }
+    files += found.sorted().map { url.appendingPathComponent($0) }
 }
+// MODEL=/path/Model.mlmodelc scores one of our Core ML sound models instead of Apple's built-in one.
+let model: MLModel? = ProcessInfo.processInfo.environment["MODEL"].flatMap { try? MLModel(contentsOf: URL(fileURLWithPath: $0)) }
 struct Clip: Codable { let file: String; let peak1: [String: Double]; let peak2: [String: Double] }
 var clips: [Clip] = []
 for (index, url) in files.enumerated() where index % shards == shard {
     autoreleasepool {
         guard let analyzer = try? SNAudioFileAnalyzer(url: url),
-              let request = try? SNClassifySoundRequest(classifierIdentifier: .version1) else { return }
+              let request = model.map({ try? SNClassifySoundRequest(mlModel: $0) }) ?? (try? SNClassifySoundRequest(classifierIdentifier: .version1)) else { return }
         request.overlapFactor = 0.5
         let collector = Collector()
         guard (try? analyzer.add(request, withObserver: collector)) != nil else { return }
@@ -40,7 +46,7 @@ for (index, url) in files.enumerated() where index % shards == shard {
                 if i + 1 < collector.windows.count, let next = collector.windows[i + 1][label] { peak2[label] = max(peak2[label] ?? 0, min(score, next)) }
             }
         }
-        clips.append(Clip(file: url.deletingPathExtension().lastPathComponent, peak1: peak1, peak2: peak2))
+        clips.append(Clip(file: url.path, peak1: peak1, peak2: peak2))
     }
 }
 try JSONEncoder().encode(clips).write(to: URL(fileURLWithPath: arguments[1]))
