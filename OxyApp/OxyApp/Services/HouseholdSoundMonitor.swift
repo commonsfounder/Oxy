@@ -14,6 +14,9 @@ struct HouseholdSoundEventEnvelope: Equatable {
     let requiresNow: Bool
     let occurredAt: Date
 
+    /// The sound's key, e.g. "knock" or "smoke_alarm".
+    var sound: String { id.split(separator: ":").dropFirst().first.map(String.init) ?? subject }
+
     var dictionary: [String: Any] {
         [
             "id": id,
@@ -216,11 +219,21 @@ private final class HouseholdSoundAnalysisPipeline: @unchecked Sendable {
     private let alarms: AlarmPatternDetector
     private let onAlarm: (AlarmPatternDetector.Pattern) -> Void
     private let lock = NSLock()
+    /// The last few seconds, in memory only; written out only if an alert fires and the person keeps clips.
+    private var recent: [Float] = []
+    private let recentLimit: Int
 
     init(analyzer: SNAudioStreamAnalyzer, sampleRate: Double, onAlarm: @escaping (AlarmPatternDetector.Pattern) -> Void) {
         self.analyzer = analyzer
         self.alarms = AlarmPatternDetector(sampleRate: sampleRate)
         self.onAlarm = onAlarm
+        self.recentLimit = Int(sampleRate * SoundClipStore.seconds)
+    }
+
+    func recentSamples() -> [Float] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(recent.suffix(recentLimit))
     }
 
     func analyze(_ buffer: AVAudioPCMBuffer, at position: AVAudioFramePosition) {
@@ -229,6 +242,8 @@ private final class HouseholdSoundAnalysisPipeline: @unchecked Sendable {
         analyzer.analyze(buffer, atAudioFramePosition: position)
         guard let channel = buffer.floatChannelData?[0] else { return }
         let samples = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+        recent.append(contentsOf: samples)
+        if recent.count > recentLimit * 2 { recent.removeFirst(recent.count - recentLimit) }
         if let pattern = alarms.process(samples) {
             // Start listening afresh so the same alarm can be reported again once the cooldown passes.
             alarms.reset()
@@ -250,13 +265,14 @@ final class HouseholdSoundMonitor {
 
     private var audioEngine: AVAudioEngine?
     private var analysisPipeline: HouseholdSoundAnalysisPipeline?
+    private var sampleRate = 0.0
     private var resultsObserver: HouseholdSoundResultsObserver?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var filter = HouseholdSoundEventFilter()
     private var lastAlarmAt: [AlarmPatternDetector.Pattern: Date] = [:]
     private let alarmCooldown: TimeInterval = 15 * 60
     private var activeUserId: String?
-    private var pausedForVoiceInput = false
+    private var pausedListening = false
     private var isStarting = false
     #if DEBUG
     private var lastClassificationLogAt = Date.distantPast
@@ -298,20 +314,22 @@ final class HouseholdSoundMonitor {
         }
     }
 
-    func suspendForVoiceInput() {
-        pausedForVoiceInput = true
+    /// Stops while the microphone or speaker is needed elsewhere: dictation, or playing a clip back.
+    func pauseListening() {
+        pausedListening = true
         stop()
     }
 
-    func resumeAfterVoiceInput() {
-        pausedForVoiceInput = false
+    func resumeListening() {
+        pausedListening = false
         Task { await startIfNeeded() }
     }
 
     func stopAndForgetUser() {
         activeUserId = nil
-        pausedForVoiceInput = false
+        pausedListening = false
         stop()
+        SoundClipStore.shared.deleteAll()
     }
 
     private var isEnabled: Bool {
@@ -320,7 +338,7 @@ final class HouseholdSoundMonitor {
 
     private func startIfNeeded() async {
         guard isEnabled,
-              !pausedForVoiceInput,
+              !pausedListening,
               !isStarting,
               audioEngine == nil,
               activeUserId != nil,
@@ -335,7 +353,7 @@ final class HouseholdSoundMonitor {
             }
             return
         }
-        guard isEnabled, !pausedForVoiceInput else { return }
+        guard isEnabled, !pausedListening else { return }
 
         do {
             let engine = AVAudioEngine()
@@ -377,6 +395,7 @@ final class HouseholdSoundMonitor {
 
             audioEngine = engine
             analysisPipeline = pipeline
+            sampleRate = format.sampleRate
             resultsObserver = observer
             #if DEBUG
             let supported = request.knownClassifications.filter { classification in
@@ -429,7 +448,10 @@ final class HouseholdSoundMonitor {
     }
 
     private func submit(_ event: HouseholdSoundEventEnvelope) {
-        guard let userId = activeUserId, isEnabled, !pausedForVoiceInput else { return }
+        guard let userId = activeUserId, isEnabled, !pausedListening else { return }
+        if SoundClipStore.shared.isEnabled, let samples = analysisPipeline?.recentSamples() {
+            SoundClipStore.shared.save(samples: samples, sampleRate: sampleRate, sound: event.sound, title: event.subject, at: event.occurredAt)
+        }
         Task {
             #if DEBUG
             print("[HouseholdSound] detected id=\(event.id) confidence=\(String(format: "%.3f", event.confidence))")

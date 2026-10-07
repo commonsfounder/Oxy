@@ -323,6 +323,7 @@ struct PreferencesPage: View {
     @AppStorage(ThreadMenuChoice.orderKey) private var wheelOrderRaw = ""
     @State private var settings = SettingsStore.load()
     @State private var showsWheelEditor = false
+    @State private var showsSoundClips = false
 
     var body: some View {
         SettingsPage(title: "Preferences") {
@@ -382,6 +383,10 @@ struct PreferencesPage: View {
                         subtitle: "Listens while Adam is open. Stays on this iPhone",
                         isOn: $soundAwarenessEnabled
                     )
+                    if soundAwarenessEnabled {
+                        SettingsRule()
+                        SettingsNavRow(title: "Sounds heard", subtitle: "Check what set off an alert") { showsSoundClips = true }
+                    }
                 }
             }
         }
@@ -392,6 +397,9 @@ struct PreferencesPage: View {
             WheelEditorSheet(orderRaw: $wheelOrderRaw)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $showsSoundClips) {
+            SoundClipsPage().swipeToDismiss()
         }
         .onChange(of: settings.preferredMapsApp) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.locationReminders) { _, _ in SettingsStore.save(settings, userId: appState.userId) }

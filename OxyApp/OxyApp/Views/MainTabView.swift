@@ -127,6 +127,7 @@ private struct AdamYouView: View {
     @State private var versionTapCount = 0
     #if DEBUG
     @State private var showsIndicatorPreview = false
+    @State private var showsSoundsPreview = false
     #endif
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
@@ -210,9 +211,11 @@ private struct AdamYouView: View {
         .fullScreenCover(isPresented: $showsIndicatorPreview) {
             if ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"] == "transition" { ActivityTransitionPreview() } else { ActivityMarkPreview() }
         }
+        .fullScreenCover(isPresented: $showsSoundsPreview) { SoundClipsPage() }
         .onAppear {
             if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_YOU"] {
                 if raw == "indicator" || raw == "transition" { showsIndicatorPreview = true }
+                else if raw == "sounds" { SoundClipStore.shared.seedPreviewClips(); showsSoundsPreview = true }
                 else if let target = Destination(rawValue: raw) { destination = target }
             }
         }
