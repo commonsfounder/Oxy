@@ -23,7 +23,7 @@ from models.mn.model import get_model  # noqa: E402
 
 classes = json.loads((mel_folder / "classes.json").read_text()) if (mel_folder / "classes.json").exists() else ["background", "glass_breaking", "knock", "doorbell", "baby_crying"]
 model = get_model(width_mult=NAME_TO_WIDTH("mn04_as"), pretrained_name="mn04_as", strides=[2, 2, 2, 2], head_type="mlp")
-model.classifier[5] = torch.nn.Linear(512, len(classes))
+model.classifier[5] = torch.nn.Linear(model.classifier[5].in_features, len(classes))
 model.load_state_dict(torch.load(weights, map_location="cpu"))
 model.eval()
 
@@ -51,12 +51,15 @@ print(f"{macs[0] / 1e6:.0f} million multiply-adds for each 2 s window; one windo
 print(f"largest single layer output {max(sizes) / 1e3:.0f} KB, two consecutive layers {pairs / 1e3:.0f} KB (int8); BOX-3 has 512 KB fast RAM and 8 MB external")
 
 # ---- int8 simulation ----
-arrays = [np.load(f) for f in sorted(mel_folder.glob("mel-*.npz"))]
-X = np.concatenate([a["x"] for a in arrays]); Y = np.concatenate([a["y"] for a in arrays]); SP = np.concatenate([a["split"] for a in arrays])
 rng = np.random.default_rng(0)
-calib = X[rng.choice(np.where(SP == 0)[0], 256, replace=False)].astype(np.float32)
-val = X[SP == 1].astype(np.float32)
-yv = Y[SP == 1]
+calib_parts, val_parts, yv_parts = [], [], []
+for f in sorted(mel_folder.glob("mel-*.npz")):  # one shard at a time to keep memory small
+    a = np.load(f)
+    split = a["split"]
+    train_rows = np.where(split == 0)[0]
+    calib_parts.append(a["x"][rng.choice(train_rows, 48, replace=False)].astype(np.float32))
+    val_parts.append(a["x"][split == 1].astype(np.float32)); yv_parts.append(a["y"][split == 1])
+calib, val, yv = np.concatenate(calib_parts), np.concatenate(val_parts), np.concatenate(yv_parts)
 
 
 def fold(m):

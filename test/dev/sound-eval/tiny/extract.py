@@ -32,7 +32,7 @@ model = get_model(width_mult=NAME_TO_WIDTH(name), pretrained_name=name, strides=
 FT = os.environ.get("FT_WEIGHTS")  # a fine-tuned network (finetune.py): scores become our 5 class probabilities
 if FT:
     import json as _json
-    model.classifier[5] = torch.nn.Linear(512, len(_json.loads(Path(os.environ["FT_CLASSES"]).read_text())) if os.environ.get("FT_CLASSES") else 5)
+    model.classifier[5] = torch.nn.Linear(model.classifier[5].in_features, len(_json.loads(Path(os.environ["FT_CLASSES"]).read_text())) if os.environ.get("FT_CLASSES") else 5)
     model.load_state_dict(torch.load(FT))
 ACT = os.environ.get("ACT_SCALES")  # qat.py output: round every layer's output to 8 bits, as the chip would
 if FT and ACT:

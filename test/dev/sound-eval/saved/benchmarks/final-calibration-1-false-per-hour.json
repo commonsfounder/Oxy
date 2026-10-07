@@ -1,0 +1,152 @@
+{
+ "alarm": {
+  "threshold": 0.85,
+  "hits": 2,
+  "tune_found": 1,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 1,
+  "check_total": 32,
+  "check_false_per_hour": 1.0
+ },
+ "baby_crying": {
+  "threshold": 0.98,
+  "hits": 1,
+  "tune_found": 11,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 9,
+  "check_total": 32,
+  "check_false_per_hour": 0.0
+ },
+ "cough": {
+  "threshold": 0.98,
+  "hits": 2,
+  "tune_found": 16,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 9,
+  "check_total": 32,
+  "check_false_per_hour": 0.5
+ },
+ "dog_bark": {
+  "threshold": 0.7,
+  "hits": 3,
+  "tune_found": 14,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 21,
+  "check_total": 32,
+  "check_false_per_hour": 0.0
+ },
+ "door_slam": {
+  "threshold": 0.95,
+  "hits": 2,
+  "tune_found": 0,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 0,
+  "check_total": 32,
+  "check_false_per_hour": 0.0
+ },
+ "doorbell": {
+  "threshold": 0.85,
+  "hits": 3,
+  "tune_found": 1,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 1,
+  "check_total": 32,
+  "check_false_per_hour": 1.0
+ },
+ "glass_breaking": {
+  "threshold": 0.9,
+  "hits": 2,
+  "tune_found": 15,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 12,
+  "check_total": 32,
+  "check_false_per_hour": 3.51
+ },
+ "gunshot": {
+  "threshold": 0.95,
+  "hits": 3,
+  "tune_found": 4,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 3,
+  "check_total": 32,
+  "check_false_per_hour": 0.0
+ },
+ "knock": {
+  "threshold": 0.9,
+  "hits": 3,
+  "tune_found": 9,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 9,
+  "check_total": 32,
+  "check_false_per_hour": 3.51
+ },
+ "microwave": {
+  "threshold": 0.8,
+  "hits": 3,
+  "tune_found": 6,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 3,
+  "check_total": 32,
+  "check_false_per_hour": 0.5
+ },
+ "phone_ring": {
+  "threshold": 0.95,
+  "hits": 3,
+  "tune_found": 1,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 1,
+  "check_total": 32,
+  "check_false_per_hour": 1.0
+ },
+ "scream": {
+  "threshold": 0.99,
+  "hits": 2,
+  "tune_found": 2,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.5,
+  "check_found": 0,
+  "check_total": 32,
+  "check_false_per_hour": 2.5
+ },
+ "siren": {
+  "threshold": 0.97,
+  "hits": 1,
+  "tune_found": 15,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 15,
+  "check_total": 32,
+  "check_false_per_hour": 2.0
+ },
+ "toilet_flush": {
+  "threshold": 0.97,
+  "hits": 1,
+  "tune_found": 18,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 17,
+  "check_total": 32,
+  "check_false_per_hour": 0.5
+ },
+ "water_running": {
+  "threshold": 0.97,
+  "hits": 3,
+  "tune_found": 6,
+  "tune_total": 32,
+  "tune_false_per_hour": 0.0,
+  "check_found": 1,
+  "check_total": 32,
+  "check_false_per_hour": 0.0
+ }
+}

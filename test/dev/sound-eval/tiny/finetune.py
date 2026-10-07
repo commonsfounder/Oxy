@@ -39,10 +39,31 @@ def train_windows(x, is_target, rng):
     return np.stack([x[s:s + WIN] for s in sorted(starts)]).astype(np.float32)
 
 
-def build(classes=None):
+# The AudioSet classes each of our sounds corresponds to; used to start the new last layer from what the network already knows.
+AUDIOSET = {
+    "alarm": ["Alarm", "Smoke detector, smoke alarm", "Fire alarm", "Alarm clock"], "baby_crying": ["Baby cry, infant cry"], "cough": ["Cough"],
+    "dog_bark": ["Bark"], "door_slam": ["Slam"], "doorbell": ["Doorbell", "Ding-dong"], "glass_breaking": ["Shatter"],
+    "gunshot": ["Gunshot, gunfire"], "knock": ["Knock"], "microwave": ["Microwave oven"], "phone_ring": ["Ringtone", "Telephone bell ringing"],
+    "scream": ["Screaming"], "siren": ["Siren"], "toilet_flush": ["Toilet flush"], "water_running": ["Water tap, faucet", "Sink (filling or washing)"],
+}
+
+
+def build(classes=None, arch=None, warm=False):
+    import os as _os
+    from helpers.utils import labels as audioset_labels
     classes = classes or CLASSES
-    model = get_model(width_mult=NAME_TO_WIDTH("mn04_as"), pretrained_name="mn04_as", strides=[2, 2, 2, 2], head_type="mlp")
-    model.classifier[5] = torch.nn.Linear(512, len(classes))
+    arch = arch or _os.environ.get("ARCH", "mn04_as")
+    model = get_model(width_mult=NAME_TO_WIDTH(arch), pretrained_name=arch, strides=[2, 2, 2, 2], head_type="mlp")
+    old = model.classifier[5]
+    new = torch.nn.Linear(old.in_features, len(classes))
+    if warm:
+        with torch.no_grad():
+            new.weight.zero_(); new.bias.zero_()
+            for i, c in enumerate(classes):
+                ids = [audioset_labels.index(n) for n in AUDIOSET.get(c, []) if n in audioset_labels]
+                if ids:
+                    new.weight[i] = old.weight[ids].mean(0); new.bias[i] = old.bias[ids].mean()
+    model.classifier[5] = new
     return model
 
 
@@ -85,7 +106,9 @@ tr, va = np.where(SP == 0)[0], np.where(SP == 1)[0]
 print(f"{len(tr)} train windows {np.bincount(Y[tr]).tolist()}, {len(va)} val windows, mel {X.shape[1:]}", flush=True)
 torch.set_num_threads(10)
 dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-model = build(CLASSES).to(dev)
+import os
+warm = os.environ.get("WARM") == "1"
+model = build(CLASSES, warm=warm).to(dev)
 batch = 64
 
 if mode == "bench":
@@ -122,28 +145,48 @@ def augment(m):
 
 
 def validate():
-    model.eval()
+    net = ema.module if ema is not None else model
+    net.eval()
     correct = 0
     with torch.no_grad():
         for i in range(0, len(va), 128):
             idx = va[i:i + 128]
-            logits = model(torch.from_numpy(X[idx].astype(np.float32)).unsqueeze(1).to(dev))[0]
+            logits = net(torch.from_numpy(X[idx].astype(np.float32)).unsqueeze(1).to(dev))[0]
             correct += int((logits.argmax(1).cpu().numpy() == Y[idx]).sum())
     model.train()
     return correct / len(va)
 
 
+ema = None
+if os.environ.get("EMA") == "1":
+    from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
+    ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(0.998), use_buffers=True)
+teacher = None
+if os.environ.get("TEACHER"):
+    teacher = build(CLASSES, arch=os.environ.get("TEACHER_ARCH", "mn10_as"))
+    teacher.load_state_dict(torch.load(os.environ["TEACHER"], map_location="cpu"))
+    teacher = teacher.to(dev).eval()
+KD_T, KD_W = float(os.environ.get("KD_T", "2.0")), float(os.environ.get("KD_W", "0.5"))
 best, started = (0.0, None), time.time()
 model.train()
 for step in range(steps):
     idx = rng.choice(tr, batch, p=prob)
     xb = augment(torch.from_numpy(X[idx].astype(np.float32))).unsqueeze(1).to(dev)
-    loss = torch.nn.functional.cross_entropy(model(xb)[0], torch.from_numpy(Y[idx]).to(dev), weight=weights)
+    student = model(xb)[0]
+    yb = torch.from_numpy(Y[idx]).to(dev)
+    loss = torch.nn.functional.cross_entropy(student, yb, weight=weights)
+    if teacher is not None:
+        with torch.no_grad():
+            soft = torch.softmax(teacher(xb)[0] / KD_T, dim=1)
+        kd = torch.nn.functional.kl_div(torch.log_softmax(student / KD_T, dim=1), soft, reduction="batchmean") * KD_T * KD_T
+        loss = (1 - KD_W) * loss + KD_W * kd
     opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+    if ema is not None:
+        ema.update_parameters(model)
     if step % 100 == 99 or step == steps - 1:
         accuracy = validate()
         if accuracy > best[0]:
-            best = (accuracy, {k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
+            best = (accuracy, {k: v.detach().cpu().clone() for k, v in (ema.module if ema is not None else model).state_dict().items()})
             torch.save(best[1], out)
         print(f"step {step + 1}/{steps}: loss {loss.item():.3f}, val accuracy {accuracy:.3f} (best {best[0]:.3f}), {int(time.time() - started)}s", flush=True)
 print(f"done, best val accuracy {best[0]:.3f}")

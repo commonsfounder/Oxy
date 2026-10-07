@@ -67,6 +67,8 @@ for name in ("dev", "eval"):
         source = audio / f"{row['fname']}.wav"
         split = "test" if name == "eval" else ("val" if row["split"] == "val" else "train")
         matched = [sound for sound, classes in TARGETS.items() if labels & set(classes)]
+        if len(matched) > 1 and "alarm" in matched:  # FSD50K gives sirens, doorbells and ringtones an "Alarm" parent label
+            matched.remove("alarm")
         text = " ".join(clip["tags"] + [clip["title"]]).lower()
         if "Crying_and_sobbing" in labels and any(word in text for word in BABY_WORDS):
             matched.append("baby_crying")

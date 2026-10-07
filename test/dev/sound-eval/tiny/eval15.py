@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fair, threshold-free comparison of Apple's classifier and our models on the hard-condition test set.
 
-  python3 eval15.py <stress folder> <report.json> --apple <peaks json> [...] --model name=<cache folder>=<classes.json | legacy> [...]
+  python3 eval15.py <stress folder> <report.json> --apple <peaks json> [...] [--phone <peaks json> ...] --model name=<cache folder>=<classes.json | legacy> [...]
 
 For each sound and each condition the clips of that sound are the positives and every other clip in that condition the
 negatives. A model's score for a clip is its highest score in any window (one hit) or the highest score held for two
@@ -22,7 +22,7 @@ APPLE = {
     "glass_breaking": ["glass_breaking"], "knock": ["knock"], "doorbell": ["door_bell"], "baby_crying": ["baby_crying"],
     "water_running": ["water_tap_faucet", "sink_filling_washing", "bathtub_filling_washing"], "toilet_flush": ["toilet_flush"],
     "dog_bark": ["dog_bark"], "cough": ["cough"], "scream": ["screaming"], "door_slam": ["door_slam"],
-    "gunshot": ["gunshot_gunfire"], "microwave": ["microwave_oven"],
+    "gunshot": ["gunshot_gunfire"], "microwave": ["microwave_oven"], "alarm": ["smoke_detector", "alarm_clock", "beep"],
     "siren": ["siren", "police_siren", "ambulance_siren", "fire_engine_siren", "civil_defense_siren", "emergency_vehicle"],
     "phone_ring": ["ringtone", "telephone_bell_ringing"],
 }
@@ -64,15 +64,19 @@ def clip_scores(p):
 def main():
     args = sys.argv[1:]
     stress, report = Path(args[0]), args[1]
-    apple_files, models = [], {}
+    apple_files, phone_files, models = [], [], {}
     mode = None
     for a in args[2:]:
         if a == "--apple":
             mode = "apple"
+        elif a == "--phone":
+            mode = "phone"
         elif a == "--model":
             mode = "model"
         elif mode == "apple":
             apple_files.append(a)
+        elif mode == "phone":
+            phone_files.append(a)
         else:
             name, folder, classes = a.split("=", 2)
             models[name] = (folder, LEGACY if classes == "legacy" else json.loads(Path(classes).read_text()))
@@ -93,6 +97,13 @@ def main():
             table[path] = {cls: (max(clip["peak1"].get(l, 0) for l in labels), max(clip["peak2"].get(l, 0) for l in labels))
                            for cls, labels in APPLE.items()}
         scores["Apple"] = table
+    if phone_files:  # our Core ML model on the phone: its labels are our own class names
+        peaks = {}
+        for f in phone_files:
+            for clip in json.load(open(f)):
+                peaks[clip["file"]] = clip
+        scores["Phone v2"] = {path: {cls: (clip["peak1"].get(cls, 0), clip["peak2"].get(cls, 0)) for cls in ("glass_breaking", "knock", "doorbell", "baby_crying")}
+                              for path, clip in peaks.items()}
     for name, (folder, classes) in models.items():
         cache = {}
         for f in sorted(Path(folder).glob("eval-*.pkl")):

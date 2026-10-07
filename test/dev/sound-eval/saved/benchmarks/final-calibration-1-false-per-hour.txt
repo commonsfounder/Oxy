@@ -1,0 +1,16 @@
+sound            setting                tuning: found  false/h     unseen check: found  false/h
+alarm            thr 0.85, 2 in a row      1/32     0.00/h            1/32     1.00/h
+baby_crying      thr 0.98, 1 in a row     11/32     0.50/h            9/32     0.00/h
+cough            thr 0.98, 2 in a row     16/32     0.50/h            9/32     0.50/h
+dog_bark         thr 0.70, 3 in a row     14/32     0.50/h           21/32     0.00/h
+door_slam        thr 0.95, 2 in a row      0/32     0.00/h            0/32     0.00/h
+doorbell         thr 0.85, 3 in a row      1/32     0.00/h            1/32     1.00/h
+glass_breaking   thr 0.90, 2 in a row     15/32     0.50/h           12/32     3.51/h
+gunshot          thr 0.95, 3 in a row      4/32     0.50/h            3/32     0.00/h
+knock            thr 0.90, 3 in a row      9/32     0.50/h            9/32     3.51/h
+microwave        thr 0.80, 3 in a row      6/32     0.50/h            3/32     0.50/h
+phone_ring       thr 0.95, 3 in a row      1/32     0.50/h            1/32     1.00/h
+scream           thr 0.99, 2 in a row      2/32     0.50/h            0/32     2.50/h
+siren            thr 0.97, 1 in a row     15/32     0.00/h           15/32     2.00/h
+toilet_flush     thr 0.97, 1 in a row     18/32     0.00/h           17/32     0.50/h
+water_running    thr 0.97, 3 in a row      6/32     0.00/h            1/32     0.00/h

@@ -1,0 +1,4 @@
+16 classes, 721,456 weights = 0.72 MB as int8 (2.89 MB as float32)
+23 million multiply-adds for each 2 s window; one window every 0.5 s means 47 million per second of audio
+largest single layer output 155 KB, two consecutive layers 207 KB (int8); BOX-3 has 512 KB fast RAM and 8 MB external
+int8 simulation on 2244 validation windows: accuracy 0.516 -> 0.520, same answer as float 79.9% of the time, mean probability change 0.0169

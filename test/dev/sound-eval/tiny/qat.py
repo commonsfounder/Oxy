@@ -26,7 +26,7 @@ from models.mn.model import get_model  # noqa: E402
 
 classes = json.loads((mel_folder / "classes.json").read_text())
 model = get_model(width_mult=NAME_TO_WIDTH("mn04_as"), pretrained_name="mn04_as", strides=[2, 2, 2, 2], head_type="mlp")
-model.classifier[5] = nn.Linear(512, len(classes))
+model.classifier[5] = nn.Linear(model.classifier[5].in_features, len(classes))
 model.load_state_dict(torch.load(in_weights, map_location="cpu"))
 dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
