@@ -25,8 +25,16 @@ from models.preprocess import AugmentMelSTFT  # noqa: E402
 
 MAP = {"glass_breaking": ["Shatter"], "knock": ["Knock"], "doorbell": ["Doorbell", "Ding-dong"], "baby_crying": ["Baby cry, infant cry"]}
 IDS = {cls: [labels.index(n) for n in names] for cls, names in MAP.items()}
+import os  # noqa: E402
+
 torch.set_num_threads(2)
-model = get_model(width_mult=NAME_TO_WIDTH(name), pretrained_name=name, strides=[2, 2, 2, 2], head_type="mlp").eval()
+model = get_model(width_mult=NAME_TO_WIDTH(name), pretrained_name=name, strides=[2, 2, 2, 2], head_type="mlp")
+FT = os.environ.get("FT_WEIGHTS")  # a fine-tuned network (finetune.py): scores become our 5 class probabilities
+if FT:
+    model.classifier[5] = torch.nn.Linear(512, 5)
+    model.load_state_dict(torch.load(FT))
+dev = torch.device("mps" if FT and torch.backends.mps.is_available() else "cpu")
+model = model.to(dev).eval()
 mel = AugmentMelSTFT(n_mels=128, sr=32000, win_length=800, hopsize=320).eval()
 SECONDS = 2.0
 WIN = int(SECONDS * 16000)
@@ -38,10 +46,14 @@ def run(windows16):
     with torch.no_grad():
         for i in range(0, len(windows16), 128):
             w = torchaudio.functional.resample(torch.from_numpy(windows16[i:i + 128]), 16000, 32000)
-            preds, features = model(mel(w).unsqueeze(1))
-            p = torch.sigmoid(preds.float()).numpy()
-            embs.append(features.reshape(len(w), -1).numpy())
-            scores.append(np.stack([p[:, ids].max(axis=1) for ids in IDS.values()], axis=1))
+            preds, features = model(mel(w).unsqueeze(1).to(dev))
+            if FT:
+                p = torch.softmax(preds.float(), dim=1).cpu().numpy()
+                scores.append(p)
+            else:
+                p = torch.sigmoid(preds.float()).cpu().numpy()
+                scores.append(np.stack([p[:, ids].max(axis=1) for ids in IDS.values()], axis=1))
+            embs.append(features.reshape(len(w), -1).cpu().numpy())
     return np.concatenate(embs).astype(np.float16), np.concatenate(scores).astype(np.float16)
 
 

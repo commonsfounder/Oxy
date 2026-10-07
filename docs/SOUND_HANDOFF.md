@@ -57,6 +57,16 @@ speed on the ESP32-S3 (the 0.11 GMAC figure is per 10 s of 32 kHz audio; the BOX
 Saved: `saved/models/efficientat-mn04-head-v1.pt`, `saved/benchmarks/efficientat-mn04-*`. Embedding caches (`scratchpad/emb/*.pkl`) are not saved; rerun `extract.py` (~15 min with 4 shards).
 Competitor to know: Seeed Sound Event Detection Module D1 (AIZIP model) already does baby cry, glass break, gunshot, T3/T4 alarms and snore locally.
 
+## Whole-network fine-tune of EfficientAT mn04 (2026-10-07): the best model so far
+`tiny/finetune.py` (prep -> train): all 0.98M weights trained on the same data, 3,000 steps (batch 64) in 17 minutes on the Mac GPU (`mps`; CPU was 47x slower).
+Weights `saved/models/efficientat-mn04-finetuned-v1.pt` (5-class head, 2 s windows at 32 kHz mel), results `saved/benchmarks/efficientat-mn04-finetuned-v1-*`.
+30-min stream at threshold 0.95, 36 of each, found / false alarms per hour: glass 18 / 6, knock 15 / 4, doorbell 8 / 6, baby 18 / 2.
+Phone v2: 16 / 6, 12 / 2, 8 / 0, 20 / 6. Apple: 9 / 0, 12 / 2, 1 / 0, 13 / 0. Head only: 17 / 16, 14 / 12, 7 / 12, 20 / 14.
+At matched false alarms in hard conditions it beats v2 on glass and knock (echo: glass 89 caught / 11 false vs v2 78 / 15; knock 103 / 11 vs v2 79 / 13);
+baby crying ties; doorbell ties or is slightly worse (noise: 9 / 13 vs v2 10 / 7). Fine-tuning cut the head-only false alarms 2-7x.
+Pipeline to reproduce (all cached, scripts in `tiny/`): `finetune.py prep` (6 shards) -> `finetune.py train` -> `FT_WEIGHTS=<pt> extract.py ... eval` (4 shards) -> `head.py eval <emb> <stress> <stream> probs`.
+Not done: 16 kHz retrain for the BOX-3 mic, int8 export, on-chip speed, Core ML conversion for the phone (coremltools not installed), mined negatives on this model.
+
 ## Not done / next
 1. Install the current build on the iPhone: last install failed because the phone was unavailable (device `00008110-000644503C63A01E`).
 2. Continuous per-house learning (doorbell, washing machine end-of-cycle). Idea settled: labels come mostly from signals the user already gives (door opened right after a doorbell sound, alert opened vs swiped away), with a "Not a doorbell, stop these" button on the alert itself; the Right/Wrong list is a testers' tool, not something to ask everyone to do. Nothing built yet.

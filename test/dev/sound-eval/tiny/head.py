@@ -66,7 +66,12 @@ def train(folder, out):
 def evaluate(folder, stress, stream, which):
     cache = load(folder, "eval")
     tiny.STREAM_WINDOW = 2.0
-    if which == "zeroshot":
+    if which == "probs":  # extract.py with FT_WEIGHTS: the cache already holds our 5 class probabilities
+        def prob_fn(path):
+            entry = cache.get(str(path))
+            return None if entry is None else entry[1].astype(np.float32)
+        thresholds = (0.5, 0.8, 0.95)
+    elif which == "zeroshot":
         def prob_fn(path):
             entry = cache.get(str(path))
             if entry is None:
