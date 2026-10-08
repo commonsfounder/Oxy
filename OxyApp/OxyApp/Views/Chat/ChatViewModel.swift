@@ -737,6 +737,20 @@ final class ChatViewModel {
         sendMessage(userId: userId, retryingUserMessageID: lastFailedUserMessageID)
     }
 
+    /// A small JPEG kept with the sent turn so the photo shows in the chat. Nil when the bytes
+    /// are not a decodable image (e.g. HEIC the system cannot decode).
+    static func thumbnailJPEG(from data: Data, maxDimension: CGFloat = 480) -> Data? {
+        guard let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
+        let scale = min(1, maxDimension / max(image.size.width, image.size.height))
+        let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return resized.jpegData(compressionQuality: 0.6)
+    }
+
     func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String, isImage: Bool = true) {
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = typed.isEmpty
@@ -753,8 +767,9 @@ final class ChatViewModel {
         activitySteps = [ActivityStep(title: isImage ? "Looking at image" : "Reading file", state: .active)]
         networkError = nil
 
-        let attachmentTag = isImage ? "[Image attached]" : "[File attached: \(fileName)]"
-        let userMessage = Message(role: .user, content: "\(text)\n\(attachmentTag)")
+        let thumbnail = isImage ? Self.thumbnailJPEG(from: imageData) : nil
+        let content = isImage ? text : "\(text)\n[File attached: \(fileName)]"
+        let userMessage = Message(role: .user, content: content, attachmentImage: thumbnail)
         messages.append(userMessage)
         activeTurnUserMessageID = userMessage.id
 
@@ -780,6 +795,7 @@ final class ChatViewModel {
                     imageData: imageData,
                     fileName: fileName,
                     mimeType: mimeType,
+                    thumbnail: thumbnail,
                     chatStartedAt: activeChatStartedAt,
                     settings: settings
                 )
@@ -850,13 +866,15 @@ final class ChatViewModel {
     private func messages(from entries: [HistoryEntry]) -> [Message] {
         entries.compactMap { entry -> Message? in
             guard let role = Message.Role(rawValue: entry.role) else { return nil }
+            let split = role == .user ? AttachmentTag.splitImageTag(entry.content) : (text: entry.content, hadTag: false)
             return Message(
                 dbId: entry.id,
                 role: role,
-                content: entry.content,
+                content: split.text,
                 timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
                 actions: entry.actions ?? [],
-                sources: entry.sources ?? []
+                sources: entry.sources ?? [],
+                attachmentImage: role == .user ? AttachmentTag.decodeDataURL(entry.image) : nil
             )
         }
     }

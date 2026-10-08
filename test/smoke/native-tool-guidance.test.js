@@ -44,7 +44,9 @@ test('the static prompt shrank by roughly the size of the removed catalogue', ()
   // wired into the prompt.
   const removedBlockSize = actionPromptBlock().length;
   assert.ok(removedBlockSize > 25000, 'sanity: the catalogue itself should still be roughly its known size');
-  assert.ok(CORE_SYSTEM_PROMPT.length < 20000, `static prompt is ${CORE_SYSTEM_PROMPT.length} chars — the catalogue should be gone, not just shrunk`);
+  // Ceiling is a guard against the ~25k catalogue returning, not a budget for prose; it was 20000
+  // until the attachments/lookup fixes took the prompt from 19.9k to 21.5k.
+  assert.ok(CORE_SYSTEM_PROMPT.length < 23000, `static prompt is ${CORE_SYSTEM_PROMPT.length} chars — the catalogue should be gone, not just shrunk`);
 });
 
 test('the personality block itself is untouched by this phase', () => {

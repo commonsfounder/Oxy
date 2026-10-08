@@ -1,4 +1,4 @@
-// Gemini-powered day-by-day itinerary generation + natural language modification.
+// LLM-powered day-by-day itinerary generation + natural language modification.
 // Uses the FAST_MODEL for generation; does NOT hallucinate bookings or prices —
 // all cost estimates are labelled approximate, and live results are passed in.
 

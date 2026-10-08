@@ -114,7 +114,7 @@ async function runAgentLoop({
   dynamicSystemPrompt,
   baseHistory = [],
   useSearch = false,
-  modelName = PRIMARY_CHAT_MODEL || 'gemini-3-flash-preview',
+  modelName = PRIMARY_CHAT_MODEL || require('./model-routing').defaultModelForProvider('openai'),
   provider = null,
   maxIterations = 6,
   context = {},

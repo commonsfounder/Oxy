@@ -119,7 +119,7 @@ struct ChatService {
         )
     }
 
-    /// Polish a raw voice transcript through Gemini — removes filler words,
+    /// Polish a raw voice transcript through the chat model — removes filler words,
     /// fixes grammar, preserves intent.  Falls back to the original text on error.
     func polishTranscript(userId: String, transcript: String) async -> String {
         do {
@@ -147,6 +147,7 @@ struct ChatService {
         imageData: Data,
         fileName: String,
         mimeType: String,
+        thumbnail: Data? = nil,
         chatStartedAt: String? = nil,
         settings: OxySettings? = nil
     ) async throws -> ImageChatResponse {
@@ -154,6 +155,9 @@ struct ChatService {
             "userId": userId,
             "message": message
         ]
+        if let thumbnail {
+            fields["thumbnail"] = "data:image/jpeg;base64,\(thumbnail.base64EncodedString())"
+        }
         if let chatStartedAt {
             fields["chatStartedAt"] = chatStartedAt
         }

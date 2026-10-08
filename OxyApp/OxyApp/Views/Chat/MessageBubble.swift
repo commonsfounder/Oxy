@@ -135,6 +135,14 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 6) {
+            if isUser, let data = message.attachmentImage, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 220, height: 220 * min(max(uiImage.size.height / max(uiImage.size.width, 1), 0.6), 1.4))
+                    .clipShape(bubbleShape)
+                    .accessibilityLabel("Photo you sent")
+            }
             // Message content
             if !message.content.isEmpty && uberAction == nil {
                 if isUser {

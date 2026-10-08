@@ -11,8 +11,6 @@ test('getBrainProvider defaults to openai and is case-insensitive', () => {
   const saved = process.env.OXY_BRAIN_PROVIDER;
   delete process.env.OXY_BRAIN_PROVIDER;
   assert.equal(getBrainProvider(), 'openai');
-  process.env.OXY_BRAIN_PROVIDER = 'GEMINI';
-  assert.equal(getBrainProvider(), 'gemini');
   process.env.OXY_BRAIN_PROVIDER = 'GROQ';
   assert.equal(getBrainProvider(), 'groq');
   if (saved === undefined) delete process.env.OXY_BRAIN_PROVIDER;

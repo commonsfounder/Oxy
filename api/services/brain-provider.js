@@ -1,22 +1,12 @@
 'use strict';
-// Provider seam for the chat brain: streamBrain/generateBrain return @google/genai-shaped
-// results whatever OXY_BRAIN_PROVIDER is set to. No cross-provider fallback; unknown throws.
+// Provider seam for the chat brain: streamBrain/generateBrain return results in the
+// contents/parts shape the rest of the codebase uses, whatever OXY_BRAIN_PROVIDER is set to.
+// No cross-provider fallback; unknown throws.
 
-const { GoogleGenAI } = require('@google/genai');
 const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
 
 // Minimum output cap so short-answer callers still get visible text.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
-
-let _gemini = null;
-function geminiClient() {
-  if (!_gemini) _gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
-  return _gemini;
-}
-
-function geminiConfigured() {
-  return Boolean(String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim());
-}
 
 function getBrainProvider() {
   return (process.env.OXY_BRAIN_PROVIDER || 'openai').toLowerCase();
@@ -471,7 +461,6 @@ function streamBrain({ provider, model, contents, config }) {
   if (p === 'groq') return groqStream({ model: resolvedModel, contents, config });
   if (p === 'openai' || p === 'local') return compatibleStream({ provider: p, model: resolvedModel, contents, config });
   if (p === 'anthropic') return anthropicStream({ model: resolvedModel, contents, config });
-  if (p === 'gemini') return geminiClient().models.generateContentStream({ model: resolvedModel, contents, config });
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
@@ -481,15 +470,11 @@ async function generateBrain({ provider, model, contents, config }) {
   const resolvedModel = resolveBrainModel(p, model);
   if (OPENAI_COMPATIBLE.has(p)) return compatibleGenerate({ provider: p, model: resolvedModel, contents, config });
   if (p === 'anthropic') return anthropicGenerate({ model: resolvedModel, contents, config });
-  if (p === 'gemini') {
-    const res = await geminiClient().models.generateContent({ model: resolvedModel, contents, config });
-    return { text: res.text || '' };
-  }
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
-// Web-grounded answer for `web_search`: inline googleSearch on Gemini, a separate
-// Responses-API call on OpenAI. Returns '' when nothing usable came back.
+// Web-grounded answer for `web_search`: a separate Responses-API call on OpenAI. Other
+// providers cannot ground, so they return ''.
 async function webSearchBrain({ model, prompt, provider }) {
   const p = provider || getBrainProvider();
   if (p === 'openai') {
@@ -502,16 +487,7 @@ async function webSearchBrain({ model, prompt, provider }) {
     const text = responsesText(await res.json()).trim();
     return text;
   }
-  // Anthropic/Groq/local cannot ground, so this one lookup borrows Gemini — with a real
-  // Gemini model id, never the calling provider's, which 404s.
-  if (!geminiConfigured()) return '';
-  const groundingModel = p === 'gemini' ? model : (process.env.OXY_GEMINI_MODEL || 'gemini-2.5-flash');
-  const res = await geminiClient().models.generateContent({
-    model: groundingModel,
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config: { tools: [{ googleSearch: {} }] }
-  });
-  return (res.text || '').trim();
+  return '';
 }
 
 // Gemini declares schema types in uppercase ('OBJECT'/'STRING'); OpenAI expects standard
@@ -636,12 +612,7 @@ async function callToolsBrain({ provider, model, contents, config }) {
       tools: geminiToolsToAnthropic(config?.tools)
     });
   }
-  if (p === 'gemini') {
-    return geminiClient().models.generateContent({ model: resolvedModel, contents, config });
-  }
-  // Anything left must speak the OpenAI tool-calling shape. Falling through to the Gemini
-  // SDK here used to send e.g. a Groq model id to generativelanguage.googleapis.com — a
-  // silent cross-provider hop that contradicts this module's no-fallback contract.
+  // Anything left must speak the OpenAI tool-calling shape.
   if (!OPENAI_COMPATIBLE.has(p)) throw new Error(`Unknown brain provider: ${p}`);
 
   if (p === 'openai') {

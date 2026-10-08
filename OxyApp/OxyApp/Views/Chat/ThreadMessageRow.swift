@@ -430,14 +430,15 @@ struct ShimmerText: View {
     }
 }
 
-/// Shown while Adam works on a reply. Only a real step is ever named; otherwise it is just the ping.
+/// Shown while Adam works on a reply, as the dot at the left of the step being worked on, with no
+/// bubble behind it. Only a real step is ever named; otherwise it is just the dot.
 struct WorkingBubble: View {
     var label: String? = nil
 
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-                AdamActivityMark(state: .working, size: 28)
+                AdamActivityMark(state: .working, size: 22)
                 if let label {
                     ShimmerText(text: label)
                         .lineLimit(1)
@@ -446,10 +447,7 @@ struct WorkingBubble: View {
                 }
             }
             .animation(.appSpring, value: label)
-            .padding(.leading, 12)
-            .padding(.trailing, label == nil ? 12 : 16)
             .padding(.vertical, 9)
-            .background(Capsule().fill(Color.appReceivedBubble))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, AppSpacing.chatMargin)
