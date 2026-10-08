@@ -488,7 +488,7 @@ function requireSession(userId) {
 // Open a URL. Plain navigation — no search-term derivation, no site fast-paths, no goal
 // parsing. `objective` is carried only so a workflow checkpoint can say what the browsing
 // was for; nothing branches on it.
-async function open(userId, { url, site = '', searchFor = '', objective = '', workflowId = null } = {}) {
+async function open(userId, { url, site = '', searchFor = '', objective = '', workflowId = null, agentTaskId = null } = {}) {
   // Resolve a destination from what is already known about the host, so the agent does not
   // have to guess a search URL or land on a homepage and hunt for the search box. Site
   // knowledge is DATA here: when it has nothing, the given url is used unchanged.
@@ -549,7 +549,7 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
   await settle(page, 100);
 
   const session = createSession(userId, {
-    browser, context, page, release, site: host, goal: objective, workflowId,
+    browser, context, page, release, site: host, goal: objective, workflowId, agentTaskId,
     history: [], requestedUrl: url, usedStoredSession: Boolean(storageState),
   });
   const observation = await observePage(page);

@@ -52,6 +52,24 @@ test('display receiver page is public while the app display list remains session
   assert.equal(appList.status, 401);
 });
 
+test('generated interface replies cannot confirm or cancel an existing approval', async () => {
+  const token = createSessionToken('u1');
+  for (const message of ['For options: yes please', 'For dates: notes: go ahead', 'For checklist: cancel it']) {
+    const result = await request('/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ userId: 'u1', message, interactionOrigin: 'task_interface' })
+    });
+    assert.equal(result.status, 400);
+    assert.equal(JSON.parse(result.body).code, 'needs_phone');
+  }
+  const result = await request('/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ userId: 'u1', message: 'Find a morning appointment', interactionOrigin: 'task_interface', approvalId: 'a1', approvalTaskId: 't1' })
+  });
+  assert.equal(result.status, 400);
+  assert.match(result.body, /review controls/);
+});
+
 test('public pairing errors are bounded and do not expose raw server exceptions', async () => {
   const result = await request('/display/pair', {
     method: 'POST',

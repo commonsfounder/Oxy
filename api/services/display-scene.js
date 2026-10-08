@@ -52,7 +52,7 @@ svg{max-width:100%;height:auto}
 
 // The only way a scene reaches Adam: a tap asks a question or makes a request, exactly as if it
 // were typed. It carries no authority; approvals still happen where the person can see them.
-const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim().slice(0,200);if(!t)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}function say(t){t=String(t||'').trim().slice(0,400);if(t&&!(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.adam))window.parent.postMessage({adamSay:t},'*')}window.adam={ask:send,say:say};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
+const BRIDGE_JS = "(function(){function send(t){t=String(t||'').trim();if(!t||t.length>2000)return;var w=window.webkit;if(w&&w.messageHandlers&&w.messageHandlers.adam){w.messageHandlers.adam.postMessage(t)}else{window.parent.postMessage({adamAsk:t},'*')}}function say(t){t=String(t||'').trim().slice(0,400);if(t&&!(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.adam))window.parent.postMessage({adamSay:t},'*')}window.adam={ask:send,say:say};document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-ask]');if(el)send(el.getAttribute('data-ask'))})})();";
 
 module.exports = {
   CSP,

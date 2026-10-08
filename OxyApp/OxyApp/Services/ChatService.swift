@@ -15,12 +15,14 @@ struct ChatService {
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
         nativeHints: [String: Any]? = nil,
-        incognito: Bool = false
+        incognito: Bool = false,
+        interfaceRequest: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
             "userId": userId,
             "message": message
         ]
+        if interfaceRequest { body["interactionOrigin"] = "task_interface" }
 
         if incognito {
             body["incognito"] = true

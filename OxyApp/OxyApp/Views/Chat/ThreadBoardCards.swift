@@ -215,14 +215,18 @@ struct ThreadBoardCards: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             ForEach(model.working.prefix(3)) { item in
-                workingChip(item)
-                    .matchedGeometryEffect(id: handoffID(item), in: handoff)
-                    .transition(.opacity)
+                VStack(alignment: .leading, spacing: 8) {
+                    workingChip(item)
+                        .matchedGeometryEffect(id: handoffID(item), in: handoff)
+                    if let taskID = item.taskId { LiveWorkPreview(taskID: taskID) }
+                }.transition(.opacity)
             }
             ForEach(model.needsYou.prefix(3)) { item in
-                needsYouCard(item)
-                    .matchedGeometryEffect(id: handoffID(item), in: handoff)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                VStack(alignment: .leading, spacing: 8) {
+                    needsYouCard(item)
+                        .matchedGeometryEffect(id: handoffID(item), in: handoff)
+                    if let taskID = item.taskId { LiveWorkPreview(taskID: taskID) }
+                }.transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             if let message = model.errorMessage {
                 Text(message)

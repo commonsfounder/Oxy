@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AB1000000000000000000002 /* AgentEnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000002 /* AgentEnvironmentView.swift */; };
 		AB1000000000000000000F01 /* CornerReveal.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000F01 /* CornerReveal.swift */; };
+		AB1000000000000000000001 /* TaskInterfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000001 /* TaskInterfaceView.swift */; };
 		A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F08 /* WorkflowTimelineView.swift */; };
 		A10000010000000000000F14 /* YourHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F14 /* YourHomeView.swift */; };
 		A10000010000000000000F16 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F16 /* SceneView.swift */; };
@@ -97,7 +99,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		AB2000000000000000000002 /* AgentEnvironmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEnvironmentView.swift; sourceTree = "<group>"; };
 		AB2000000000000000000F01 /* CornerReveal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CornerReveal.swift; sourceTree = "<group>"; };
+		AB2000000000000000000001 /* TaskInterfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskInterfaceView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F08 /* WorkflowTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowTimelineView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F14 /* YourHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourHomeView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F16 /* SceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneView.swift; sourceTree = "<group>"; };
@@ -321,6 +325,8 @@
 				A20000010000000000000047 /* TurnReceiptRow.swift */,
 				A20000010000000000000F10 /* ThreadBoardCards.swift */,
 				A20000010000000000000F16 /* SceneView.swift */,
+				AB2000000000000000000001 /* TaskInterfaceView.swift */,
+				AB2000000000000000000002 /* AgentEnvironmentView.swift */,
 				AB2000000000000000000F01 /* CornerReveal.swift */,
 				A20000010000000000000F90 /* PlaceResultsCard.swift */,
 				A20000010000000000000F91 /* TravelOptionsCard.swift */,
@@ -628,6 +634,8 @@
 				A10000010000000000000047 /* TurnReceiptRow.swift in Sources */,
 				A10000010000000000000F10 /* ThreadBoardCards.swift in Sources */,
 				A10000010000000000000F16 /* SceneView.swift in Sources */,
+				AB1000000000000000000001 /* TaskInterfaceView.swift in Sources */,
+				AB1000000000000000000002 /* AgentEnvironmentView.swift in Sources */,
 				AB1000000000000000000F01 /* CornerReveal.swift in Sources */,
 				A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */,
 				A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */,

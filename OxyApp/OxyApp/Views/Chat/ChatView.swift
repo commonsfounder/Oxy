@@ -143,6 +143,9 @@ struct ChatView: View {
                 onRetryFailedTurn: {
                     viewModel.retryLastFailedMessage(userId: appState.userId)
                 },
+                onSceneRequest: { request in
+                    viewModel.sendInterfaceRequest(request, userId: appState.userId)
+                },
                 reaction: adamReaction(on: message) ?? ReactionStore.shared.reaction(for: message)
             )
         }

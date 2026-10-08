@@ -20,6 +20,9 @@ const { getActionContract } = require('../../api/action-contracts');
 const sceneRuntime = require('../../api/services/scene-runtime');
 
 const CASES = [
+  { id: 'comparison', interactive: true, say: 'In this chat, help me choose between the 10:14 train (£54, 2h08, direct) and the 11:14 (£38, 2h40, one change). Give me an interface I can tap to explore either option.' },
+  { id: 'packing', interactive: true, say: 'Give me a checkable packing list in this chat: passport, charger, medication and coat.' },
+  { id: 'appointment', interactive: true, say: 'Help me find an appointment. You do not know my preferred day, time or budget. Let me enter these details together in this chat before searching.' },
   { id: 'radiator', say: "Explain how to bleed a radiator. I'll be watching the screen from across the room while I do it." },
   { id: 'trains', say: 'Compare the 10:14 (£54, 2h08, direct) and the 11:14 (£38, 2h40, one change) to Manchester so I can pick.' },
   { id: 'dinner', say: "Plan the timings for a roast for six people eating at 7pm: chicken (2h), potatoes (1h15), veg (20 min), gravy." }
@@ -31,13 +34,15 @@ async function main() {
   const contract = getActionContract('show_scene');
   const route = resolveModelRoute({});
   const system = [
-    'You are Adam. When someone wants something to look at or tap through, you write one small web page.',
+    'You are Adam. Choose the interface that helps the person complete the current task in this chat.',
     `Tool: show_scene. ${contract.guidance}`,
     `scene: ${contract.paramHints.scene}`,
     'Reply with ONLY the JSON object for scene. No markdown fences, no commentary.'
   ].join('\n\n');
   console.log(`# scene eval · ${route.provider}/${route.model}`);
-  for (const c of CASES) {
+  let failures = 0;
+  const selected = process.argv.slice(3);
+  for (const c of CASES.filter(c => !selected.length || selected.includes(c.id))) {
     const contents = [{ role: 'user', parts: [{ text: c.say }] }];
     let html = '';
     let verdict = 'accepted';
@@ -51,7 +56,12 @@ async function main() {
       });
       html = String(res.text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
       try {
-        doc = sceneRuntime.buildSpecDocument(html);
+        const spec = require('../../api/services/scene-spec').validateScene(html);
+        if (c.interactive && spec.mode !== 'interface') throw new Error('This is an interactive task inside chat; use mode interface, not a narrated explainer.');
+        const result = await require('../../api/actions/display').handlers.show_scene({ params: { title: spec.title, scene: spec } });
+        if (!result.success) throw new Error(result.error);
+        doc = result.scene.srcdoc;
+        fs.writeFileSync(path.join(out, c.id + '.action.json'), JSON.stringify([{ action: 'show_scene', ...result }], null, 2));
         verdict = attempt ? `accepted after ${attempt} retry` : 'accepted';
         break;
       } catch (e) {
@@ -62,7 +72,9 @@ async function main() {
     if (doc) fs.writeFileSync(path.join(out, c.id + '.html'), doc);
     fs.writeFileSync(path.join(out, c.id + '.raw.json'), html);
     console.log(`${c.id}: ${html.length} chars, ${verdict}`);
+    if (!doc) failures++;
   }
+  if (failures) process.exitCode = 1;
 }
 
 main().catch(err => { console.error('eval failed:', err.message); process.exit(1); });

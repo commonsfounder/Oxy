@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the wheel can open. The first four, in the saved order, sit on the arc; the rest are a spin away.
 enum ThreadMenuChoice: String, CaseIterable, Identifiable {
-    case activity, home, memory, settings, privateChat, apps, payments, logins, displays
+    case activity, home, memory, settings, privateChat, apps, payments, logins, displays, environment
 
     var id: String { rawValue }
 
@@ -17,6 +17,7 @@ enum ThreadMenuChoice: String, CaseIterable, Identifiable {
         case .payments: return "Payments"
         case .logins: return "Saved logins"
         case .displays: return "Displays"
+        case .environment: return "Workspace"
         }
     }
 
@@ -53,6 +54,7 @@ private struct WheelGlyph: View {
             case .payments: AppIcon("card", size: size)
             case .logins: AppIcon("person-check", size: size)
             case .displays: AppIcon("photo", size: size)
+            case .environment: AppIcon("photo", size: size)
             }
         }
     }

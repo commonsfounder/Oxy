@@ -41,6 +41,11 @@ function optStr(value, max, where) {
   return value == null || value === '' ? undefined : str(value, max, where);
 }
 
+function ask(value, where) {
+  try { return require('./display-ask').validateDisplayAsk(str(value, 200, where)); }
+  catch (error) { throw specError(`${where}: ${error.message}`); }
+}
+
 function num(value, min, max, where, fallback) {
   if (value == null && fallback !== undefined) return fallback;
   const n = Number(value);
@@ -91,7 +96,7 @@ function block(raw, where) {
     case 'text':
       return { ...base, text: str(raw.text, 200, `${where}.text`), style: ['h', 't', 'sub'].includes(raw.style) ? raw.style : 't' };
     case 'number':
-      return { ...base, value: num(raw.value, -1e9, 1e9, `${where}.value`), unit: optStr(raw.unit, 16, `${where}.unit`), label: optStr(raw.label, 40, `${where}.label`), decimals: num(raw.decimals, 0, 2, `${where}.decimals`, 0) };
+      return { ...base, value: num(raw.value, -1e9, 1e9, `${where}.value`), unit: optStr(raw.unit, 16, `${where}.unit`), label: optStr(raw.label, 40, `${where}.label`), decimals: Math.round(num(raw.decimals, 0, 2, `${where}.decimals`, 0)) };
     case 'bars': {
       if (!Array.isArray(raw.items) || !raw.items.length || raw.items.length > 8) throw specError(`${where}.items needs 1 to 8 items.`);
       return { ...base, unit: optStr(raw.unit, 12, `${where}.unit`), items: raw.items.map((item, k) => ({ label: str(item?.label, 30, `${where}.items[${k}].label`), value: num(item?.value, 0, 1e9, `${where}.items[${k}].value`) })) };
@@ -125,12 +130,45 @@ function block(raw, where) {
             label: str(fact?.label, 24, `${where}.items[${k}].facts[${j}].label`),
             value: str(fact?.value, 30, `${where}.items[${k}].facts[${j}].value`)
           })),
-          ask: optStr(item?.ask, 120, `${where}.items[${k}].ask`)
+          ask: item?.ask == null ? undefined : ask(item.ask, `${where}.items[${k}].ask`)
         }))
       };
     }
+    case 'choices': {
+      if (!Array.isArray(raw.items) || !raw.items.length || raw.items.length > 6) throw specError(`${where}.items needs 1 to 6 choices.`);
+      return { ...base, items: raw.items.map((item, k) => ({
+        title: str(item?.title, 60, `${where}.items[${k}].title`),
+        detail: optStr(item?.detail, 160, `${where}.items[${k}].detail`),
+        ask: ask(item?.ask, `${where}.items[${k}].ask`)
+      })) };
+    }
+    case 'table': {
+      if (!Array.isArray(raw.columns) || raw.columns.length < 2 || raw.columns.length > 5) throw specError(`${where}.columns needs 2 to 5 headings.`);
+      if (!Array.isArray(raw.rows) || !raw.rows.length || raw.rows.length > 10) throw specError(`${where}.rows needs 1 to 10 rows.`);
+      const columns = raw.columns.map((label, k) => str(label, 40, `${where}.columns[${k}]`));
+      const rows = raw.rows.map((row, k) => {
+        if (!Array.isArray(row) || row.length !== columns.length) throw specError(`${where}.rows[${k}] must match the headings.`);
+        return row.map((cell, j) => str(cell, 100, `${where}.rows[${k}][${j}]`));
+      });
+      return { ...base, columns, rows };
+    }
+    case 'form': {
+      if (!Array.isArray(raw.fields) || !raw.fields.length || raw.fields.length > 6) throw specError(`${where}.fields needs 1 to 6 fields.`);
+      const ids = new Set();
+      const fields = raw.fields.map((field, k) => {
+        const at = `${where}.fields[${k}]`;
+        if (!ID.test(field?.id || '') || ids.has(field.id)) throw specError(`${at} needs a unique lowercase id.`);
+        ids.add(field.id);
+        const type = field.type || 'text';
+        if (!['text', 'number', 'multiline'].includes(type)) throw specError(`${at}.type must be text, number, or multiline. Secrets use the existing protected flows.`);
+        if (/password|passcode|\bpin\b|\bcvv\b|\bcvc\b|card.?number|credit.?card|bank.?account|sort.?code|api.?key|access.?token|secret/i.test(`${field.id} ${field.label}`)) throw specError(`${at}: secrets use the existing protected flows.`);
+        return { id: field.id, label: str(field.label, 60, `${at}.label`), type, required: field.required === true,
+          placeholder: optStr(field.placeholder, 80, `${at}.placeholder`) };
+      });
+      return { ...base, fields, submit: str(raw.submit, 40, `${where}.submit`), ask: ask(raw.ask, `${where}.ask`) };
+    }
     default:
-      throw specError(`${where} has an unknown type "${raw.type}". Panel types: text, number, bars, timeline, timer, steps, compare.`);
+      throw specError(`${where} has an unknown type "${raw.type}". Panel types: text, number, bars, timeline, timer, steps, compare, choices, table, form.`);
   }
 }
 
@@ -174,6 +212,8 @@ function validateScene(raw) {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw specError('The scene must be a JSON object.');
   const spec = { title: str(raw.title, 80, 'title') };
+  if (raw.mode != null && raw.mode !== 'interface' && raw.mode !== 'explainer') throw specError('mode must be interface or explainer.');
+  if (raw.mode === 'interface') spec.mode = 'interface';
   const types = new Map();
 
   const things = raw.visual?.things;
@@ -205,10 +245,17 @@ function validateScene(raw) {
   }
   if (!spec.visual && !spec.panel) throw specError('A scene needs a visual, a panel, or both.');
 
-  if (!Array.isArray(raw.beats) || !raw.beats.length || raw.beats.length > MAX_BEATS) {
+  if (spec.mode === 'interface') {
+    if (spec.visual || !spec.panel?.length || raw.beats != null) throw specError('An interface needs panel blocks, without visual or beats.');
+    if (spec.panel.some(b => b.type === 'timer')) throw specError('An interface cannot start a timer; ask Adam to create a real reminder instead.');
+  } else if (spec.panel?.some(b => ['choices', 'table', 'form'].includes(b.type))) {
+    throw specError('choices, table and form need mode: interface.');
+  }
+
+  if (spec.mode !== 'interface' && (!Array.isArray(raw.beats) || !raw.beats.length || raw.beats.length > MAX_BEATS)) {
     throw specError(`beats needs 1 to ${MAX_BEATS} beats.`);
   }
-  spec.beats = raw.beats.map((beat, k) => {
+  if (spec.mode !== 'interface') spec.beats = raw.beats.map((beat, k) => {
     const where = `beats[${k}]`;
     const say = optStr(beat?.say, 400, `${where}.say`);
     if (say && say.split(' ').length > MAX_SAY_WORDS) throw specError(`${where}.say is too long (keep it under ${MAX_SAY_WORDS} words).`);
@@ -221,7 +268,7 @@ function validateScene(raw) {
   });
   if (raw.asks != null) {
     if (!Array.isArray(raw.asks)) throw specError('asks must be a list of short follow-up requests.');
-    spec.asks = raw.asks.slice(0, 3).map((a, k) => str(a, 80, `asks[${k}]`));
+    spec.asks = raw.asks.slice(0, 3).map((a, k) => ask(a, `asks[${k}]`));
   }
   return spec;
 }

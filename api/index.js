@@ -7164,6 +7164,14 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'message is required.' });
     }
 
+    if (req.body.interactionOrigin === 'task_interface') {
+      try { require('./services/display-ask').validateDisplayAsk(message); }
+      catch (error) { return res.status(400).json({ error: error.message, code: error.code }); }
+      if (req.body.approvalId !== undefined || req.body.approvalTaskId !== undefined) {
+        return res.status(400).json({ error: 'Use the review controls to answer an approval.' });
+      }
+    }
+
     // Wake the user's sandbox browser (if they have one) while the model gets going.
     try { require('./services/browser-sandbox').prewarm(userId); } catch { /* never blocks a chat */ }
 
@@ -9347,6 +9355,14 @@ app.delete('/agent/scheduled-tasks/:id', requireSessionAuth, async (req, res) =>
   }
 });
 
+app.get('/agent/environment', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.json(await require('./services/environment-view').getEnvironmentView(userId));
+  } catch { res.status(503).json({ error: 'The live view is unavailable.' }); }
+});
+
 app.post('/agent/browser/live', requireSessionAuth, (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -9357,6 +9373,16 @@ app.post('/agent/browser/live', requireSessionAuth, (req, res) => {
 });
 
 app.get('/agent/browser/live/*path', (req, res) => require('./services/browser-live-view').proxyHttp(req, res));
+
+app.get('/agent/tasks/:id/environment', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    res.json(await require('./services/environment-view').getEnvironmentView(userId, { taskId: task.id }));
+  } catch { res.status(503).json({ error: 'The live view is unavailable.' }); }
+});
 
 app.get('/agent/tasks/:id/runtime', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);

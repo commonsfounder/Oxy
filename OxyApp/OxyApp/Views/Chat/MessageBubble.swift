@@ -13,6 +13,7 @@ struct MessageBubble: View {
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
     var onRetryFailedTurn: (() -> Void)? = nil
+    var onSceneRequest: ((String) -> Void)? = nil
     var reaction: String? = nil
 
     @State private var showReauthSheet = false
@@ -62,7 +63,7 @@ struct MessageBubble: View {
         completedActions.filter { Self.memoryActionNames.contains($0.action) && $0.isCompleted }
     }
     private var receiptActions: [ActionResult] {
-        completedActions.filter { !Self.isRichAction($0) && !Self.memoryActionNames.contains($0.action) }
+        completedActions.filter { !Self.isRichAction($0) && !Self.memoryActionNames.contains($0.action) && !($0.isCompleted && $0.scene != nil) }
     }
     private var browserRecoveryAction: ActionResult? {
         completedActions.first {
@@ -200,7 +201,7 @@ struct MessageBubble: View {
             }
 
             ForEach(Array(sceneActions.enumerated()), id: \.offset) { _, item in
-                SceneCard(scene: item.scene, summary: item.summary)
+                SceneCard(scene: item.scene, summary: item.summary, onAsk: onSceneRequest)
                     .padding(.top, message.content.isEmpty ? 0 : 8)
             }
 

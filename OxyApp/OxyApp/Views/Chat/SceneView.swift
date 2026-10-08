@@ -7,56 +7,64 @@ import WebKit
 struct SceneContent: Codable, Equatable {
     let title: String
     let srcdoc: String
+    var spec: TaskInterfaceSpec? = nil
 }
 
 struct SceneCard: View {
     let scene: SceneContent
     let summary: String?
+    var onAsk: ((String) -> Void)? = nil
     @State private var open = false
 
     var body: some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            open = true
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(scene.title)
-                        .font(.appBody(15, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                        .multilineTextAlignment(.leading)
-                    if let summary, !summary.isEmpty, summary != scene.title {
-                        Text(summary)
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 8)
-                Image("ic-arrow-up-right")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 16, height: 16)
-                    .foregroundStyle(Color.appInk)
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
+        if let spec = scene.spec, spec.mode == "interface" {
+            TaskInterfaceView(spec: spec) { request in
+                if let onAsk { onAsk(request) } else { AskAdam.draft(request) }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.appScale(0.98))
-        .accessibilityLabel(scene.title)
-        .accessibilityHint("Opens the page")
-        .fullScreenCover(isPresented: $open) {
-            SceneSheet(scene: scene) { text in
-                open = false
-                AskAdam.draft(text)
-            } onClose: { open = false }
+        } else {
+            Button {
+                HapticManager.shared.impact(.light)
+                open = true
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(scene.title)
+                            .font(.appBody(15, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                            .multilineTextAlignment(.leading)
+                        if let summary, !summary.isEmpty, summary != scene.title {
+                            Text(summary)
+                                .font(.appBody(13))
+                                .foregroundStyle(Color.appMuted)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Image("ic-arrow-up-right")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .foregroundStyle(Color.appInk)
+                        .frame(width: 34, height: 34)
+                        .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.appScale(0.98))
+            .accessibilityLabel(scene.title)
+            .accessibilityHint("Opens the page")
+            .fullScreenCover(isPresented: $open) {
+                SceneSheet(scene: scene) { text in
+                    open = false
+                    if let onAsk { onAsk(text) } else { AskAdam.draft(text) }
+                } onClose: { open = false }
+            }
         }
     }
 }
@@ -138,7 +146,7 @@ private struct SceneWebView: UIViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "adam", let text = message.body as? String else { return }
             let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !clean.isEmpty, clean.count <= 200 else { return }
+            guard !clean.isEmpty, clean.count <= 2000 else { return }
             DispatchQueue.main.async { self.onAsk(clean) }
         }
 

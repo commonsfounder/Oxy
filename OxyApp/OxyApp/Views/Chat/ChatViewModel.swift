@@ -33,6 +33,7 @@ private struct QueuedTurn {
     let text: String
     let messageID: UUID
     let userId: String
+    var interfaceRequest: Bool = false
 }
 
 @Observable
@@ -70,6 +71,7 @@ final class ChatViewModel {
     @ObservationIgnored private var lastFailedUserMessageID: UUID?
     @ObservationIgnored private var lastFailedAssistantMessageID: UUID?
     @ObservationIgnored private var queuedTurns: [QueuedTurn] = []
+    @ObservationIgnored private var interfaceTurnIDs: Set<UUID> = []
 
     // Sent instead of typed text to silently keep an in-progress browser/ordering task
     // moving — never shown as a chat bubble, must match BROWSER_TASK_CONTINUE in api/index.js.
@@ -138,7 +140,10 @@ final class ChatViewModel {
             if let path = ProcessInfo.processInfo.environment["OXY_DEBUG_SCENE_FILE"],
                let data = FileManager.default.contents(atPath: path),
                let actions = try? JSONDecoder().decode([ActionResult].self, from: data) {
-                messages.append(Message(dbId: "d6", role: .assistant, content: "Here are the four steps.", timestamp: now, actions: actions, sources: []))
+                messages = [
+                    Message(dbId: "preview-request", role: .user, content: ProcessInfo.processInfo.environment["OXY_DEBUG_SCENE_PROMPT"] ?? "Show me an interface for this task.", timestamp: now.addingTimeInterval(-30), actions: [], sources: []),
+                    Message(dbId: "preview-interface", role: .assistant, content: "Interface preview", timestamp: now, actions: actions, sources: [])
+                ]
             }
             if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKING"] == "1" {
                 isSending = true
@@ -240,13 +245,13 @@ final class ChatViewModel {
         sendMessage(userId: userId, retryingUserMessageID: nil)
     }
 
-    private func sendMessage(userId: String, retryingUserMessageID: UUID?) {
+    private func sendMessage(userId: String, retryingUserMessageID: UUID?, interfaceRequest: Bool = false) {
         lastUserId = userId
         recoveryTask?.cancel()
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if isSending, retryingUserMessageID == nil {
-            enqueueTurn(text, userId: userId)
+            enqueueTurn(text, userId: userId, interfaceRequest: interfaceRequest)
             return
         }
         if isViewingHistorySnapshot {
@@ -275,6 +280,8 @@ final class ChatViewModel {
             userMessageID = userMessage.id
         }
         activeTurnUserMessageID = userMessageID
+        if interfaceRequest { interfaceTurnIDs.insert(userMessageID) }
+        let isInterfaceRequest = interfaceTurnIDs.contains(userMessageID)
         // Only drop the previous partial-failure bubble when this send is actually
         // retrying that same turn — an unrelated new message shouldn't erase a
         // still-visible (if incomplete) reply from an earlier failed turn.
@@ -387,7 +394,8 @@ final class ChatViewModel {
                 settings: settings,
                 location: location,
                 nativeHints: nativeHints,
-                incognito: incognito
+                incognito: incognito,
+                interfaceRequest: isInterfaceRequest
             )
             await MainActor.run { HapticManager.shared.impact(.light) }
             var fullText = ""
@@ -542,6 +550,13 @@ final class ChatViewModel {
     func sendCommand(_ command: String, userId: String) {
         inputText = command
         sendMessage(userId: userId)
+    }
+
+    func sendInterfaceRequest(_ request: String, userId: String) {
+        let draft = inputText
+        inputText = request
+        sendMessage(userId: userId, retryingUserMessageID: nil, interfaceRequest: true)
+        inputText = draft
     }
 
     /// Execute a voice command silently — runs through local actions + API
@@ -957,11 +972,11 @@ final class ChatViewModel {
         messages.removeAll { $0.id == id }
     }
 
-    private func enqueueTurn(_ text: String, userId: String) {
+    private func enqueueTurn(_ text: String, userId: String, interfaceRequest: Bool = false) {
         inputText = ""
         let queued = Message(role: .user, content: text, queuedForActiveTask: true)
         messages.append(queued)
-        queuedTurns.append(QueuedTurn(text: text, messageID: queued.id, userId: userId))
+        queuedTurns.append(QueuedTurn(text: text, messageID: queued.id, userId: userId, interfaceRequest: interfaceRequest))
         markChatActivity(for: userId)
     }
 
@@ -971,8 +986,10 @@ final class ChatViewModel {
         if let index = messages.firstIndex(where: { $0.id == next.messageID }) {
             messages[index].queuedForActiveTask = false
         }
+        let draft = inputText
         inputText = next.text
-        sendMessage(userId: next.userId, retryingUserMessageID: next.messageID)
+        sendMessage(userId: next.userId, retryingUserMessageID: next.messageID, interfaceRequest: next.interfaceRequest)
+        inputText = draft
     }
 
     private static func shouldFetchLocationText(_ lower: String) -> Bool {

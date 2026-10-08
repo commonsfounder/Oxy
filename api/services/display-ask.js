@@ -6,7 +6,7 @@
 
 const { isPendingConfirmMessage, isPendingCancelMessage } = require('./pending-review');
 
-const MAX_ASK = 200;
+const MAX_ASK = 2000;
 const MIN_GAP_MS = 3000;
 const lastAskAt = new Map();
 

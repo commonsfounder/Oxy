@@ -215,6 +215,15 @@ function jsonForScript(spec) {
 function buildSpecDocument(raw) {
   const spec = validateScene(raw);
   const title = spec.title.replace(/[<>&"]/g, '');
+  if (spec.mode === 'interface') {
+    const ui = require('./task-interface');
+    return '<!doctype html><html lang="en-GB"><head><meta charset="utf-8">'
+      + `<meta http-equiv="Content-Security-Policy" content="${displayScene.CSP}">`
+      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+      + `<title>${title}</title><style>${displayScene.KIT_CSS}${ui.CSS}</style></head><body>`
+      + `<script type="application/json" id="spec">${jsonForScript(spec)}</script>`
+      + `<script>${displayScene.BRIDGE_JS}</script><script>${ui.JS}</script></body></html>`;
+  }
   return '<!doctype html><html lang="en-GB"><head><meta charset="utf-8">'
     + `<meta http-equiv="Content-Security-Policy" content="${displayScene.CSP}">`
     + '<meta name="viewport" content="width=device-width,initial-scale=1">'

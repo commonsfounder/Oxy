@@ -178,6 +178,9 @@ struct ThreadMessageRow<Content: View>: View {
     @State private var frame: CGRect = .zero
 
     private var isUser: Bool { message.role == .user }
+    private var messageGestureMask: GestureMask {
+        message.actions.contains { $0.scene?.spec?.mode == "interface" } ? .subviews : .all
+    }
     private let trigger: CGFloat = 46
 
     var body: some View {
@@ -211,13 +214,15 @@ struct ThreadMessageRow<Content: View>: View {
                         crossed = false
                         withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) { dx = 0 }
                         if fire { onReply() }
-                    }
+                    },
+                including: messageGestureMask
             )
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.35).onEnded { _ in
                     HapticManager.shared.impact(.medium)
                     onHold(frame)
-                }
+                },
+                including: messageGestureMask
             )
             .accessibilityAction(named: "Reply") { onReply() }
     }

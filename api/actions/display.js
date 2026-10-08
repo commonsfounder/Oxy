@@ -45,8 +45,10 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
 async function showScene({ params }) {
   const title = String(params?.title || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Adam';
   let srcdoc;
+  let spec;
   try {
-    srcdoc = require('../services/scene-runtime').buildSpecDocument(params?.scene);
+    spec = require('../services/scene-spec').validateScene(params?.scene);
+    srcdoc = require('../services/scene-runtime').buildSpecDocument(spec);
   } catch (e) {
     return { success: false, outcome: 'failed', error: e.message };
   }
@@ -55,7 +57,7 @@ async function showScene({ params }) {
     outcome: 'completed',
     text: String(params?.body || title).replace(/\s+/g, ' ').trim().slice(0, 300),
     actionSummary: 'Made a page: ' + title,
-    scene: { title, srcdoc }
+    scene: { title, srcdoc, ...(spec.mode === 'interface' ? { spec } : {}) }
   };
 }
 

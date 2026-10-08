@@ -52,13 +52,15 @@ function noSession() {
 
 // ── Browser primitives ──────────────────────────────────────────────────────────────────
 
-async function browserOpen({ userId, params }) {
+async function browserOpen({ userId, params, context }) {
   try {
     const observation = await browserEnvironment.open(userId, {
       url: String(params?.url || '').trim(),
       site: String(params?.site || '').trim(),
       searchFor: String(params?.searchFor || '').trim(),
       objective: String(params?.objective || '').trim(),
+      agentTaskId: context?.persistedTaskId || null,
+      workflowId: context?.workflowId || null,
     });
     if (observation.blocked) {
       return {

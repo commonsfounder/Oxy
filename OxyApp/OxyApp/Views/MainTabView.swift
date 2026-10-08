@@ -52,6 +52,7 @@ struct MainTabView: View {
                     case .payments: PaymentsView()
                     case .logins: VaultView()
                     case .displays: PairedDisplaysView()
+                    case .environment: AgentEnvironmentView()
                     case .settings, .privateChat: AdamYouView()
                     }
                 }
