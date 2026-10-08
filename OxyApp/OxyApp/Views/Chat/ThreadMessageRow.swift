@@ -433,7 +433,7 @@ struct WorkingBubble: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-                AdamActivityMark(state: .working, size: 28)
+                AdamActivityMark(state: .working, size: 22)
                 if let label {
                     ShimmerText(text: label)
                         .lineLimit(1)
