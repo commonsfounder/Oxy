@@ -102,6 +102,10 @@ function registerBoxRoutes(app, deps) {
   const { supabase, pairedDisplays, displayBearerToken, bridgeToChatPipeline, buildDisplayChatRequest, evaluateAndSurfaceHouseholdEvents,
     voice, reactions, findPendingAction, log = () => {} } = deps;
   const sensors = new Map();
+  app.use(['/display/:id/voice', '/display/:id/sensors', '/display/:id/sound'], (req, res, next) => {
+    res.on('finish', () => log('info', 'box.request', { route: req.path.split('/').pop(), status: res.statusCode, bytes: Number(req.headers['content-length'] || 0) }));
+    next();
+  });
   const lastSound = new Map();
 
   async function authorise(req, res) {
