@@ -74,8 +74,11 @@ extension Color {
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
-    /// The user's own messages: the strongest surface, like a sent message.
-    static let appUserBubble = appInk
+    /// The user's own messages: a soft slate-blue wash, quieter than Adam's words.
+    static let appUserBubble = appDynamicColor(
+        dark: Color(red: 0.302, green: 0.557, blue: 1.000).opacity(0.26),
+        light: Color(red: 0.075, green: 0.369, blue: 0.882).opacity(0.12)
+    )
 
     /// Adam's side of the conversation: message bubbles and cards.
     /// The same raised surface as every card (Settings, board, Activity), so a thread has one grey, not two.

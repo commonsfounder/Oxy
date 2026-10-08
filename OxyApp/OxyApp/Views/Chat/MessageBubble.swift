@@ -152,7 +152,7 @@ struct MessageBubble: View {
                             Spacer(minLength: 64)
                             Text(AttributedString(ReplyQuote.split(message.content)?.body ?? message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
-                                .foregroundStyle(Color.appOnAction)
+                                .foregroundStyle(Color.appInk.opacity(0.9))
                                 .lineSpacing(isCompact ? 3 : 4)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 9)

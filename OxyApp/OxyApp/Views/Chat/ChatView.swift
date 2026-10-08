@@ -109,8 +109,8 @@ struct ChatView: View {
         let isGroupEnd = nextRole != message.role
         let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
         let previousMessage = idx > 0 ? msgs[idx - 1] : nil
-        if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) {
-            Text(Self.dayLabel(for: message.timestamp))
+        if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) || message.timestamp.timeIntervalSince(previousMessage?.timestamp ?? message.timestamp) > 20 * 60 {
+            Text("\(Self.dayLabel(for: message.timestamp)) \(message.timestamp.formatted(date: .omitted, time: .shortened))")
                 .font(.appBody(12))
                 .foregroundStyle(Color.appMuted)
                 .frame(maxWidth: .infinity)
@@ -989,10 +989,8 @@ struct ChatView: View {
         next: Message?,
         isGroupEnd: Bool
     ) -> Bool {
-        // Only where the conversation actually pauses, not under every reply.
-        guard isGroupEnd, !message.isStreaming else { return false }
-        guard let next else { return true }
-        return next.timestamp.timeIntervalSince(message.timestamp) > 20 * 60
+        // Times live in the dividers where the conversation pauses, not under messages.
+        false
     }
 }
 
@@ -1506,9 +1504,10 @@ private struct ChatInputBar: View {
                                 .scaleEffect(pulse ? 1.6 : 1)
                                 .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: pulse)
                         }
-                        Circle().fill(buttonFill)
-                        if !canSend && !isRecording {
-                            Circle().strokeBorder(Color.appHairline, lineWidth: 0.5)
+                        if canSend || showsStop || isRecording {
+                            Circle().fill(buttonFill)
+                        } else {
+                            Color.clear.appGlass(Circle(), interactive: true)
                         }
                     }
                     .frame(width: 44, height: 44)
@@ -1529,7 +1528,7 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(isSending ? "You're offline" : (incognito ? "Private · not saved" : "Ask Adam"), text: $text, axis: .vertical)
+        TextField(isSending ? "You're offline" : (incognito ? "Private · not saved" : "Message Adam"), text: $text, axis: .vertical)
             .font(.appBody(15, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
@@ -1621,7 +1620,7 @@ private struct ChatInputBar: View {
 
     private var buttonForeground: Color {
         if canSend || isRecording { return Color.appOnAction }
-        return canAct ? Color.appMuted : Color.appMuted.opacity(0.5)
+        return canAct ? Color.appInk.opacity(0.8) : Color.appMuted.opacity(0.5)
     }
 
     private var canAct: Bool {

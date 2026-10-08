@@ -86,7 +86,7 @@ struct MemoryView: View {
                         .padding(.bottom, composerExpanded ? 36 : 24)
 
                         HStack {
-                            SettingsSectionHeader(title: "Saved memories")
+                            SettingsSectionHeader(title: "What Adam knows")
                             Spacer()
                             if !items.isEmpty {
                                 Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
@@ -215,7 +215,7 @@ struct MemoryView: View {
         let visible = query.isEmpty
             ? items
             : items.filter { $0.content.localizedCaseInsensitiveContains(query) }
-        let order = ["People", "Places", "Work & Study", "Preferences", "Notes"]
+        let order = ["About you", "How Adam works for you", "People", "Plans"]
         let grouped = Dictionary(grouping: visible, by: { $0.category })
         return order.compactMap { title in
             guard let group = grouped[title], !group.isEmpty else { return nil }
@@ -327,11 +327,6 @@ private struct MemoryRow: View {
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    // Quiet provenance cue — "Saved" (typed by hand) vs "Learned"
-                    // (picked up from conversation) — never shouted.
-                    Text(item.sourceLabel)
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
                 }
                 Spacer(minLength: 8)
                 AppIcon("chevron-right", size: 13)
@@ -512,31 +507,19 @@ struct MemoryItem: Codable, Identifiable, Equatable {
         case createdAt = "created_at"
     }
 
-    // "Saved" = added by hand; "Learned" = picked up from conversation.
-    var sourceLabel: String {
-        switch source {
-        case "manual", "manual_profile": return "Saved"
-        default: return "Learned"
-        }
-    }
-
-    // Lightweight client-side bucket for the grouped Memory layout. First match wins,
-    // so the order matters (a "partner" who "lives in X" reads as People, not Places).
+    // Client-side bucket for the grouped Memory layout. First match wins; whole words only,
+    // so "person" never reads as "son".
     var category: String {
-        if content.count > 180 { return "Notes" }
-        // Guard against garbage/degenerate strings ("huh", "" ) getting confidently
-        // mis-filed into a keyword bucket. Upstream extraction quality (making sure
-        // low-signal content isn't saved as a memory at all) is a separate backend
-        // follow-up — this is just the client-side display guard.
         let meaningfulChars = content.filter { $0.isLetter }.count
-        if meaningfulChars < 3 { return "Notes" }
-        let t = " \(content.lowercased()) "
-        func has(_ keys: [String]) -> Bool { keys.contains { t.contains($0) } }
-        if has(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "loved one", "pookie", "name is", "named", "son", "daughter"]) { return "People" }
-        if has(["school", "college", "university", "student", "study", "studie", "work", "job", "employer", "a-level", "degree"]) { return "Work & Study" }
-        if has(["lives", "live ", "lived", "home", "address", "based in", "moved to", "commute"]) { return "Places" }
-        if has(["like", "love", "hate", "prefer", "favourite", "favorite", "watch", "eat", "drink", "listen", "read", "fan of"]) { return "Preferences" }
-        return "Notes"
+        if meaningfulChars < 3 { return "About you" }
+        let lowered = content.lowercased()
+        let words = Set(lowered.split(whereSeparator: { !$0.isLetter && $0 != "'" }).map(String.init))
+        func hasWord(_ keys: [String]) -> Bool { keys.contains { words.contains($0) } }
+        func hasPhrase(_ keys: [String]) -> Bool { keys.contains { lowered.contains($0) } }
+        if hasWord(["adam"]) || hasPhrase(["ask me", "ask before", "remind me", "always ", "never ", "when i ask", "reply ", "keep it short", "tone", "concise", "brief me"]) { return "How Adam works for you" }
+        if hasWord(["plan", "plans", "trip", "booked", "holiday", "wedding", "flight", "appointment", "deadline", "project", "tomorrow", "tonight", "upcoming", "visiting", "moving"]) || hasPhrase(["next week", "next month", "going to", "working on", "this weekend", "planning"]) { return "Plans" }
+        if hasWord(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "son", "daughter", "colleague", "cousin", "aunt", "uncle", "grandma", "grandmother", "grandfather", "pookie"]) || hasPhrase(["loved one"]) { return "People" }
+        return "About you"
     }
 }
 

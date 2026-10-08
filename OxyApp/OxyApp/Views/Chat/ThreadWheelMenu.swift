@@ -13,8 +13,8 @@ enum ThreadMenuChoice: String, CaseIterable, Identifiable {
         case .memory: return "Memory"
         case .settings: return "Settings"
         case .privateChat: return "Private mode"
-        case .apps: return "Apps"
-        case .payments: return "Payments"
+        case .apps: return "Connections"
+        case .payments: return "Payment methods"
         case .logins: return "Saved logins"
         case .displays: return "Displays"
         case .environment: return "Workspace"
@@ -47,14 +47,14 @@ private struct WheelGlyph: View {
             switch choice {
             case .activity: AppIcon("history", size: size)
             case .home: AppIcon("tab-home", size: size)
-            case .memory: AppIcon("dotted", size: size)
+            case .memory: AppIcon("sparkles", size: size)
             case .settings: AppIcon("list", size: size)
             case .privateChat: GhostIcon(active: active).frame(width: size, height: size)
-            case .apps: AppIcon("cube", size: size)
+            case .apps: AppIcon("bolt", size: size)
             case .payments: AppIcon("card", size: size)
             case .logins: AppIcon("person-check", size: size)
             case .displays: AppIcon("photo", size: size)
-            case .environment: AppIcon("photo", size: size)
+            case .environment: AppIcon("box", size: size)
             }
         }
     }
@@ -418,14 +418,14 @@ private struct WheelItem: View, Animatable {
             .frame(width: 52, height: 52)
             .overlay(alignment: .bottom) {
                 Text(active ? "Private · On" : choice.title)
-                    .font(.appBody(selected || active ? 13 : 12, weight: selected || active ? .semibold : .medium))
+                    .font(.appBody(12, weight: selected || active ? .semibold : .medium))
                     .foregroundStyle(Color.appInk.opacity(0.62 + 0.38 * max(nearness, active ? 1 : 0)))
                     .lineLimit(1)
                     .fixedSize()
                     .alignmentGuide(.bottom) { d in d[.top] - 8 }
                     .opacity(Double(min(max((q - 0.5) * 2, 0), 1)))
             }
-            .scaleEffect((0.4 + 0.6 * min(q, 1)) * (1 + 0.2 * CGFloat(nearness)) * (1 + 0.3 * CGFloat(held)))
+            .scaleEffect((0.4 + 0.6 * min(q, 1)) * (1 + 0.3 * CGFloat(held)))
             .shadow(color: .black.opacity(0.35 * held), radius: 14, y: 6)
             .opacity(Double(min(q * 1.8, 1)) * (edge + (1 - edge) * held))
         }

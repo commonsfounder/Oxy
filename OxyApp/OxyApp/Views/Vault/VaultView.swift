@@ -121,7 +121,7 @@ struct VaultView: View {
     private var credentialsSection: some View {
         SettingsGroup(title: "Saved sign-ins") {
             if credentials.isEmpty {
-                SettingsStatement(text: "No saved sign-ins", solid: false)
+                SettingsStatement(text: "No passwords saved", solid: false)
                     .padding(.horizontal, 4)
             } else {
                 SettingsList {
@@ -180,9 +180,9 @@ struct VaultView: View {
                     .padding(.horizontal, 4)
             } else {
                 SettingsList {
-                    ForEach(Array(uses.enumerated()), id: \.element.id) { index, use in
+                    ForEach(Array(VaultCredentialUse.grouped(uses).enumerated()), id: \.element.id) { index, group in
                         if index > 0 { SettingsRule() }
-                        SettingsRow(title: use.site, subtitle: use.detailLine)
+                        SettingsRow(title: group.site, subtitle: group.detailLine)
                     }
                 }
             }
@@ -577,9 +577,33 @@ struct VaultCredentialUse: Codable, Equatable, Identifiable {
         return parts.joined(separator: " · ")
     }
 
+    struct Group: Identifiable {
+        let id: String
+        let site: String
+        let detailLine: String
+    }
+
+    /// One row per site and outcome, so four visits read as "4 times", while a refusal still gets its own row.
+    static func grouped(_ uses: [VaultCredentialUse]) -> [Group] {
+        var order: [String] = []
+        var buckets: [String: [VaultCredentialUse]] = [:]
+        for use in uses {
+            let key = "\(use.site)|\(use.outcome)|\(use.reason ?? "")"
+            if buckets[key] == nil { order.append(key) }
+            buckets[key, default: []].append(use)
+        }
+        return order.compactMap { key in
+            guard let items = buckets[key], let first = items.first else { return nil }
+            guard items.count > 1 else { return Group(id: first.id, site: first.site, detailLine: first.detailLine) }
+            var parts = [outcomeText(first.outcome, reason: first.reason), "\(items.count) times"]
+            if let when = timeText(first.createdAt) { parts.append("last \(when)") }
+            return Group(id: first.id, site: first.site, detailLine: parts.joined(separator: " · "))
+        }
+    }
+
     private static func outcomeText(_ outcome: String, reason: String?) -> String {
         switch outcome {
-        case "used": return reason == "stored_session" ? "Reused a saved session" : "Signed in"
+        case "used": return reason == "stored_session" ? "Still signed in from before, no password used" : "Signed in with a saved password"
         case "failed": return "Sign-in failed"
         case "denied":
             guard let reason, !reason.isEmpty else { return "Refused" }

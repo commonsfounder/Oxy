@@ -73,7 +73,7 @@ struct PaymentsView: View {
                     }
                 }
             }
-            SettingsStatement(text: "Adam asks before every payment.", solid: false)
+            SettingsStatement(text: "Adam asks before every payment.", solid: false, icon: "shield-check")
                 .padding(.horizontal, 4)
         }
     }
@@ -85,10 +85,10 @@ struct PaymentsView: View {
         } label: {
             Text(agentCard == nil ? "Add" : "Remove")
                 .font(.appBody(14, weight: .medium))
-                .foregroundStyle(agentCard == nil ? Color.appOnAction : Color.appInk)
-                .padding(.horizontal, 16)
+                .foregroundStyle(agentCard == nil ? Color.appOnAction : Color.appDestructive)
+                .padding(.horizontal, agentCard == nil ? 16 : 8)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(agentCard == nil ? Color.appAction : Color.appInk.opacity(0.10)))
+                .background { if agentCard == nil { Capsule().fill(Color.appAction) } }
         }
         .buttonStyle(.appScale(0.96))
         .accessibilityLabel(agentCard == nil ? "Add a checkout card" : "Remove checkout card")

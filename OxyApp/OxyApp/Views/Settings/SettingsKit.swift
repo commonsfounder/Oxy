@@ -258,11 +258,19 @@ struct SettingsToggleRow: View {
 struct SettingsStatement: View {
     let text: String
     var solid = true
+    /// A fixed fact, not a state: shows an icon instead of an on/off dot.
+    var icon: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            AdamDot(solid: solid, size: 10)
-                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+            if let icon {
+                AppIcon(icon, size: 14)
+                    .foregroundStyle(Color.appMuted)
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
+            } else {
+                AdamDot(solid: solid, size: 10)
+                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+            }
             Text(text)
                 .font(.appBody(16))
                 .foregroundStyle(Color.appInk)

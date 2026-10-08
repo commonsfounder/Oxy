@@ -20,6 +20,11 @@ struct ModelRoutingView: View {
             } else if isLoading {
                 OxySkeletonCard(height: 120, cornerRadius: 16)
             }
+            Text("Version adam-0001-alpha")
+                .font(.appBody(11))
+                .foregroundStyle(Color.appMuted.opacity(0.7))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
         }
         .task { await load() }
     }

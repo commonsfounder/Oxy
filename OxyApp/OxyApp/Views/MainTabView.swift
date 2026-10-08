@@ -174,7 +174,7 @@ private struct AdamYouView: View {
                             SettingsRule(inset: 34)
                             youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
                             SettingsRule(inset: 34)
-                            youRow(title: "Account", subtitle: appState.userId, icon: "list") { destination = .account }
+                            youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Signed in as \(appState.userId)", icon: "envelope") { destination = .account }
                         }
 
                         Spacer(minLength: 40)
@@ -187,18 +187,13 @@ private struct AdamYouView: View {
                                     showBackendURLEditor = true
                                 }
                             } label: {
-                                VStack(spacing: 10) {
-                                    AdamMark().frame(width: 36, height: 36)
-                                    Text("adam-0001-alpha")
-                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(Color.appMuted)
-                                }
+                                AdamMark().frame(width: 36, height: 36)
                                 .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Adam, version adam-0001-alpha")
+                            .accessibilityLabel("Adam")
 
                             Button { destination = .agents } label: {
                                 Text("Advanced")

@@ -60,12 +60,12 @@ struct TurnReceiptRow: View {
     // MARK: Collapsed line
 
     private var collapsedLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            glyph(for: rowState)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if rowState != .success { glyph(for: rowState) }
 
             Text(summaryLine)
-                .font(.appBody(13))
-                .foregroundStyle(Color.appMuted)
+                .font(.appBody(11.5))
+                .foregroundStyle(Color.appMuted.opacity(rowState == .success ? 0.7 : 1))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
@@ -79,12 +79,12 @@ struct TurnReceiptRow: View {
                 }
                 .foregroundStyle(Color.appTitanium)
             } else if isExpandable {
-                AppIcon("chevron-down", size: 12)
+                AppIcon("chevron-down", size: 10)
                     .foregroundStyle(Color.appMuted.opacity(0.75))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
