@@ -13,6 +13,7 @@ const { createFusion } = require('../../api/services/sensor-fusion');
 
 const days = Number(process.argv[2]) || 30;
 const scale = Number(process.argv[3]) || 1;
+const MODEL = process.argv[4] || 'phone';   // 'phone' (measured) or 'large' (estimate: phone recall scaled by large/small 8-bit recall from the hard-conditions test)
 
 const ASSUMPTIONS = {
   // False sound detections per hour, and the share of real events the sound model catches (from our 30-minute stream and
@@ -25,6 +26,12 @@ const ASSUMPTIONS = {
   arrivalsPerDay: 2, phoneArrivalLateShare: 0.3, phoneLateMaxSeconds: 120,   // the phone is sometimes slow to say "home"
   trials: 2000
 };
+
+if (MODEL === 'large') {
+  // Recall at 1% false alarms, hard-conditions test: small 8-bit -> large 8-bit. The phone-model rates above are scaled by this ratio; false-alarm rates are assumed unchanged.
+  const gain = { glass_breaking: .66 / .62, baby_crying: .72 / .60, knock: .71 / .69, doorbell: .32 / .24 };
+  for (const [name, g] of Object.entries(gain)) ASSUMPTIONS.recall[name] = Math.min(0.98, ASSUMPTIONS.recall[name] * g);
+}
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -121,6 +128,7 @@ function caught(kind) {
 
 const pct = x => `${Math.round(x * 100)}%`;
 const quiet = falseAlerts();
+console.log(`Sound model: ${MODEL === 'large' ? 'LARGE 8-bit (estimated recall)' : 'phone model (measured recall)'}`);
 console.log(`Simulated ${days} quiet days, false sound detections at ${scale}x the rate seen in our dense test stream.\n`);
 console.log(`Alerts when nothing real is happening (per day):`);
 console.log(`  sound alone (glass, baby, knock, doorbell, alarm): ${(quiet.soundOnly / days).toFixed(1)}`);
