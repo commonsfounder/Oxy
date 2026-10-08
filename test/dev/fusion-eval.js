@@ -98,7 +98,7 @@ function caught(kind) {
       if (random() < r) f = f.concat(house.send(t0 + 10e3, { kind: 'sensor', name: 'smoke_particles', value: 'detected' }));
       fused += (heard || f.length) ? 1 : 0; sound += aloneAlert ? 1 : 0; continue;   // the alarm sound alone is raised at once in both
     } else if (kind === 'baby_alone') {
-      // a real crying episode: four chances for the sound model, 45 seconds apart
+      // a real crying episode: four chances for the sound model, 45 seconds apart. A cry alerts on its own, in both policies.
       for (let k = 0; k < 4; k++) {
         if (random() < recall.baby_crying) { aloneAlert = true; f = f.concat(house.send(t0 + k * 45e3, { kind: 'sound', name: 'baby_crying' })); }
       }

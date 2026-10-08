@@ -27,7 +27,7 @@ const SOUNDS = Object.freeze([
 ]);
 
 // When a more specific finding fires, the broader ones it covers are not raised as well.
-const SUPERSEDES = Object.freeze({ intruder_inside: ['break_in_suspected', 'door_opened_while_away'], break_in_suspected: ['door_opened_while_away'], fire_confirmed: ['smoke_sensor'], co_confirmed: ['co_sensor'], visitor_at_door: ['doorbell_pressed'] });
+const SUPERSEDES = Object.freeze({ intruder_inside: ['break_in_suspected', 'door_opened_while_away'], break_in_suspected: ['door_opened_while_away'], fire_confirmed: ['smoke_sensor'], co_confirmed: ['co_sensor'], visitor_at_door: ['doorbell_pressed'], baby_unattended: ['baby_crying_heard'] });
 // Someone arriving opens the door a little before their phone says they are home, so a door alone waits this long.
 const ENTRY_GRACE_MS = 90 * 1000;
 const KEEP_MS = 30 * 60 * 1000;
@@ -175,6 +175,14 @@ const RULES = [
     }
   },
   {
+    id: 'baby_crying_heard',
+    run(ctx) {
+      const cry = ctx.last(s => s.name === 'baby_crying', 60000);
+      if (!cry) return null;
+      return { title: 'Baby crying', body: 'Crying was heard.', urgent: false, confidence: 0.7, evidence: [cry] };
+    }
+  },
+  {
     id: 'appliance_finished',
     run(ctx) {
       const done = ctx.last(s => s.name === 'appliance_power' && s.value === 'finished', 2 * 60000);
@@ -184,7 +192,7 @@ const RULES = [
   }
 ];
 
-const ORDER = ['intruder_inside', 'break_in_suspected', 'glass_repeated', 'door_opened_while_away', 'fire_confirmed', 'co_confirmed', 'smoke_sensor', 'co_sensor', 'visitor_at_door', 'doorbell_pressed'];
+const ORDER = ['intruder_inside', 'break_in_suspected', 'glass_repeated', 'door_opened_while_away', 'fire_confirmed', 'co_confirmed', 'smoke_sensor', 'co_sensor', 'visitor_at_door', 'doorbell_pressed', 'baby_unattended', 'baby_crying_heard'];
 RULES.sort((a, b) => (ORDER.indexOf(a.id) + 1 || 99) - (ORDER.indexOf(b.id) + 1 || 99));
 
 function createFusion({ now = () => Date.now() } = {}) {

@@ -155,7 +155,7 @@ test('water: a leak sensor alerts alone; a tap is only reported when running a l
   assert.deepEqual(busy.sound('water_running'), []);
 });
 
-test('a visitor needs the bell or a knock plus a person in view; a baby alone in a room is flagged only without movement', () => {
+test('a visitor needs the bell or a knock plus a person in view; a baby crying is heard alone, and flagged as unattended only without movement', () => {
   const h = house();
   h.sensor('presence', 'away');
   h.sound('doorbell');
@@ -165,7 +165,8 @@ test('a visitor needs the bell or a knock plus a person in view; a baby alone in
   alone.sound('doorbell');
   assert.deepEqual(alone.sound('knock'), []);
   const baby = house();
-  baby.sound('baby_crying', 'nursery'); baby.wait(90);
+  assert.deepEqual(ids(baby.sound('baby_crying', 'nursery')), ['baby_crying_heard']);
+  baby.wait(90);
   assert.deepEqual(ids(baby.sound('baby_crying', 'nursery')), ['baby_unattended']);
   const attended = house();
   attended.sound('baby_crying', 'nursery'); attended.wait(30); attended.sensor('motion', 'active', 'nursery'); attended.wait(60);

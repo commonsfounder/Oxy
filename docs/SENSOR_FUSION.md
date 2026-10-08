@@ -12,7 +12,7 @@ door contact, window contact, door lock, someone home/away (phone), motion, came
 - Someone may be inside: a way in, then movement indoors, while away.
 - Opened while you are out: a window opens (at once), or a door opens or unlocks and nobody says "home" within 90 seconds. Only openings *after* the house became empty count.
 - Fire likely / CO confirmed: an alarm sound plus a second sensor. Smoke detected / CO detected: the sensor alone.
-- Water leak (sensor); tap left running (water sound over 10 minutes, nobody near); visitor at the door (bell, press or knock plus a person); baby crying with no one going in; appliance finished; glass heard twice in two minutes.
+- Water leak (sensor); tap left running (water sound over 10 minutes, nobody near); visitor at the door (bell, press or knock plus a person); a baby crying (alerts on the sound alone, since no other sensor can confirm a cry; "no one has gone in" is added as an urgent follow-up); appliance finished; glass heard twice in two minutes.
 - A more specific alert replaces the plainer ones it covers (and keeps them quiet for the cooldown).
 
 Because a door waits 90 seconds, a house must be re-checked now and then: `registerBoxRoutes` sweeps every 15 seconds. State is kept in memory per server process, so a restart forgets the last 30 minutes (fine for a stand-in; a multi-machine deploy would need shared state).
@@ -28,5 +28,6 @@ Sensors are posted to `POST /display/:id/signal` (`{kind:'sensor'|'sound', name,
 
 ## What the comparison shows, and does not
 `fusion-eval.js` is a **simulation under stated assumptions**, not a measurement in a home. Sound rates come from our own tests (e.g. glass 16 of 36 found at 6 false alarms an hour; the beep detector found 3 of 12 real alarm recordings); sensors are imagined at 97% reliable; the phone is sometimes slow to say "home".
-Over 60 simulated quiet days with false sound rates as dense as our test stream, sound alone raises about 300 alerts a day and the combined rules about 40; at a tenth of that rate, about 26 against 0.6. Real events caught: break-in 44% -> 97%, forced door with no sound 0% -> 97%, kitchen fire 23% -> 98%, visitor 22% -> 98%. **Baby crying is the cost: 96% -> 77%**, because two detections are required. The sound-alone baseline alerts on every detection, which is deliberately naive.
+Over 60 simulated quiet days with false sound rates as dense as our test stream, sound alone raises about 300 alerts a day and the combined rules about 100; at a tenth of that rate, about 26 against 11. Real events caught: break-in 44% -> 97%, forced door with no sound 0% -> 97%, kitchen fire 23% -> 98%, visitor 22% -> 98%, baby crying unchanged at 96%.
+**What fusion cannot fix:** most of the remaining false alerts are baby-crying detections from the sound model itself (a second sensor cannot tell a real cry from a false one), so the baby model's false alarms are still the biggest source of noise. The sound-alone baseline alerts on every detection, which is deliberately naive.
 Found by running this: leaving by the door looked like an alert a minute later; a door opening just before the phone said "home" gave a false alarm about once a day; a plainer alert followed a confirmed fire. All three are fixed and tested.
