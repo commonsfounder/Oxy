@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Household Sound Detection: Technical Evidence</title>
+<style>
+@page { size: A4; margin: 18mm 16mm; }
+body { font: 10.5pt/1.45 -apple-system, "Helvetica Neue", Arial, sans-serif; color: #1c1c1e; }
+h1 { font-size: 17pt; margin: 0 0 2pt; }
+h2 { break-after: avoid; font-size: 13pt; margin: 18pt 0 4pt; border-bottom: 1px solid #ccc; padding-bottom: 2pt; }
+.sub { color: #666; margin-bottom: 10pt; }
+.claim { background: #f4f1ea; padding: 8pt 10pt; border: 1px solid #e2dccb; border-radius: 4pt; margin: 8pt 0; }
+table { border-collapse: collapse; width: 100%; margin: 6pt 0; font-size: 9.5pt; }
+th, td { border: 1px solid #d5d5d5; padding: 3pt 6pt; text-align: left; }
+th { background: #f0f0f0; } td.n, th.n { text-align: right; white-space: nowrap; }
+tr.win td { background: #eef7ee; } tr.loss td { background: #fbeeee; }
+a { color: #1a5fb4; } .small { font-size: 9pt; color: #555; }
+ul { margin: 4pt 0 4pt 16pt; padding: 0; } li { margin-bottom: 2pt; }
+.keep { break-inside: avoid; }
+</style></head><body>
+
+<h1>Household Sound Detection</h1>
+<div class="sub">Technical evidence summary, October 2026: methods, results and limitations.</div>
+
+<div class="claim"><b>Summary.</b> On a 15-sound household benchmark with simulated noise, room echo and very short clips, our fine-tuned model detects <b>56%</b> of real events at a 1% false-alarm rate, against <b>43%</b> for Apple's built-in sound classifier. It retains <b>54%</b> after compression to 8-bit precision, small enough for low-cost embedded chips. On clean studio-quality audio, Apple's classifier is slightly ahead. All results to date use public recordings; real-home validation is the next step.</div>
+
+<h2>1. What we have built</h2>
+<ul>
+<li><b>Smoke and CO alarm detector.</b> Identifies the standard alarm beep rhythm (ISO 8201: three beeps for smoke, four for carbon monoxide) rather than relying on a sound label. Implemented in Swift for iPhone and in C for embedded chips, with identical results on shared test files. It detected 3 of 12 real fire-alarm recordings; the other 9 are bells, horns or 2-second snippets with no beep pattern, which remain a gap.</li>
+<li><b>On-phone model.</b> A 17 KB model for glass breaking, knock, doorbell and baby crying, running alongside Apple's classifier inside the app with a per-sound rule for how many consecutive sound windows must agree before an alert.</li>
+<li><b>15-sound networks.</b> Public EfficientAT networks (MIT licence) fine-tuned end to end on commercially licensed audio. A small network (0.72 million weights, 0.72 MB at 8-bit) and a large one (4.2 million weights, 4.2 MB at 8-bit). Sounds: alarm, baby crying, cough, dog bark, door slam, doorbell, glass breaking, gunshot, knock, microwave, phone ring, scream, siren, toilet flush and running water.</li>
+<li><b>Opt-in clip review.</b> A "Sounds heard" page keeps a 5-second clip of each alert on the user's phone only, so the user can mark it Right or Wrong. This is the mechanism for collecting real-home evaluation data.</li>
+</ul>
+
+<h2>2. Main result: hard-conditions benchmark</h2>
+<p>Each sound is scored in six conditions built from held-out FSD50K evaluation clips: clean, noise at 10 dB, noise at 0 dB, room echo, 1-second blips, and noise, echo and short clips combined. Noise and echo are simulated to approximate home conditions. The metric is the share of real events detected when only 1% of non-events may trigger a false alarm, so no model benefits from a favourably chosen alert threshold.</p>
+<table class="keep"><tr><th>Model (mean of 15 sounds, six conditions)</th><th class="n">Detected at 1% false alarms</th><th class="n">Ranking quality (AUC, 1.0 = perfect)</th></tr>
+<tr><td>Apple built-in classifier</td><td class="n">43.3%</td><td class="n">0.776</td></tr>
+<tr><td>Ours, small, full precision</td><td class="n">49.4%</td><td class="n">0.925</td></tr>
+<tr><td>Ours, small, 8-bit</td><td class="n">47.3%</td><td class="n">0.922</td></tr>
+<tr class="win"><td>Ours, large, full precision</td><td class="n">55.6%</td><td class="n">0.936</td></tr>
+<tr class="win"><td>Ours, large, 8-bit</td><td class="n">53.9%</td><td class="n">0.933</td></tr></table>
+<p class="small">Large model by condition: clean 73%, noise 10 dB 61%, echo 64%, 1-second blip 51%, noise 0 dB 42%, all combined 41%.</p>
+
+<h2>3. Results by sound: Apple against our large 8-bit model</h2>
+<p class="small">Detected at 1% false alarms / AUC, averaged over the six conditions. Our model is ahead on 11 sounds (two of them weak for both systems), level on 3, and behind on 1. The small 8-bit model is weaker on baby crying (.60), siren (.62) and doorbell (.24).</p>
+<table><tr><th>Sound</th><th class="n">Apple</th><th class="n">Ours (large, 8-bit)</th><th>Result</th></tr>
+<tr class="win"><td>Glass breaking</td><td class="n">.39 / .71</td><td class="n">.66 / .96</td><td>Clearly ahead</td></tr>
+<tr class="win"><td>Knock</td><td class="n">.40 / .75</td><td class="n">.71 / .95</td><td>Clearly ahead</td></tr>
+<tr class="win"><td>Scream</td><td class="n">.27 / .62</td><td class="n">.52 / .96</td><td>Clearly ahead</td></tr>
+<tr class="win"><td>Gunshot</td><td class="n">.34 / .60</td><td class="n">.49 / .93</td><td>Clearly ahead</td></tr>
+<tr class="win"><td>Cough</td><td class="n">.58 / .84</td><td class="n">.71 / .96</td><td>Ahead</td></tr>
+<tr class="win"><td>Toilet flush</td><td class="n">.69 / .97</td><td class="n">.81 / .99</td><td>Ahead</td></tr>
+<tr class="win"><td>Running water</td><td class="n">.46 / .88</td><td class="n">.55 / .96</td><td>Ahead</td></tr>
+<tr class="win"><td>Dog bark</td><td class="n">.70 / .87</td><td class="n">.75 / .96</td><td>Slightly ahead</td></tr>
+<tr class="win"><td>Phone ring</td><td class="n">.24 / .63</td><td class="n">.32 / .92</td><td>Ahead (weak for both)</td></tr>
+<tr class="win"><td>Microwave</td><td class="n">.38 / .76</td><td class="n">.42 / .91</td><td>Slightly ahead</td></tr>
+<tr class="win"><td>Door slam</td><td class="n">.11 / .64</td><td class="n">.25 / .89</td><td>Ahead (weak for both)</td></tr>
+<tr><td>Alarm (generic)</td><td class="n">.09 / .69</td><td class="n">.14 / .83</td><td>Weak for both; smoke and CO are covered by the beep-pattern detector</td></tr>
+<tr><td>Baby crying</td><td class="n">.75 / .96</td><td class="n">.72 / .97</td><td>Level</td></tr>
+<tr><td>Doorbell</td><td class="n">.33 / .77</td><td class="n">.32 / .88</td><td>Level (26 test clips)</td></tr>
+<tr class="loss"><td>Siren</td><td class="n">.77 / .93</td><td class="n">.72 / .95</td><td>Apple ahead</td></tr></table>
+
+<h2>4. Independent check: ESC-50, clean recordings</h2>
+<p>ESC-50 is a standard 2,000-clip benchmark that we did not train on. Seven sounds overlap with ours (dog, cough, toilet, siren, glass, knock, baby crying); the negatives are the other 1,720 clips.</p>
+<table class="keep"><tr><th>Model</th><th class="n">Detected at 1% false alarms</th><th class="n">AUC</th></tr>
+<tr class="loss"><td>Apple built-in classifier</td><td class="n">98.6%</td><td class="n">0.998</td></tr>
+<tr><td>Ours, large, full precision</td><td class="n">96.1%</td><td class="n">0.998</td></tr>
+<tr><td>Public EfficientAT mn20 as released (no training by us)</td><td class="n">93.2%</td><td class="n">0.996</td></tr>
+<tr><td>Ours, small, 8-bit</td><td class="n">90.7%</td><td class="n">0.994</td></tr></table>
+<p>On clean, standard data every model is near the ceiling and Apple's classifier is marginally best. Our advantage is in degraded conditions: noise, echo, faint and very short sounds.</p>
+
+<h2>5. Realistic stream: on-phone model against Apple</h2>
+<p>A 30-minute simulated stream with 36 instances of each sound mixed into household background. Events found out of 36 / false alarms per hour:</p>
+<table class="keep"><tr><th>Sound</th><th class="n">Apple</th><th class="n">Our on-phone model</th></tr>
+<tr><td>Glass breaking</td><td class="n">9 / 0</td><td class="n">16 / 6</td></tr><tr><td>Baby crying</td><td class="n">13 / 0</td><td class="n">20 / 6</td></tr>
+<tr><td>Doorbell</td><td class="n">1 / 0</td><td class="n">8 / 0</td></tr><tr><td>Knock</td><td class="n">12 / 2</td><td class="n">12 / 2</td></tr></table>
+<p class="small">Our model finds more events; Apple raises fewer false alarms. Reducing glass false alarms (currently 6 per hour) is an open item.</p>
+
+<h2>6. Competitive landscape</h2>
+<p>Competing products run detection inside their own devices and do not publish accuracy, so they cannot be scored on our benchmark. The comparison below is of coverage, taken from each company's own documentation.</p>
+<table><tr><th>Product</th><th>Sounds detected (as stated by the maker)</th><th>Notes</th></tr>
+<tr><td>Amazon Alexa Guard (Echo)</td><td>Smoke alarm, CO alarm, breaking glass; later also human activity</td><td>Launched 2019; user switches it on when leaving. Current availability unconfirmed. <a href="https://techcrunch.com/2019/05/14/amazon-rolls-out-alexa-guard-to-help-protect-your-home-while-youre-out/">TechCrunch</a>, <a href="https://www.securitysales.com/automation/smart-home/amazon-alexa-guard-echo-smart-security/">Security Sales</a></td></tr>
+<tr><td>Google Home speakers and displays</td><td>Smoke alarm, CO alarm, breaking glass (US only, Google Home Premium)</td><td><a href="https://support.google.com/googlenest/answer/13315909">Google Home Premium help</a></td></tr>
+<tr><td>Google Nest cameras</td><td>Dog bark, speech, smoke and CO alarms; user selects which sounds alert</td><td>Certain camera models only. <a href="https://support.google.com/googlenest/answer/16594324">Google help</a></td></tr>
+<tr><td>Wyze Cam</td><td>Smoke (T3) and CO (T4) beep patterns</td><td>Same pattern-based approach as ours; user reports of missed newer alarms. <a href="https://support.wyze.com/hc/en-us/articles/360031134712-How-does-the-Smoke-Alarm-and-CO-alarm-work">Wyze help</a></td></tr>
+<tr><td>Seeed Sound Event Detection Module D1</td><td>Baby cry, glass break, gunshot, T3/T4 alarms, snoring</td><td>On-device chip module. Maker claims 95% or better recognition; not independently tested. <a href="https://thepihut.com/products/sound-event-detection-module-d1">Product page</a></td></tr>
+<tr><td>Apple Sound Recognition</td><td>About 300 labels in the developer classifier</td><td>The competitor we measured directly. <a href="https://developer.apple.com/documentation/soundanalysis/snclassifysoundrequest">Apple documentation</a></td></tr>
+<tr class="win"><td>Ours</td><td>15 sounds plus smoke and CO beep patterns</td><td>Measured in sections 2 to 5.</td></tr></table>
+<p>Alexa and Google's speakers each cover three sounds; our system covers fifteen. Coverage does not establish accuracy on the shared sounds, which no one outside those companies has measured. A direct device-level comparison, playing identical clips to each product and counting alerts, is planned.</p>
+
+<h2>7. Comparison with a general-purpose audio language model</h2>
+<p>We also tested OpenAI's audio model (gpt-audio-1.5), which takes real audio, exactly as released and with no examples. Both systems were given the same 500 clips (10 clean and 10 hard recordings of each of the 15 sounds, plus 100 clean and 100 hard background clips) and had to pick one of 16 labels. Chance is not 1 in 16 here: answering "background" every time scores 40%.</p>
+<table class="keep"><tr><th>System</th><th class="n">All 500 clips</th><th class="n">Sounds, clean</th><th class="n">Sounds, hard conditions</th><th class="n">Background</th></tr>
+<tr class="win"><td>Ours (large, 8-bit)</td><td class="n">59%</td><td class="n">81%</td><td class="n">54%</td><td class="n">46%</td></tr>
+<tr><td>OpenAI gpt-audio-1.5</td><td class="n">48%</td><td class="n">67%</td><td class="n">29%</td><td class="n">48%</td></tr></table>
+<p>The audio model is respectable on clean recordings (very good on baby crying and running water) but falls away in hard conditions, and it found 2 of 20 alarms and 5 of 20 gunshots. Nineteen of its answers were not a usable label and are counted as wrong.</p>
+<p class="small">Read with care: this is a different, simpler measure from sections 2 to 5 (one label per clip, not a false-alarm-controlled alert), our model's answer is its highest-scoring label averaged over the clip, and our model was trained on this kind of audio while the language model was not. The result shows what a general-purpose model achieves with no tuning, not a ceiling for such models. A cloud audio model would also need continuous home audio sent off the device.</p>
+
+<h2>8. Limitations</h2>
+<ul>
+<li><b>Real-home validation is pending.</b> Noise and echo are simulated. Training and test clips both come from FSD50K, as separate sets, so the hard-conditions benchmark is more favourable to us than a fully independent one; ESC-50 (section 4) is the independent check.</li>
+<li><b>Comparison scope.</b> We measured Apple's classifier, one untrained public network and one general-purpose audio language model. Stronger public models (BEATs, PaSST) and other audio language models are untested, and we do not claim state of the art.</li>
+<li><b>Alert settings are conservative.</b> At up to one false alarm per hour, calibrated settings detect roughly 30 to 50% of events in a crowded stream for the stronger sounds (glass 12 of 32, dog 21 of 32), and few of door slam, doorbell, generic alarm and scream.</li>
+<li><b>Embedded hardware.</b> Model sizes and operation counts are calculated; they have not yet been measured on a target chip.</li>
+<li><b>Data licensing.</b> Training uses only CC0 and CC BY clips and Donate-a-Cry (ODbL). ESC-50 (CC BY-NC) is used for testing only. Attribution will be included at release.</li>
+</ul>
+
+<h2>9. Next steps</h2>
+<ul>
+<li>Collect real-home clips through the opt-in Sounds heard feature and rerun this benchmark on them.</li>
+<li>Learn each home's own sounds (doorbell, washing machine, kettle) from signals the user already gives, such as opening the door after a doorbell alert.</li>
+<li>Evaluate larger public networks and other audio language models (with example clips), run the compressed model on the target chip, and compare directly against competing devices.</li>
+</ul>
+
+<h2>10. Sources</h2>
+<ul>
+<li>EfficientAT networks (MIT licence): <a href="https://github.com/fschmid56/EfficientAT">github.com/fschmid56/EfficientAT</a>; paper: <a href="https://arxiv.org/abs/2211.04772">arxiv.org/abs/2211.04772</a></li>
+<li>FSD50K dataset: <a href="https://zenodo.org/records/4060432">zenodo.org/records/4060432</a>; paper: <a href="https://arxiv.org/abs/2010.00475">arxiv.org/abs/2010.00475</a></li>
+<li>ESC-50 benchmark: <a href="https://github.com/karolpiczak/ESC-50">github.com/karolpiczak/ESC-50</a></li>
+<li>Donate-a-Cry corpus: <a href="https://github.com/gveres/donateacry-corpus">github.com/gveres/donateacry-corpus</a></li>
+<li>Apple SoundAnalysis: <a href="https://developer.apple.com/documentation/soundanalysis/snclassifysoundrequest">SNClassifySoundRequest documentation</a></li>
+</ul>
+<p class="small">Full result files, test code and reproduction steps are available on request.</p>
+</body></html>
