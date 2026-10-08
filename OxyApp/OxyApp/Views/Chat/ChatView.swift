@@ -728,7 +728,7 @@ struct ChatView: View {
                     }
                 }
                 .frame(width: 232)
-                .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appReceivedBubble))
+                .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appSurface2))
                 .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
                 .padding(.leading, 14)
