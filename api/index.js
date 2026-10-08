@@ -8770,6 +8770,23 @@ app.post('/display/:id/events/:eventId/respond', async (req, res) => {
   }
 });
 
+// A paired speaker-display with a microphone (the BOX-3): voice, room readings and alarm sounds.
+require('./services/box-gateway').registerBoxRoutes(app, {
+  supabase,
+  pairedDisplays: require('./services/paired-displays'),
+  displayBearerToken,
+  bridgeToChatPipeline,
+  buildDisplayChatRequest,
+  evaluateAndSurfaceHouseholdEvents,
+  voice: {
+    transcribe: buffer => require('./services/voice-provider').transcribeSpeechOpenAI(buffer),
+    synthesizeSpeech: text => require('./services/voice-provider').synthesizeSpeechOpenAI(text)
+  },
+  reactions,
+  findPendingAction: actions => telegramBot.findPendingAction(actions),
+  log
+});
+
 // Turn urgent screens on or off for one display. Pairing a screen is not consent to put an alarm on it.
 app.put('/agent/displays/:id/urgent', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
