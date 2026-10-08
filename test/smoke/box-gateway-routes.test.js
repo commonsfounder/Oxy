@@ -32,7 +32,7 @@ function post(path, body, contentType) {
 
 // The app-wide login check must let the box's token-scoped routes through to their own display check.
 test('the box routes are reached by the real server and refuse a bad display token themselves', async () => {
-  for (const [route, body, type] of [['voice', Buffer.alloc(40000), 'application/octet-stream'], ['sensors', '{}', 'application/json'], ['sound', '{"type":"smoke_alarm"}', 'application/json']]) {
+  for (const [route, body, type] of [['voice', Buffer.alloc(40000), 'application/octet-stream'], ['sensors', '{}', 'application/json'], ['sound', '{"type":"smoke_alarm"}', 'application/json'], ['signal', '{"kind":"sensor","name":"motion","value":"active"}', 'application/json']]) {
     const result = await post(`/display/some-display/${route}`, body, type);
     assert.notEqual(result.status, 404, route);
     assert.notEqual(JSON.parse(result.text).error, 'Unauthorized', `${route} was stopped by the app login check`);

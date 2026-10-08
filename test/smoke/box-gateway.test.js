@@ -151,3 +151,33 @@ test('alarm sounds become fixed household events, deduped, and unknown sounds ar
     assert.equal(beeping.status, 200);
   } finally { await box.close(); }
 });
+
+test('sensor signals reach the combining rules: an alarm heard plus a temperature rise raises a confirmed fire, bad signals are refused', async () => {
+  const box = await start();
+  try {
+    assert.equal((await box.request('/display/d1/signal', { token: 'bad', json: { kind: 'sensor', name: 'motion', value: 'active' } })).status, 401);
+    assert.equal((await box.request('/display/d1/signal', { json: { kind: 'sensor', name: 'toaster', value: 'on' } })).status, 400);
+    const sound = await box.request('/display/d1/sound', { json: { type: 'smoke_alarm' } });
+    assert.equal(sound.status, 200);
+    assert.equal(box.calls.events.length, 1);
+    assert.equal(box.calls.events[0].events[0].title, 'Smoke alarm heard');
+    const signal = await box.request('/display/d1/signal', { json: { kind: 'sensor', name: 'temperature_rise', value: 'rapid', room: 'kitchen' } });
+    assert.equal(signal.status, 200);
+    assert.equal(box.calls.events.length, 2);
+    const confirmed = box.calls.events[1].events[0];
+    assert.equal(confirmed.title, 'Fire likely');
+    assert.equal(confirmed.urgent, true);
+    assert.equal(confirmed.source, 'adam-fusion');
+    const none = await box.request('/display/d1/signal', { json: { kind: 'sensor', name: 'motion', value: 'active' } });
+    assert.equal(JSON.parse(none.body).raised, 0);
+  } finally { await box.close(); }
+});
+
+test('signals are rate limited per display', async () => {
+  const box = await start();
+  try {
+    let last;
+    for (let i = 0; i < 32; i++) last = await box.request('/display/d1/signal', { json: { kind: 'sensor', name: 'motion', value: 'active' } });
+    assert.equal(last.status, 429);
+  } finally { await box.close(); }
+});

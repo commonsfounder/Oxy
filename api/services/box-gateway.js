@@ -5,6 +5,7 @@
 
 const express = require('express');
 const displayAsk = require('./display-ask');
+const sensorFusion = require('./sensor-fusion');
 
 const RATE = 16000;
 const MIN_AUDIO_BYTES = RATE * 2 * 0.4;
@@ -101,8 +102,10 @@ function soundEvent(displayId, type, now = new Date()) {
 function registerBoxRoutes(app, deps) {
   const { supabase, pairedDisplays, displayBearerToken, bridgeToChatPipeline, buildDisplayChatRequest, evaluateAndSurfaceHouseholdEvents,
     voice, reactions, findPendingAction, log = () => {} } = deps;
+  const fusion = deps.fusion || sensorFusion.createFusion();
   const sensors = new Map();
-  app.use(['/display/:id/voice', '/display/:id/sensors', '/display/:id/sound'], (req, res, next) => {
+  const signalTimes = new Map();
+  app.use(['/display/:id/voice', '/display/:id/sensors', '/display/:id/sound', '/display/:id/signal'], (req, res, next) => {
     res.on('finish', () => log('info', 'box.request', { route: req.path.split('/').pop(), status: res.statusCode, bytes: Number(req.headers['content-length'] || 0) }));
     next();
   });
@@ -126,6 +129,26 @@ function registerBoxRoutes(app, deps) {
     });
     res.send(pcm);
   }
+
+  // Sounds and other sensors are combined over a short window. Combining only adds to what is raised: a smoke or CO
+  // alarm heard on its own is still raised at once by the sound route.
+  async function raiseFindings(userId, signal, now) {
+    const findings = fusion.ingest(userId, signal);
+    if (!findings.length) return 0;
+    const outcome = await evaluateAndSurfaceHouseholdEvents(userId, findings.map(finding => sensorFusion.findingToEvent(finding, now)), now);
+    return outcome.raised;
+  }
+
+  // Some alerts wait for a grace period (a door opening before the phone says someone is home), so houses are re-checked now and then.
+  const sweepTimer = setInterval(async () => {
+    try {
+      for (const { userId, findings } of fusion.sweep()) {
+        const now = new Date();
+        await evaluateAndSurfaceHouseholdEvents(userId, findings.map(finding => sensorFusion.findingToEvent(finding, now)), now);
+      }
+    } catch (e) { log('warn', 'box.sweep.failed', { error: e.message }); }
+  }, deps.sweepMs ?? 15000);
+  sweepTimer.unref?.();
 
   app.post('/display/:id/voice', express.raw({ type: 'application/octet-stream', limit: MAX_AUDIO_BYTES + 1024 }), async (req, res) => {
     try {
@@ -171,6 +194,25 @@ function registerBoxRoutes(app, deps) {
     }
   });
 
+  app.post('/display/:id/signal', async (req, res) => {
+    try {
+      const display = await authorise(req, res);
+      if (!display) return;
+      const now = Date.now();
+      const recent = (signalTimes.get(display.id) || []).filter(at => now - at < 60000);
+      if (recent.length >= 30) return res.status(429).json({ error: 'Too many readings. Try again in a moment.' });
+      signalTimes.set(display.id, [...recent, now]);
+      const signal = { kind: req.body?.kind, name: req.body?.name, value: req.body?.value, room: req.body?.room };
+      let raised;
+      try { raised = await raiseFindings(display.user_id, signal, new Date(now)); }
+      catch (e) { if (e?.code === 'invalid_signal') return res.status(400).json({ error: e.message }); throw e; }
+      res.json({ ok: true, raised });
+    } catch (e) {
+      log('warn', 'box.signal.failed', { error: e.message });
+      res.status(503).json({ error: 'That reading could not be recorded.' });
+    }
+  });
+
   app.post('/display/:id/sound', async (req, res) => {
     try {
       const display = await authorise(req, res);
@@ -183,7 +225,8 @@ function registerBoxRoutes(app, deps) {
       if (now.getTime() - (lastSound.get(key) || 0) < 15000) return res.json({ ok: true, raised: 0, deduped: true });
       lastSound.set(key, now.getTime());
       const outcome = await evaluateAndSurfaceHouseholdEvents(display.user_id, [event], now);
-      res.json({ ok: true, raised: outcome.raised });
+      const confirmed = await raiseFindings(display.user_id, { kind: 'sound', name: type }, now);
+      res.json({ ok: true, raised: outcome.raised + confirmed });
     } catch (e) {
       log('warn', 'box.sound.failed', { error: e.message });
       res.status(503).json({ error: 'That sound could not be reported.' });

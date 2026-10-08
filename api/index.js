@@ -795,7 +795,7 @@ app.use((req, res, next) => {
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
     (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path) || /^\/display\/[^/]+\/(voice|sensors|sound)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
+    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path) || /^\/display\/[^/]+\/(voice|sensors|sound|signal)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
