@@ -1,5 +1,9 @@
 # ESP32-S3-BOX-3 arrival steps
 
+The local USB voice bench is implemented in `hardware/esp32-box3/` and `api/physical/box3-voice.js`. On 2026-10-05 the physical BOX-3 captured the spoken test "Adam, what is two plus three?", transcription returned that text, the existing local agent answered "Two plus three is five.", and the BOX-3 codec acknowledged reply playback. This establishes a USB voice round trip, not independent confirmation of audible sound. See `hardware/esp32-box3/README.md` for the bounded host bridge and factory backup. The network adapter and production Oxy action integration below remain separate work.
+
+The same bench firmware now reads the IMU and attached SENSOR base's temperature/humidity and configured AT581x signal. `api/physical/box3-sensors.js` imports fresh USB readings as hardware observations for the existing context agent. IMU movement remains device movement, and inactive radar does not imply an empty room. Environmental readings and an agent-generated spoken sensor report were tested; radar movement transitions, infrared, and BOX-based CSI still need proof.
+
 Espressif's [BOX-3 hardware overview](https://github.com/espressif/esp-box/blob/master/docs/hardware_overview/esp32_s3_box_3/hardware_overview_for_box_3.md) describes a 2.4-inch touch display, two digital microphones, speaker, three buttons, accelerometer, gyroscope, Wi-Fi, and BLE. These are board capabilities, not validated Adam capabilities. Espressif's [firmware guide](https://github.com/espressif/esp-box/blob/master/docs/firmware_update.md) warns that an older v0.5.0 release is for BOX and BOX-Lite, so confirm the exact BOX-3 board revision and compatible current firmware before flashing.
 
 1. Inspect the delivered board and its exact revision, USB cable, accessories, and current firmware. Confirm a BOX-3-compatible ESP-IDF example builds and flashes.
