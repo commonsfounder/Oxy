@@ -1,44 +1,11 @@
 // Shared language for text that can reach the person using Adam.
 // Provider names, action ids, and server errors stay behind this boundary.
 
-const ACTION_NAMES = Object.freeze({
-  send_email: 'Email',
-  send_outlook_email: 'Email',
-  get_emails: 'Email',
-  search_emails: 'Email',
-  get_outlook_emails: 'Email',
-  search_outlook_emails: 'Email',
-  send_message: 'Message',
-  send_telegram: 'Message',
-  send_adam_email: 'Message',
-  send_adam_sms: 'Message',
-  make_call: 'Call',
-  create_reminder: 'Reminder',
-  create_calendar_event: 'Calendar event',
-  get_calendar_events: 'Calendar',
-  book_appointment: 'Appointment',
-  find_place: 'Nearby place',
-  get_directions: 'Directions',
-  plan_trip: 'Travel plan',
-  book_uber: 'Ride',
-  book_lyft: 'Ride',
-  search_trains: 'Train times',
-  play_music: 'Music',
-  add_to_music_playlist: 'Music',
-  web_search: 'Search',
-  create_github_issue: 'GitHub issue',
-  project_status: 'Project update',
-  project_diff: 'Changes',
-  project_write: 'Saved update',
-  project_check: 'Check',
-  project_commit: 'Saved update',
-  project_rollback: 'Reverted update',
-  project_sync: 'Published update',
-  workspace_read: 'Saved information',
-  workspace_write: 'Saved update',
-  workspace_list: 'Saved information',
-  forget_memory: 'Memory'
-});
+const { ACTION_WORDING } = require('../action-wording');
+
+const ACTION_NAMES = Object.freeze(Object.fromEntries(
+  Object.entries(ACTION_WORDING).filter(([, wording]) => wording.name).map(([type, wording]) => [type, wording.name])
+));
 
 function titleCaseAction(type) {
   if (!type) return 'Action';
@@ -90,18 +57,7 @@ function actionFailureMessage(action, rawError = '') {
 function formatActionFailure(action, rawError = '') {
   const detail = actionFailureMessage(action, rawError);
   if (/^This connection needs attention\./i.test(detail)) {
-    const lead = {
-      search_emails: "I couldn't check your email.",
-      get_emails: "I couldn't check your email.",
-      search_outlook_emails: "I couldn't check your email.",
-      get_outlook_emails: "I couldn't check your email.",
-      get_calendar_events: "I couldn't check your calendar.",
-      web_search: "I couldn't search for that.",
-      find_place: "I couldn't find a nearby place.",
-      get_directions: "I couldn't get directions.",
-      book_uber: "I couldn't arrange the ride.",
-      book_lyft: "I couldn't arrange the ride."
-    }[action] || `I couldn't finish ${actionDisplayName(action).toLowerCase()}.`;
+    const lead = ACTION_WORDING[action]?.failureLead || `I couldn't finish ${actionDisplayName(action).toLowerCase()}.`;
     return `${lead} The connection needs attention. Reconnect it in Settings, then try again.`;
   }
   if (/^(I need|I couldn't|This connection|The payment|The website|Nearby|Cancelled|Canceled)/i.test(detail)) {
@@ -125,18 +81,7 @@ function formatProviderFailure(rawError = '') {
 }
 
 function approvalTitle(action) {
-  switch (action) {
-    case 'send_email':
-    case 'send_outlook_email': return 'Email ready to send';
-    case 'send_message':
-    case 'send_telegram': return 'Message ready to send';
-    case 'book_uber':
-    case 'book_lyft': return 'Ride ready to book';
-    case 'make_call': return 'Call ready to make';
-    case 'create_calendar_event': return 'Calendar event ready';
-    case 'book_appointment': return 'Appointment ready to book';
-    default: return `${actionDisplayName(action)} needs your OK`;
-  }
+  return ACTION_WORDING[action]?.approval || `${actionDisplayName(action)} needs your OK`;
 }
 
 module.exports = {

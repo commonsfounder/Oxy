@@ -15,8 +15,10 @@ process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-key';
 const { ACTION_CONTRACTS } = require('../../api/action-contracts');
 const { handlers } = require('../../api/actions');
 const { getConnectorDefinition } = require('../../api/services/action-catalog');
-const { PROGRESS_LINES } = require('../../api/services/progress-lines');
-const { ACTION_NAMES } = require('../../api/services/user-facing-copy');
+const { ACTION_WORDING } = require('../../api/action-wording');
+
+// Logged by the phone itself, so the backend has no contract for it.
+const CLIENT_ONLY = new Set(['check_health']);
 
 const types = Object.keys(ACTION_CONTRACTS);
 const visible = types.filter(type => ACTION_CONTRACTS[type].modelVisible !== false);
@@ -40,16 +42,11 @@ test('no handler exists for an action that has no contract', () => {
   assert.deepEqual(orphans, [], report('handlers without a contract', orphans));
 });
 
-test('every action has a progress line, and no progress line names a missing action', () => {
-  const missing = types.filter(type => typeof PROGRESS_LINES[type] !== 'function');
-  const stale = Object.keys(PROGRESS_LINES).filter(type => !ACTION_CONTRACTS[type]);
+test('every action has a progress line, and no wording is kept for a missing action', () => {
+  const missing = types.filter(type => typeof ACTION_WORDING[type]?.progress !== 'function');
+  const stale = Object.keys(ACTION_WORDING).filter(type => !ACTION_CONTRACTS[type] && !CLIENT_ONLY.has(type));
   assert.deepEqual(missing, [], report('actions with no progress line', missing));
-  assert.deepEqual(stale, [], report('progress lines for missing actions', stale));
-});
-
-test('no display name is kept for an action that no longer exists', () => {
-  const stale = Object.keys(ACTION_NAMES).filter(type => !ACTION_CONTRACTS[type]);
-  assert.deepEqual(stale, [], report('display names for missing actions', stale));
+  assert.deepEqual(stale, [], report('wording for missing actions', stale));
 });
 
 test('every model-visible action says its risk, its confirmation rule and its outcome wording', () => {

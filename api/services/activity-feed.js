@@ -1,5 +1,7 @@
 'use strict';
 
+const { ACTION_WORDING } = require('../action-wording');
+
 // Activity is Adam's record of what it noticed, did, asked and scheduled. It is built from the
 // places those things are actually recorded (the action log, schedules, approvals, notices and
 // finished durable work), never from the chat transcript: a message or a reaction is
@@ -45,38 +47,10 @@ function humanize(type) {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Something';
 }
 
-function quoted(text) {
-  const value = clean(text, 60);
-  return value ? `“${value}”` : '';
-}
-
 // Past-tense, plain phrases for the common actions. Anything unmapped says what it was, not an internal name.
 function describeAction(type, input = {}) {
-  const who = clean(input.contact || input.to || input.recipient || input.name, 40);
-  const withWho = (verb, noun) => (who ? `${verb} ${noun} to ${who}` : `${verb} ${noun}`);
-  switch (type) {
-    case 'send_message': return withWho('Sent', 'a message');
-    case 'send_telegram': return withWho('Sent', 'a Telegram message');
-    case 'send_email': case 'send_outlook_email': return withWho('Sent', 'an email');
-    case 'send_adam_sms': case 'send_adam_email': return withWho('Sent', 'a message');
-    case 'create_calendar_event': return `Added ${quoted(input.title) || 'an event'} to your calendar`;
-    case 'book_uber': case 'book_lyft': return 'Booked a ride';
-    case 'book_appointment': return 'Booked an appointment';
-    case 'make_call': return who ? `Opened a call to ${who}` : 'Opened a call';
-    case 'create_scheduled_task': case 'create_agent_task': return `Set up ${quoted(input.title || input.goal) || 'a task'}`;
-    case 'web_search': return `Looked up ${quoted(input.query) || 'something online'}`;
-    case 'get_emails': case 'search_emails': return 'Checked your email';
-    case 'get_calendar_events': return 'Checked your calendar';
-    case 'find_place': return `Looked for ${quoted(input.query || input.place) || 'a place'}`;
-    case 'get_directions': return 'Looked up directions';
-    case 'plan_trip': return 'Planned a trip';
-    case 'search_trains': return 'Checked train times';
-    case 'check_health': return 'Checked your health data';
-    case 'transaction_status': return 'Checked an order';
-    case 'transaction_authorize': return 'Placed an order';
-    case 'confirm_browser_payment': return 'Paid for an order';
-    default: return humanize(type);
-  }
+  const feed = ACTION_WORDING[type]?.feed;
+  return feed ? feed(input) : humanize(type);
 }
 
 function classifyAction(type) {
