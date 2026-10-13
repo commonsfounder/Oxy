@@ -8843,6 +8843,31 @@ app.post('/display/:id/voice', express.raw({ type: ['audio/wav', 'audio/x-wav', 
     if (!display) return res.status(401).json({ error: 'Device authorization is invalid.' });
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Send the recording as audio/wav.' });
     displayAsk.checkAskRate(display.id);
+    // ?stream=1: the reply is spoken as it is synthesised, as raw 16 kHz 16-bit mono PCM
+    // (audio/L16), so the device starts playing within a moment of the words being known.
+    if (req.query.stream === '1') {
+      const { deviceVoiceTurnStream } = require('./services/device-voice');
+      const { streamSpeechOpenAI } = require('./services/voice-provider');
+      const sent = await deviceVoiceTurnStream({
+        audio: req.body,
+        transcribe: wav => transcribeSpeechOpenAI(wav, 'audio/wav'),
+        ask: text => bridgeToChatPipeline(display.user_id, text, req, buildHomeDeviceChatRequest),
+        streamSpeech: text => streamSpeechOpenAI(text),
+        onStart: ({ heard, reply, kind }) => {
+          res.writeHead(200, {
+            'Content-Type': 'audio/L16; rate=16000; channels=1',
+            'X-Adam-Reply-Kind': kind,
+            'X-Adam-Heard': encodeURIComponent(heard.slice(0, 300)),
+            'X-Adam-Reply': encodeURIComponent(reply.slice(0, 300)),
+            'Cache-Control': 'no-store'
+          });
+          res.flushHeaders();
+        },
+        onAudio: pcm => (res.write(pcm) ? null : new Promise(resolve => res.once('drain', resolve)))
+      });
+      log('info', 'device.voice.stream', { displayId: display.id, pcmBytes: sent });
+      return res.end();
+    }
     const turn = await deviceVoiceTurn({
       audio: req.body,
       transcribe: wav => transcribeSpeechOpenAI(wav, 'audio/wav'),
@@ -8858,6 +8883,11 @@ app.post('/display/:id/voice', express.raw({ type: ['audio/wav', 'audio/x-wav', 
     });
     res.send(turn.audio);
   } catch (e) {
+    // A streamed reply that fails part-way has already sent its headers: end it, the device plays what came.
+    if (res.headersSent) {
+      log('warn', 'device.voice.stream_failed', { error: e.message });
+      return res.end();
+    }
     if (['invalid_audio', 'unsupported_audio', 'too_short', 'too_long'].includes(e?.code)) return res.status(400).json({ error: e.message, code: e.code });
     if (e?.code === 'too_fast') return res.status(429).json({ error: e.message });
     log('warn', 'device.voice.failed', { error: e.message });

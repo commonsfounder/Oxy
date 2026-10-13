@@ -35,6 +35,14 @@ const voiceProvider = require('../../api/services/voice-provider');
 const heardBy = [];
 voiceProvider.transcribeSpeechOpenAI = async wav => { heardBy.push(parseWav(wav).sampleRate); return 'what is on tomorrow'; };
 voiceProvider.synthesizeSpeechOpenAI = async () => tone(220, 0.6, 24000).toString('base64');
+// Streamed speech: the same tone as raw 24 kHz PCM, in awkward odd-sized pieces with gaps between them.
+voiceProvider.streamSpeechOpenAI = async function* () {
+  const pcm = parseWav(tone(220, 0.6, 24000)).pcm;
+  for (let offset = 0; offset < pcm.length; offset += 1001) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    yield pcm.subarray(offset, offset + 1001);
+  }
+};
 
 const pairedDisplays = require('../../api/services/paired-displays');
 const DISPLAY = { id: 'disp-1', user_id: 'user-1', display_name: 'Kitchen' };
@@ -83,6 +91,41 @@ test('pair, speak and report a sound with the same calls the firmware makes', as
     assert.match(csv, /^key,type,encoding,value\nadam,namespace,,\n/);
     assert.match(csv, /token,data,string,"tok-1"/);
     assert.match(csv, /wifi_ssid,data,string,"Home ""5G"""/);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a streamed reply arrives as raw 16 kHz PCM, identical to the downloaded one, and the script reports first audio', async () => {
+  const server = app.listen(0);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adam-device-'));
+  const env = { ...process.env, ADAM_HOME_DEVICE_STATE: path.join(dir, 'state.json') };
+  const script = path.resolve(__dirname, '../../scripts/home-device.js');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    fs.writeFileSync(env.ADAM_HOME_DEVICE_STATE, JSON.stringify({ baseUrl: base, displayId: 'disp-1', token: 'tok-1' }));
+    fs.writeFileSync(path.join(dir, 'ask.wav'), tone(300, 1.2, 16000));
+    const resetRate = () => require('../../api/services/display-ask')._reset(); // one turn per 3 s per device
+
+    resetRate();
+    const raw = await fetch(`${base}/display/disp-1/voice?stream=1`, {
+      method: 'POST', headers: { Authorization: 'Bearer tok-1', 'Content-Type': 'audio/wav' }, body: fs.readFileSync(path.join(dir, 'ask.wav'))
+    });
+    assert.equal(raw.status, 200);
+    assert.equal(raw.headers.get('content-type'), 'audio/L16; rate=16000; channels=1');
+    assert.equal(decodeURIComponent(raw.headers.get('x-adam-reply')), 'You have the dentist at 9.');
+    const streamedPcm = Buffer.from(await raw.arrayBuffer());
+    const { toDeviceWav } = require('../../api/services/device-audio');
+    assert.ok(streamedPcm.equals(parseWav(toDeviceWav(tone(220, 0.6, 24000))).pcm), 'streamed audio matches the non-streamed reply sample for sample');
+
+    resetRate();
+    const run = await promisify(execFile)('node', [script, 'voice', path.join(dir, 'ask.wav'), '--stream', '--out', path.join(dir, 'reply.wav')], { env });
+    assert.match(run.stdout, /Words known after \d+ ms; first audio after \d+ ms; done after \d+ ms/);
+    assert.match(run.stdout, /\(streamed\)/);
+    const saved = parseWav(fs.readFileSync(path.join(dir, 'reply.wav')));
+    assert.equal(saved.sampleRate, 16000);
+    assert.ok(saved.pcm.equals(streamedPcm));
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });

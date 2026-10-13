@@ -5,7 +5,8 @@
 //
 //   1. In the app, start pairing a display; it shows a link (…/display?challenge=ID) and a code.
 //   2. node scripts/home-device.js pair <link> <code> --name Kitchen      -> data/home-device.json
-//   3. node scripts/home-device.js voice request.wav [--out reply.wav]     (16 kHz mono 16-bit WAV)
+//   3. node scripts/home-device.js voice request.wav [--out reply.wav] [--stream]   (16 kHz mono 16-bit WAV;
+//      --stream plays the reply as it is synthesised and reports time to first audio)
 //      node scripts/home-device.js sound smoke_alarm [--confidence 0.95] [--sustained]
 //   4. node scripts/home-device.js nvs --ssid HOME --password … > adam-nvs.csv
 //      then: nvs_partition_gen.py generate adam-nvs.csv adam-nvs.bin 0x6000
@@ -60,19 +61,30 @@ async function pair(args) {
 async function voice(args) {
   const state = loadState();
   const file = args[0];
-  if (!file) throw new Error('Usage: voice <request.wav> [--out reply.wav]');
+  if (!file) throw new Error('Usage: voice <request.wav> [--out reply.wav] [--stream]');
+  const streamed = args.includes('--stream');
   const started = Date.now();
-  const response = await request(state, `/display/${encodeURIComponent(state.displayId)}/voice`, {
+  const response = await request(state, `/display/${encodeURIComponent(state.displayId)}/voice${streamed ? '?stream=1' : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: fs.readFileSync(file)
   });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `HTTP ${response.status}`);
-  const reply = Buffer.from(await response.arrayBuffer());
+  const headersAt = Date.now();
+  let firstAudioAt = null;
+  const parts = [];
+  for await (const chunk of response.body) {
+    if (firstAudioAt === null && chunk.length) firstAudioAt = Date.now();
+    parts.push(Buffer.from(chunk));
+  }
+  const body = Buffer.concat(parts);
+  // A streamed reply is raw PCM; wrap it so it plays like the non-streamed WAV.
+  const reply = streamed ? require('../api/services/device-audio').wavFromPcm16(body.subarray(0, body.length - (body.length % 2))) : body;
   const out = option(args, '--out', 'reply.wav');
   fs.writeFileSync(out, reply);
   const decode = name => decodeURIComponent(response.headers.get(name) || '');
   console.log(`Heard: ${decode('x-adam-heard')}`);
   console.log(`Adam (${response.headers.get('x-adam-reply-kind')}): ${decode('x-adam-reply')}`);
-  console.log(`${reply.length} bytes of 16 kHz speech -> ${out} in ${Date.now() - started} ms`);
+  console.log(`Words known after ${headersAt - started} ms; first audio after ${(firstAudioAt || Date.now()) - started} ms; done after ${Date.now() - started} ms`);
+  console.log(`${reply.length} bytes of 16 kHz speech -> ${out}${streamed ? ' (streamed)' : ''}`);
 }
 
 async function sound(args) {

@@ -4,7 +4,7 @@ const http = require('node:http');
 
 const { parseWav, toDeviceWav, validateDeviceCapture, wavFromPcm16 } = require('../../api/services/device-audio');
 const { deviceSoundEvents, SOUNDS } = require('../../api/services/device-sounds');
-const { deviceVoiceTurn, spokenText, SAY } = require('../../api/services/device-voice');
+const { deviceVoiceTurn, deviceVoiceTurnStream, spokenText, SAY } = require('../../api/services/device-voice');
 const { buildChatChannelContext, buildHomeDeviceChatRequest } = require('../../api/services/chat-channel');
 
 function tone(hz, seconds, rate, amplitude = 8000) {
@@ -178,5 +178,45 @@ test('device voice and sound routes refuse a request without the device token', 
     assert.equal(await post('/display/d1/sounds', JSON.stringify({ events: [] }), 'application/json'), 401);
   } finally {
     server.close();
+  }
+});
+
+test('a streamed turn announces the words before any audio, and approval words never reach Adam', async () => {
+  const events = [];
+  const pcm24 = parseWav(tone(220, 0.5, 24000)).pcm;
+  const streamSpeech = async function* (text) { events.push(['speak', text]); yield pcm24.subarray(0, 333); yield pcm24.subarray(333); };
+  const sent = await deviceVoiceTurnStream({
+    audio: tone(300, 1, 16000), transcribe: async () => 'what is on tomorrow', ask: async () => ({ text: 'Dentist at 9.' }),
+    streamSpeech, onStart: info => events.push(['start', info.reply, info.kind]), onAudio: pcm => events.push(['audio', pcm.length])
+  });
+  assert.deepEqual(events[0], ['start', 'Dentist at 9.', 'answer']);
+  assert.deepEqual(events[1], ['speak', 'Dentist at 9.']);
+  assert.ok(events.slice(2).every(e => e[0] === 'audio'));
+  assert.equal(sent, parseWav(toDeviceWav(tone(220, 0.5, 24000))).pcm.length);
+
+  const asked = [];
+  await deviceVoiceTurnStream({
+    audio: tone(300, 1, 16000), transcribe: async () => 'yes do it', ask: async text => { asked.push(text); return {}; },
+    streamSpeech: async function* () {}, onStart: info => events.push(['start', info.reply]), onAudio: () => {}
+  });
+  assert.deepEqual(asked, []);
+  assert.deepEqual(events.at(-1), ['start', SAY.approveOnPhone]);
+});
+
+test('the streaming resampler matches the whole-file one exactly, however the network splits the bytes', () => {
+  const { createStreamingResampler } = require('../../api/services/device-audio');
+  const pcm = Buffer.alloc(24000 * 2 * 2 + 14);
+  let s = 0;
+  for (let i = 0; i < pcm.length / 2; i++) {
+    s = 0.97 * s + Math.sin(i * 1.7) * 900;
+    pcm.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(s + 4000 * Math.sin(i / 9)))), i * 2);
+  }
+  const whole = parseWav(toDeviceWav(wavFromPcm16(pcm, 24000))).pcm;
+  for (const size of [1, 3, 160, 4097, pcm.length]) {
+    const r = createStreamingResampler(24000);
+    const parts = [];
+    for (let o = 0; o < pcm.length; o += size) parts.push(r.push(pcm.subarray(o, o + size)));
+    parts.push(r.flush());
+    assert.ok(Buffer.concat(parts).equals(whole), `chunk size ${size}`);
   }
 });

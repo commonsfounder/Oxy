@@ -47,6 +47,61 @@ int adam_wav_samples(const uint8_t *wav, size_t len, const uint8_t **pcm, size_t
     return -1;
 }
 
+void adam_ring_init(adam_ring_t *r, uint8_t *mem, size_t size, uint32_t preroll_ms) {
+    memset(r, 0, sizeof *r);
+    r->mem = mem;
+    r->size = size & ~(size_t)1;
+    r->preroll = (size_t)preroll_ms * ADAM_SAMPLE_RATE / 1000 * 2;
+    if (r->preroll > r->size / 2) r->preroll = r->size / 2;
+}
+
+static void ring_put(adam_ring_t *r, uint8_t byte) {
+    r->mem[(r->head + r->count) % r->size] = byte;
+    r->count++;
+}
+
+size_t adam_ring_write(adam_ring_t *r, const uint8_t *data, size_t n) {
+    size_t taken = 0;
+    // Keep the ring holding whole samples only: a lone byte waits in `carry` for its partner.
+    while (taken < n) {
+        if (r->has_carry) {
+            if (r->size - r->count < 2) break;
+            ring_put(r, r->carry);
+            ring_put(r, data[taken++]);
+            r->has_carry = 0;
+        } else if (n - taken >= 2) {
+            if (r->size - r->count < 2) break;
+            ring_put(r, data[taken++]);
+            ring_put(r, data[taken++]);
+        } else {
+            r->carry = data[taken++];
+            r->has_carry = 1;
+        }
+    }
+    return taken;
+}
+
+void adam_ring_finish(adam_ring_t *r) { r->finished = 1; }
+
+size_t adam_ring_read(adam_ring_t *r, uint8_t *out, size_t max_bytes) {
+    if (!r->started) {
+        if (r->count < r->preroll && !r->finished) return 0;
+        r->started = 1;
+    }
+    size_t n = r->count < max_bytes ? r->count : max_bytes;
+    n &= ~(size_t)1;
+    if (!n) {
+        if (!r->finished) r->underruns++;
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) out[i] = r->mem[(r->head + i) % r->size];
+    r->head = (r->head + n) % r->size;
+    r->count -= n;
+    return n;
+}
+
+int adam_ring_done(const adam_ring_t *r) { return r->finished && r->count == 0; }
+
 void adam_sounds_init(adam_sound_queue_t *q) { memset(q, 0, sizeof *q); }
 
 static adam_sound_t *at(adam_sound_queue_t *q, int i) { return &q->items[(q->head + i) % ADAM_SOUND_QUEUE]; }

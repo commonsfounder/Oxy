@@ -116,6 +116,71 @@ function resample(samples, from, to) {
   return out;
 }
 
+// The same filter as resample(), fed in pieces: push() raw little-endian 16-bit mono chunks of any
+// size (odd byte counts included) and get back 16-bit samples at the new rate as soon as each one's
+// whole filter window has arrived; flush() finishes the tail. Output is identical to resample() over
+// the whole signal, so a streamed reply sounds exactly like a downloaded one.
+function createStreamingResampler(from, to = DEVICE_SAMPLE_RATE) {
+  const ratio = from / to;
+  const cutoff = Math.min(1, to / from) * 0.95;
+  const half = 16;
+  let buffer = new Float32Array(0);
+  let base = 0;        // absolute index of buffer[0]
+  let received = 0;    // samples received so far
+  let next = 0;        // next output index
+  let carry = null;    // a dangling byte from an odd-sized chunk
+
+  function value(i, limit) {
+    const center = i * ratio;
+    const start = Math.floor(center) - half + 1;
+    let acc = 0;
+    let weight = 0;
+    for (let j = start; j < start + 2 * half; j++) {
+      if (j < 0 || j >= limit) continue;
+      const x = j - center;
+      const sinc = x === 0 ? 1 : Math.sin(Math.PI * cutoff * x) / (Math.PI * cutoff * x);
+      const w = sinc * (0.5 + 0.5 * Math.cos(Math.PI * x / half));
+      acc += buffer[j - base] * w;
+      weight += w;
+    }
+    return weight ? acc / weight : 0;
+  }
+
+  function emit(limit, ready) {
+    const out = [];
+    while (ready(next)) out.push(value(next++, limit));
+    const keepFrom = Math.max(base, Math.floor(next * ratio) - half + 1);
+    if (keepFrom > base) {
+      buffer = buffer.slice(keepFrom - base);
+      base = keepFrom;
+    }
+    const pcm = Buffer.alloc(out.length * 2);
+    // Math.fround: resample() keeps samples in a Float32Array, so round from the same 32-bit value.
+    out.forEach((sample, k) => pcm.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(Math.fround(sample)))), k * 2));
+    return pcm;
+  }
+
+  return {
+    push(chunk) {
+      let bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (carry) { bytes = Buffer.concat([carry, bytes]); carry = null; }
+      if (bytes.length % 2) { carry = bytes.subarray(bytes.length - 1); bytes = bytes.subarray(0, bytes.length - 1); }
+      const count = bytes.length / 2;
+      const grown = new Float32Array(buffer.length + count);
+      grown.set(buffer);
+      for (let k = 0; k < count; k++) grown[buffer.length + k] = bytes.readInt16LE(k * 2);
+      buffer = grown;
+      received += count;
+      return emit(Infinity, i => Math.floor(i * ratio) + half < received);
+    },
+    flush() {
+      const total = received;
+      const length = Math.floor(total / ratio);
+      return emit(total, i => i < length);
+    }
+  };
+}
+
 // Any PCM WAV from speech synthesis -> the device's playback format.
 function toDeviceWav(buffer) {
   const wav = parseWav(buffer);
@@ -133,6 +198,7 @@ function toDeviceWav(buffer) {
 module.exports = {
   DEVICE_SAMPLE_RATE,
   MAX_CAPTURE_SECONDS,
+  createStreamingResampler,
   parseWav,
   toDeviceWav,
   validateDeviceCapture,

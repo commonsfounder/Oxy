@@ -167,6 +167,47 @@ esp_err_t adam_net_voice(adam_net_t *net, const int16_t *pcm, size_t samples,
     return err;
 }
 
+esp_err_t adam_net_voice_stream(adam_net_t *net, const int16_t *pcm, size_t samples, adam_ring_t *ring, int *status) {
+    *status = 0;
+    if (!net->token[0] || net->link.unpaired) { adam_ring_finish(ring); return ESP_ERR_INVALID_STATE; }
+    if (samples > (size_t)ADAM_SAMPLE_RATE * ADAM_MAX_CAPTURE_SECONDS) samples = (size_t)ADAM_SAMPLE_RATE * ADAM_MAX_CAPTURE_SECONDS;
+
+    esp_http_client_handle_t c = open_post(net, "voice?stream=1", "audio/wav", 60000);
+    if (!c) { adam_ring_finish(ring); return ESP_ERR_NO_MEM; }
+    uint8_t header[ADAM_WAV_HEADER_BYTES];
+    uint32_t pcm_bytes = (uint32_t)(samples * 2);
+    adam_wav_header(header, pcm_bytes);
+    esp_err_t err = esp_http_client_open(c, (int)(sizeof header + pcm_bytes));
+    if (err == ESP_OK && esp_http_client_write(c, (const char *)header, sizeof header) != (int)sizeof header) err = ESP_FAIL;
+    for (size_t sent = 0; err == ESP_OK && sent < pcm_bytes;) {
+        int chunk = (int)(pcm_bytes - sent > 4096 ? 4096 : pcm_bytes - sent);
+        int w = esp_http_client_write(c, (const char *)pcm + sent, chunk);
+        if (w <= 0) err = ESP_FAIL;
+        else sent += (size_t)w;
+    }
+    if (err == ESP_OK && esp_http_client_fetch_headers(c) < 0) err = ESP_FAIL;
+    if (err == ESP_OK) {
+        *status = esp_http_client_get_status_code(c);
+        static uint8_t chunk[2048];
+        while (*status == 200) {
+            int r = esp_http_client_read(c, (char *)chunk, sizeof chunk);
+            if (r <= 0) break;
+            // The speaker drains the ring concurrently; wait for room rather than drop audio.
+            for (size_t taken = 0; taken < (size_t)r;) {
+                taken += adam_ring_write(ring, chunk + taken, (size_t)r - taken);
+                if (taken < (size_t)r) vTaskDelay(pdMS_TO_TICKS(5));
+            }
+        }
+    }
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    adam_ring_finish(ring);
+
+    adam_link_result_t result = adam_link_result(&net->link, *status, mono_ms(), esp_random() % 1000);
+    if (result == ADAM_LINK_UNPAIRED) forget_pairing(net);
+    return err;
+}
+
 void adam_net_heard_alarm(adam_net_t *net, alarm_kind_t kind) {
     const char *key = adam_alarm_key(kind);
     if (!key) return;

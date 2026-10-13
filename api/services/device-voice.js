@@ -6,7 +6,7 @@
 // approve: approval words are refused before they reach the pipeline, and a reply that is waiting
 // on approval is spoken as "it's on your phone", never read out as a question to answer here.
 
-const { validateDeviceCapture, toDeviceWav } = require('./device-audio');
+const { createStreamingResampler, validateDeviceCapture, toDeviceWav } = require('./device-audio');
 const { validateDisplayAsk } = require('./display-ask');
 const reactions = require('./reactions');
 
@@ -49,8 +49,8 @@ function replyFor(result) {
   return { text: text || SAY.done, kind: 'answer' };
 }
 
-// transcribe(wav) -> text; ask(text) -> /chat result; synthesize(text) -> WAV buffer (any PCM rate).
-async function deviceVoiceTurn({ audio, transcribe, ask, synthesize }) {
+// transcribe(wav) -> text; ask(text) -> /chat result. Decides what to say back.
+async function decideReply({ audio, transcribe, ask }) {
   const capture = validateDeviceCapture(audio);
   const heard = String(await transcribe(capture.wav) || '').replace(/\s+/g, ' ').trim();
 
@@ -76,8 +76,31 @@ async function deviceVoiceTurn({ audio, transcribe, ask, synthesize }) {
     }
   }
 
+  return { heard, reply };
+}
+
+// synthesize(text) -> WAV buffer (any PCM rate). The whole reply, as one 16 kHz WAV.
+async function deviceVoiceTurn({ audio, transcribe, ask, synthesize }) {
+  const { heard, reply } = await decideReply({ audio, transcribe, ask });
   const speech = await synthesize(reply.text);
   return { heard, reply: reply.text, kind: reply.kind, audio: toDeviceWav(speech) };
 }
 
-module.exports = { SAY, deviceVoiceTurn, spokenText };
+// The same turn, but the reply is spoken as it is synthesised: onStart({ heard, reply, kind }) once
+// the words are known, then onAudio(16 kHz 16-bit mono PCM) for each piece. streamSpeech(text)
+// yields raw PCM chunks at speechRate. Returns the number of PCM bytes sent.
+async function deviceVoiceTurnStream({ audio, transcribe, ask, streamSpeech, speechRate = 24000, onStart, onAudio }) {
+  const { heard, reply } = await decideReply({ audio, transcribe, ask });
+  await onStart({ heard, reply: reply.text, kind: reply.kind });
+  const resampler = createStreamingResampler(speechRate);
+  let sent = 0;
+  for await (const chunk of streamSpeech(reply.text)) {
+    const pcm = resampler.push(chunk);
+    if (pcm.length) { sent += pcm.length; await onAudio(pcm); }
+  }
+  const tail = resampler.flush();
+  if (tail.length) { sent += tail.length; await onAudio(tail); }
+  return sent;
+}
+
+module.exports = { SAY, deviceVoiceTurn, deviceVoiceTurnStream, spokenText };

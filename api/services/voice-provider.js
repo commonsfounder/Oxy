@@ -87,6 +87,31 @@ async function synthesizeSpeechOpenAI(text, voiceName) {
 }
 
 /*
+ * Streams speech as it is generated: raw 24 kHz 16-bit mono PCM chunks (OpenAI's `pcm` format), so
+ * a device can start playing before the whole reply has been synthesised. The timeout covers the
+ * wait for the first audio, not the length of the reply.
+ */
+async function* streamSpeechOpenAI(text, voiceName) {
+  const voice = resolveOpenAIVoice(voiceName);
+  const model = process.env.OXY_TTS_MODEL || 'gpt-4o-mini-tts';
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${openAIBaseURL()}/audio/speech`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
+      body: JSON.stringify({ model, voice, input: text, response_format: 'pcm' })
+    });
+    if (!res.ok) throw new Error(`OpenAI TTS ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    clearTimeout(timeoutId);
+    for await (const chunk of res.body) yield Buffer.from(chunk);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/*
  * Transcribes WAV audio to text, sent as multipart/form-data — the Gemini path's
  * JSON+inlineData shape has no equivalent here.
  */
@@ -113,6 +138,7 @@ module.exports = {
   getVoiceProvider,
   resolveOpenAIVoice,
   synthesizeSpeechOpenAI,
+  streamSpeechOpenAI,
   transcribeSpeechOpenAI,
   OPENAI_VOICES,
   DEFAULT_OPENAI_VOICE,

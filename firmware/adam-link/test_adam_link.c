@@ -98,7 +98,47 @@ static void test_link(void) {
     assert(adam_link_result(&l, 401, 0, 0) == ADAM_LINK_UNPAIRED && !adam_link_may_send(&l, 1u << 30));
 }
 
+static void test_ring(void) {
+    uint8_t mem[64], out[64];
+    adam_ring_t r;
+    adam_ring_init(&r, mem, sizeof mem, 1);              // 1 ms = 32 bytes of pre-roll
+    assert(r.preroll == 32);
+
+    // Network reads split samples anywhere; the speaker only ever sees whole samples, in order.
+    uint8_t stream[40];
+    for (int i = 0; i < 40; i++) stream[i] = (uint8_t)i;
+    assert(adam_ring_write(&r, stream, 3) == 3 && r.count == 2 && r.has_carry);
+    assert(adam_ring_read(&r, out, 64) == 0);           // pre-rolling
+    assert(adam_ring_write(&r, stream + 3, 30) == 30 && r.count == 32 && r.has_carry == 1);
+    assert(adam_ring_read(&r, out, 7) == 6);             // even only
+    for (int i = 0; i < 6; i++) assert(out[i] == i);
+    assert(adam_ring_read(&r, out, 64) == 26);
+    for (int i = 0; i < 26; i++) assert(out[i] == 6 + i);
+    assert(adam_ring_read(&r, out, 64) == 0 && r.underruns == 1);   // caught up mid-reply
+
+    // A full ring takes what fits; the caller retries the rest.
+    assert(adam_ring_write(&r, stream + 33, 7) == 7);    // carry(32)+33.. → 8 bytes, ring has room
+    adam_ring_finish(&r);
+    assert(adam_ring_read(&r, out, 64) == 8);
+    for (int i = 0; i < 8; i++) assert(out[i] == 32 + i);
+    assert(adam_ring_done(&r));
+
+    adam_ring_init(&r, mem, sizeof mem, 0);
+    uint8_t big[100] = {0};
+    assert(adam_ring_write(&r, big, 100) == 64 && r.count == 64);
+    assert(adam_ring_write(&r, big, 1) == 1 && r.has_carry);  // a lone byte is held, not stored
+    assert(adam_ring_write(&r, big, 1) == 0);                  // and its pair has no room yet
+
+    // A reply shorter than the pre-roll still plays once the stream ends.
+    adam_ring_init(&r, mem, sizeof mem, 1);
+    adam_ring_write(&r, stream, 10);
+    assert(adam_ring_read(&r, out, 64) == 0);
+    adam_ring_finish(&r);
+    assert(adam_ring_read(&r, out, 64) == 10 && adam_ring_done(&r));
+}
+
 int main(void) {
+    test_ring();
     test_iso8601();
     test_wav();
     test_sounds();

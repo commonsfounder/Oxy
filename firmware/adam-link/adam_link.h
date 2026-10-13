@@ -33,6 +33,34 @@ void adam_wav_header(uint8_t out[ADAM_WAV_HEADER_BYTES], uint32_t pcm_bytes);
 // *pcm/*pcm_bytes when the reply is 16 kHz mono 16-bit PCM; -1 for anything else.
 int adam_wav_samples(const uint8_t *wav, size_t len, const uint8_t **pcm, size_t *pcm_bytes);
 
+// ---- Streamed replies ----------------------------------------------------------------------
+//
+// POST /display/{id}/voice?stream=1 answers with raw 16 kHz 16-bit mono PCM (audio/L16) as Adam's
+// reply is synthesised. The network task writes whatever each read returns into a ring; the speaker
+// task reads whole samples from it. Reads return nothing until `preroll` bytes are buffered (or the
+// stream has ended), so a slow first packet doesn't start playback only to stutter.
+
+typedef struct {
+    uint8_t *mem;
+    size_t size, head, count;  // bytes
+    size_t preroll;
+    uint8_t carry, has_carry;  // half of a sample split across two network reads
+    uint8_t started, finished;
+    uint32_t underruns;        // times the speaker caught up with the network mid-reply
+} adam_ring_t;
+
+// mem: caller-owned buffer (PSRAM is fine); size must be even. preroll_ms: e.g. 250.
+void adam_ring_init(adam_ring_t *r, uint8_t *mem, size_t size, uint32_t preroll_ms);
+// Copies as many bytes as fit (odd-sized writes are fine); returns how many were taken. The caller
+// retries the rest after the speaker has drained some.
+size_t adam_ring_write(adam_ring_t *r, const uint8_t *data, size_t n);
+// The network is done (or failed): play out what is left, pre-roll or not.
+void adam_ring_finish(adam_ring_t *r);
+// Up to max_bytes of whole samples (always even); 0 while pre-rolling or empty.
+size_t adam_ring_read(adam_ring_t *r, uint8_t *out, size_t max_bytes);
+// Everything received has been played.
+int adam_ring_done(const adam_ring_t *r);
+
 // ---- Sounds -----------------------------------------------------------------------------------
 
 typedef struct {

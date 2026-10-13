@@ -37,6 +37,12 @@ esp_err_t adam_net_start(adam_net_t *net);
 esp_err_t adam_net_voice(adam_net_t *net, const int16_t *pcm, size_t samples,
                          uint8_t *reply, size_t reply_cap, size_t *reply_len, int *status);
 
+// The same turn with the reply streamed: Adam's speech arrives as raw 16 kHz PCM while it is being
+// synthesised and is written into `ring` as it comes; run the speaker task on adam_ring_read() at the
+// same time so playback starts after the ring's pre-roll instead of after the whole download.
+// The ring is finished when the reply ends or fails.
+esp_err_t adam_net_voice_stream(adam_net_t *net, const int16_t *pcm, size_t samples, adam_ring_t *ring, int *status);
+
 // Queue detections (thread-safe), then send whatever is due. Cheap to call often: it does nothing
 // while the queue is empty or the link is backing off.
 void adam_net_heard_alarm(adam_net_t *net, alarm_kind_t kind);

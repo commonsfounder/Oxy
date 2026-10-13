@@ -22,6 +22,14 @@ button down → record 16 kHz mono into PSRAM (≤ 15 s) → button up
   ← play the reply bytes as they are
 ```
 
+**Streamed replies** (`?stream=1`, `adam_net_voice_stream`): the server sends raw 16 kHz PCM
+(`audio/L16`) while the reply is being synthesised, resampled on the fly with the same filter, so
+it is sample-for-sample the downloaded reply. The network task writes into an `adam_ring_t`; the
+speaker task reads whole samples from it and starts after a ~250 ms pre-roll, so playback begins
+roughly when the first sentence is ready instead of after the whole reply has downloaded.
+`node scripts/home-device.js voice ask.wav --stream` prints when the words were known, when the first
+audio arrived and when the reply finished — measure both modes on the bench.
+
 A shared device can never approve or cancel anything; the yes always happens on the phone.
 
 ## What happens when the box hears something
@@ -67,6 +75,8 @@ Do these in order on the Mac, against production after deploying this branch.
    adam_net_voice(&net, pcm, samples, reply, REPLY_CAP, &got, &status);
    const uint8_t *speech; size_t bytes;
    if (status == 200 && adam_wav_samples(reply, got, &speech, &bytes) == 0) play_pcm16(speech, bytes);
+   // or streamed: a speaker task loops on adam_ring_read(&ring, buf, sizeof buf) -> I2S while
+   //   adam_net_voice_stream(&net, pcm, samples, &ring, &status);   // ring: adam_ring_init(&ring, psram, 256 * 1024, 250)
    // detector task, after each block:
    alarm_kind_t a = alarm_pattern_process(&alarm, block, n); if (a) adam_net_heard_alarm(&net, a);
    int k = se_update(&se, scores, events, 4); adam_net_heard_model(&net, SOUND_EVENT_CONFIG, SOUND_EVENT_CLASSES, events, k);
@@ -78,7 +88,8 @@ Do these in order on the Mac, against production after deploying this branch.
 
 ## Known limits
 
-- The reply is downloaded whole before it plays. Streaming playback is the next latency win.
+- Streaming starts playback once the words are known; the words themselves still wait for the whole
+  agent turn. Speaking a first sentence earlier is the next latency win.
 - No wake word: push-to-talk only.
 - Pairing a box uses the display-pairing flow and a laptop. On-device pairing (code on the screen)
   is not built.
