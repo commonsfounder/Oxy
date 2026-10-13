@@ -132,7 +132,6 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--inset);padding:1p
     <section>
       <h2>The loop works next</h2>
       <ol>
-        <li>Skip database tests cleanly when no database is reachable; add CI</li>
         <li>Offer to connect a service before trying an action that needs it</li>
         <li>Draft (not send) pilot recruitment emails for you to review</li>
         <li>Align launch copy and pitch once the wedge is confirmed</li>
@@ -145,6 +144,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--inset);padding:1p
     <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">
       <li>Found why August's users stopped: 19 of the 26 failures they hit were calendar or email asked before Google was connected, and the error told them to "re-enable" something they had never turned on. Fixed: Adam now says "Google is not connected" and returns a Connect step.</li>
       <li>The public homepage URL returned an error. Fixed with a real page linking privacy, terms and support.</li>
+      <li>Test suite green offline for the first time: 1,996 tests, 0 failing. Tests that need the real database now skip with the reason. Added CI on every push.</li>
       <li>Added <code>scripts/traction-report.js</code>: weekly actives, retention, executed vs failed actions.</li>
       <li>Wrote the scorecard, competitor review (Muse, Instinct, Poke, Pally, Aside), YC application draft and pilot kit in <code>docs/yc/</code>.</li>
       <li>Found the sound listener only runs while Adam is open on screen. The pilot kit works around it.</li>
