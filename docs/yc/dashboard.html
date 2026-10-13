@@ -1,0 +1,155 @@
+<title>Adam YC Tracker</title>
+<style>
+/* Layout: one column; score summary, then usage chart, then what's blocked on you vs the loop, then the run log. */
+:root{
+  --bg:#F6F9FD; --surface:#FFFFFF; --inset:#E8F0FB; --ink:#101721; --muted:#5C697A; --accent:#135EE1;
+  --line:rgba(16,23,33,.11); --good:#1F8A4C; --warn:#B26A00; --bad:#C2352B;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0C1118; --surface:#141B25; --inset:#1A2433; --ink:#EEF2F8; --muted:#9AA6B6; --accent:#5B92F2;
+  --line:rgba(238,242,248,.13); --good:#4CC17E; --warn:#E3A43B; --bad:#EF6B60; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0C1118; --surface:#141B25; --inset:#1A2433; --ink:#EEF2F8; --muted:#9AA6B6; --accent:#5B92F2;
+  --line:rgba(238,242,248,.13); --good:#4CC17E; --warn:#E3A43B; --bad:#EF6B60; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+.wrap{max-width:860px;margin:0 auto;padding-inline:16px;padding-block:28px 56px;display:flex;flex-direction:column;gap:22px}
+.mark{font-weight:700;letter-spacing:.18em;font-size:12px}
+h1{font-size:28px;line-height:1.15;margin:4px 0 0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:18px;margin:0 0 12px}
+p{margin:0}
+.muted{color:var(--muted)}
+.hero{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:22px;display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center}
+.score{font-size:64px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.score small{font-size:20px;color:var(--muted);font-weight:600}
+.meter{height:8px;background:var(--inset);border-radius:99px;overflow:hidden;margin-top:12px}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px;background:var(--inset);color:var(--ink)}
+.pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+section{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap;font-family:var(--mono);font-size:13px}
+.bar{height:6px;background:var(--inset);border-radius:99px;min-width:60px}
+.bar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.scroll{overflow-x:auto}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cols>section{min-width:0}
+ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+.flag{color:var(--warn);font-weight:700}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font:11px var(--mono)}
+.log li{line-height:1.45}
+code{font-family:var(--mono);font-size:12.5px;background:var(--inset);padding:1px 5px;border-radius:5px}
+@media (max-width:640px){.hero{grid-template-columns:1fr}.cols{grid-template-columns:1fr}.score{font-size:52px}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="mark">ADAM</div>
+    <h1>YC W27 readiness</h1>
+    <p class="muted">Updated 13 Oct 2026, run 1. On-time deadline 2 Nov, 8pm PT: 20 days.</p>
+  </header>
+
+  <div class="hero">
+    <div class="score">36<small>/100</small></div>
+    <div>
+      <p><strong>Strong product, almost no outside users.</strong> Since 7 Sep the only weekly active person has been the founder. Users carry 30 of the 100 points, and that area scores 3.</p>
+      <div class="meter" role="img" aria-label="36 of 100"><i style="width:36%"></i></div>
+      <div class="pills">
+        <span class="pill bad">1 weekly active</span>
+        <span class="pill">38 accounts ever</span>
+        <span class="pill warn">Nothing deployed from this branch yet</span>
+      </div>
+    </div>
+  </div>
+
+  <section class="chart">
+    <h2>Weekly active people</h2>
+    <p class="muted" style="margin-bottom:10px">People who sent Adam a message, test accounts excluded. From production.</p>
+    <svg viewBox="0 0 560 170" role="img" aria-label="Weekly active people from 20 July to 5 October: 6, 0, 3, 1, 11, 3, 1, 1, 0, 0, 1, 1">
+      <g stroke="var(--line)" stroke-width="1">
+        <line x1="34" y1="20" x2="550" y2="20"/><line x1="34" y1="70" x2="550" y2="70"/><line x1="34" y1="120" x2="550" y2="120"/>
+      </g>
+      <text x="26" y="24" text-anchor="end">12</text><text x="26" y="74" text-anchor="end">6</text><text x="26" y="124" text-anchor="end">0</text>
+      <g fill="var(--accent)">
+        <rect x="40" y="70" width="30" height="50" rx="3"/>
+        <rect x="83" y="119" width="30" height="1" rx="0.5"/>
+        <rect x="126" y="95" width="30" height="25" rx="3"/>
+        <rect x="169" y="111.7" width="30" height="8.3" rx="3"/>
+        <rect x="212" y="28.3" width="30" height="91.7" rx="3"/>
+        <rect x="255" y="95" width="30" height="25" rx="3"/>
+        <rect x="298" y="111.7" width="30" height="8.3" rx="3"/>
+        <rect x="341" y="111.7" width="30" height="8.3" rx="3"/>
+        <rect x="384" y="119" width="30" height="1" rx="0.5"/>
+        <rect x="427" y="119" width="30" height="1" rx="0.5"/>
+        <rect x="470" y="111.7" width="30" height="8.3" rx="3"/>
+        <rect x="513" y="111.7" width="30" height="8.3" rx="3"/>
+      </g>
+      <text x="227" y="22" text-anchor="middle" style="fill:var(--ink);font-weight:600">11</text>
+      <text x="55" y="140" text-anchor="middle">20 Jul</text>
+      <text x="227" y="140" text-anchor="middle">17 Aug</text>
+      <text x="356" y="140" text-anchor="middle">7 Sep</text>
+      <text x="528" y="140" text-anchor="middle">5 Oct</text>
+      <text x="528" y="158" text-anchor="middle">founder only</text>
+    </svg>
+  </section>
+
+  <section>
+    <h2>Score by area</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Area</th><th>Score</th><th style="width:30%"></th><th>Biggest gap</th></tr></thead>
+        <tbody>
+          <tr><td>Users and retention</td><td class="num">3 / 30</td><td><div class="bar"><i style="width:10%;background:var(--bad)"></i></div></td><td>No one but the founder in 5 weeks</td></tr>
+          <tr><td>Founder and team</td><td class="num">11 / 20</td><td><div class="bar"><i style="width:55%"></i></div></td><td>Solo; founder answers unwritten</td></tr>
+          <tr><td>Product works</td><td class="num">9 / 15</td><td><div class="bar"><i style="width:60%"></i></div></td><td>No recorded end-to-end demo</td></tr>
+          <tr><td>Insight and difference</td><td class="num">5 / 15</td><td><div class="bar"><i style="width:33%;background:var(--warn)"></i></div></td><td>Story moved pendant → phone → home</td></tr>
+          <tr><td>Application and demo</td><td class="num">2 / 10</td><td><div class="bar"><i style="width:20%;background:var(--warn)"></i></div></td><td>Draft exists now; no video</td></tr>
+          <tr><td>Business model</td><td class="num">2 / 5</td><td><div class="bar"><i style="width:40%"></i></div></td><td>Nothing charging yet</td></tr>
+          <tr><td>Execution hygiene</td><td class="num">4 / 5</td><td><div class="bar"><i style="width:80%;background:var(--good)"></i></div></td><td>No CI</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Needs you</h2>
+      <ol>
+        <li><strong>Recruit 5–10 households</strong> for a two-week pilot. Kit: <code>docs/yc/PILOT.md</code></li>
+        <li><strong>Merge and deploy</strong> the branch: <code>node scripts/deploy-fly.js</code></li>
+        <li><strong>Record the 90-second demo</strong>, unedited</li>
+        <li><strong>Fill the [FOUNDER] fields</strong> in the application</li>
+        <li><strong>Confirm the wedge</strong>: an agent that lives at home</li>
+        <li><strong>Open network access</strong> so the loop can run live tests</li>
+      </ol>
+    </section>
+    <section>
+      <h2>The loop works next</h2>
+      <ol>
+        <li>Skip database tests cleanly when no database is reachable; add CI</li>
+        <li>Offer to connect a service before trying an action that needs it</li>
+        <li>Draft (not send) pilot recruitment emails for you to review</li>
+        <li>Align launch copy and pitch once the wedge is confirmed</li>
+      </ol>
+    </section>
+  </div>
+
+  <section class="log">
+    <h2>Run 1 · 13 Oct</h2>
+    <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px">
+      <li>Found why August's users stopped: 19 of the 26 failures they hit were calendar or email asked before Google was connected, and the error told them to "re-enable" something they had never turned on. Fixed: Adam now says "Google is not connected" and returns a Connect step.</li>
+      <li>The public homepage URL returned an error. Fixed with a real page linking privacy, terms and support.</li>
+      <li>Added <code>scripts/traction-report.js</code>: weekly actives, retention, executed vs failed actions.</li>
+      <li>Wrote the scorecard, competitor review (Muse, Instinct, Poke, Pally, Aside), YC application draft and pilot kit in <code>docs/yc/</code>.</li>
+      <li>Found the sound listener only runs while Adam is open on screen. The pilot kit works around it.</li>
+      <li><span class="flag">⚑</span> Recommended wedge: an agent that lives at home. Not yet applied to product docs or launch copy.</li>
+      <li><span class="flag">⚑</span> Pushed to <code>claude/friendly-hawking-mpwfnd</code>, not <code>main</code>. Not deployed.</li>
+    </ul>
+  </section>
+</div>
