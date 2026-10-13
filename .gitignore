@@ -38,3 +38,6 @@ data/*.sqlite*
 # Brainstorming visual companion mockups
 .superpowers/
 cad/
+
+# Home-device pairing state (holds a device token)
+data/home-device.json

@@ -1,0 +1,50 @@
+// ESP-IDF glue for adam_link: Wi-Fi and pairing from NVS, SNTP, and the two HTTPS calls.
+// Board audio (I2S capture, codec playback) stays in the board firmware; this file never touches it.
+//
+//   adam_net_t net;
+//   ESP_ERROR_CHECK(adam_net_start(&net));                      // NVS, Wi-Fi, SNTP
+//   // push-to-talk released: pcm holds the recording (16 kHz mono int16)
+//   size_t got; int status;
+//   adam_net_voice(&net, pcm, samples, reply, reply_cap, &got, &status);
+//   const uint8_t *speech; size_t bytes;
+//   if (status == 200 && adam_wav_samples(reply, got, &speech, &bytes) == 0) board_play(speech, bytes);
+//   // every second or so, from the task that runs the detectors:
+//   adam_net_flush_sounds(&net);
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+#include "esp_err.h"
+#include "adam_link.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    char base_url[128];
+    char display_id[64];
+    char token[96];
+    adam_link_t link;
+    adam_sound_queue_t sounds;
+} adam_net_t;
+
+// Reads namespace "adam" (written by scripts/home-device.js nvs), joins Wi-Fi and starts SNTP.
+// ESP_ERR_NOT_FOUND: not provisioned/paired yet.
+esp_err_t adam_net_start(adam_net_t *net);
+
+// One spoken turn. Sends the recording as WAV and reads Adam's spoken reply (16 kHz mono WAV) into
+// reply. *status is the HTTP status (0 if no response). A 401 forgets the pairing.
+esp_err_t adam_net_voice(adam_net_t *net, const int16_t *pcm, size_t samples,
+                         uint8_t *reply, size_t reply_cap, size_t *reply_len, int *status);
+
+// Queue detections (thread-safe), then send whatever is due. Cheap to call often: it does nothing
+// while the queue is empty or the link is backing off.
+void adam_net_heard_alarm(adam_net_t *net, alarm_kind_t kind);
+void adam_net_heard_model(adam_net_t *net, const se_class_cfg_t *cfg, int classes, const se_event_t *events, int n);
+esp_err_t adam_net_flush_sounds(adam_net_t *net);
+
+uint64_t adam_net_unix_ms(void);   // 0 until SNTP has set the clock
+
+#ifdef __cplusplus
+}
+#endif

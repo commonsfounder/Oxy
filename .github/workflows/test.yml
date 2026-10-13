@@ -26,3 +26,5 @@ jobs:
       - run: node --check api/index.js
       - run: npm run check:undef
       - run: npm test
+      - run: make -C firmware/adam-link test
+      - run: make -C firmware/sound-events test

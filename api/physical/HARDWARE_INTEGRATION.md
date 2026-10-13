@@ -24,4 +24,6 @@ Espressif's [BOX-3 hardware overview](https://github.com/espressif/esp-box/blob/
 6. Implement and test display and speaker commands separately. For voice, choose a consented capture mode, local VAD or push-to-talk, and a bounded audio transfer endpoint; the current local laptop voice CLI does not implement BOX audio transport.
 7. Check disconnection after missed heartbeats, command timeout, observation latency, clock skew, reconnection, and secret recovery. Repeat the same watch scenario with physical evidence and confirm the action status changes from simulated only when evidence and permission permit it.
 
+**Network path to the real Adam (2026-10-13):** `firmware/adam-link/` connects the box to the production Oxy backend over Wi-Fi instead of USB: spoken turns run through the full agent as the paired user (`POST /display/:id/voice`), and its alarm and sound detections reach the phone through the same policy as the iPhone's (`POST /display/:id/sounds`). The portable C and the server are tested; the ESP-IDF component has not yet been built or run on the board. Bring-up steps are in its README.
+
 The Node `ESP32Box3Adapter` intentionally reports disconnected until firmware transport has been implemented and validated. Do not advertise BOX microphone, speaker, display, or sensors as working Adam features before that proof.
