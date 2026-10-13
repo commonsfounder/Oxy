@@ -133,40 +133,66 @@ async function sendAdamEmail({ userId, action, params, enrichedParams, context, 
 
 async function sendAdamSms({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, checkAdamSendCap, looksLikeMessageAddress, resolveNativeMessageContact } = deps;
-  const to = String(params?.to || '').trim();
+  const rawTo = String(params?.to || '').trim();
   const body = String(params?.body || '').trim();
-  if (!to || !body) return { success: false, error: 'send_adam_sms requires a recipient phone number and a message' };
-  if (!looksLikeMessageAddress(to)) {
-    return { success: false, error: `I need a phone number for ${to} — that doesn't look like one.` };
+  if (!rawTo || !body) return { success: false, error: 'send_adam_sms requires a recipient phone number and a message' };
+  if (!looksLikeMessageAddress(rawTo)) {
+    return { success: false, error: `I need a phone number for ${rawTo} — that doesn't look like one.` };
   }
 
   const { ensureAdamIdentity, getActiveHandle } = require('../services/adam-identity');
   const { findOrCreateParticipant } = require('../services/participants');
   const { getOrCreateConversation, appendEvent } = require('../services/external-conversations');
+  const { normalizePhoneNumber, chooseSendingNumber, assignPoolNumber } = require('../services/phone-pool');
   const { sendSms } = require('../../connectors/phone-provider');
+
+  // Stored the way the provider will report it back, so the reply finds this conversation.
+  const to = normalizePhoneNumber(rawTo) || rawTo;
 
   const cap = await checkAdamSendCap(userId, 'phone_sms');
   if (!cap.allowed) return { success: false, error: cap.message };
 
   const { identity } = await ensureAdamIdentity(supabase, userId, { attemptPhone: false });
   const phoneHandle = await getActiveHandle(supabase, userId, 'phone_sms');
-  if (!phoneHandle) return { success: false, error: 'Adam does not have a phone number set up yet.' };
 
   const { participant, address } = await findOrCreateParticipant(supabase, userId, {
-    displayName: to, channelType: 'phone_sms', addressValue: to
+    displayName: rawTo, channelType: 'phone_sms', addressValue: to
   });
   const requestTaskId = params?.request_task_id || null;
   const { conversation } = await getOrCreateConversation(supabase, {
     userId, adamIdentityId: identity.id, participantId: participant.id, requestTaskId
   });
 
+  // A user's own number wins; everyone else texts from the shared pool.
+  let line;
+  if (phoneHandle) {
+    line = { from: phoneHandle.handle_value, provider: phoneHandle.provider, poolNumberId: null };
+  } else {
+    try {
+      const poolNumber = await chooseSendingNumber(supabase, { userId, recipient: to });
+      line = { from: poolNumber.phone_number, provider: poolNumber.provider, poolNumberId: poolNumber.id };
+    } catch (err) {
+      return { success: false, error: `Adam has no number to text from: ${err.message}` };
+    }
+  }
+
   let sendResult;
   try {
     // Driven by the provider that issued this number, not by whatever
     // MILLIE_PHONE_PROVIDER currently says.
-    sendResult = await sendSms({ from: phoneHandle.handle_value, to, body, provider: phoneHandle.provider });
+    sendResult = await sendSms({ from: line.from, to, body, provider: line.provider });
   } catch (err) {
     return { success: false, error: `Couldn't send that: ${err.message}` };
+  }
+
+  if (line.poolNumberId && conversation.pool_number_id !== line.poolNumberId) {
+    // The text has gone. Failing the action now would invite a second send, so a lost
+    // assignment is logged rather than reported: it costs the reply its routing, not a duplicate.
+    try {
+      await assignPoolNumber(supabase, conversation.id, line.poolNumberId);
+    } catch (err) {
+      console.warn('[send_adam_sms] sent, but the conversation is not marked with its pool number:', err.message);
+    }
   }
 
   await appendEvent(supabase, {
@@ -174,15 +200,15 @@ async function sendAdamSms({ userId, action, params, enrichedParams, context, de
     channelType: 'phone_sms',
     direction: 'outbound',
     participantAddressId: address.id,
-    adamIdentityHandleId: phoneHandle.id,
+    adamIdentityHandleId: phoneHandle?.id || null,
     providerEventId: sendResult.providerMessageId,
     body
   });
 
   return {
     success: true,
-    text: `Sent to ${to} from Adam's number.`,
-    cardText: `To ${to} · ${body}`,
+    text: `Sent to ${rawTo} from Adam's number.`,
+    cardText: `To ${rawTo} · ${body}`,
     actionSummary: 'Message sent',
     conversationId: conversation.id
   };

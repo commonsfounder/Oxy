@@ -14,26 +14,52 @@ function twilioAuth() {
   return { sid, token };
 }
 
+// Mobile, not Local: UK local numbers need documentary UK proof of address, mobile numbers
+// only need government ID, and mobile is also the type businesses and forms accept.
+const NUMBER_TYPES = { mobile: 'Mobile', local: 'Local', tollfree: 'TollFree' };
+
+function numberType() {
+  const key = String(process.env.TWILIO_NUMBER_TYPE || 'mobile').trim().toLowerCase().replace(/[^a-z]/g, '');
+  const type = NUMBER_TYPES[key];
+  if (!type) throw new Error(`TWILIO_NUMBER_TYPE must be one of: ${Object.keys(NUMBER_TYPES).join(', ')}.`);
+  return type;
+}
+
 async function provisionPhoneNumber(userId) {
   const { sid, token } = twilioAuth();
-  const countryCode = process.env.TWILIO_NUMBER_COUNTRY || 'GB';
+  const countryCode = (process.env.TWILIO_NUMBER_COUNTRY || 'GB').trim().toUpperCase();
+  const type = numberType();
+  // Every UK number must sit on an approved Regulatory Compliance bundle before Twilio will
+  // sell it. Failing here names the fix; letting the purchase fail would buy nothing and say less.
+  const bundleSid = (process.env.TWILIO_BUNDLE_SID || '').trim();
+  if (countryCode === 'GB' && !bundleSid) {
+    throw new Error('UK numbers need an approved Twilio Regulatory Compliance bundle. Set TWILIO_BUNDLE_SID.');
+  }
+  const appUrl = String(process.env.APP_URL || '').trim().replace(/\/+$/, '');
+  if (!appUrl) throw new Error('APP_URL is not configured, so the number would have nowhere to deliver replies.');
+
   const search = await axios.get(
-    `https://api.twilio.com/2010-04-01/Accounts/${sid}/AvailablePhoneNumbers/${countryCode}/Local.json`,
+    `https://api.twilio.com/2010-04-01/Accounts/${sid}/AvailablePhoneNumbers/${countryCode}/${type}.json`,
     { auth: { username: sid, password: token }, params: { SmsEnabled: true, VoiceEnabled: true }, timeout: 15000 }
   );
   const candidate = search.data?.available_phone_numbers?.[0];
-  if (!candidate) throw new Error(`No available phone numbers in ${countryCode} right now.`);
+  if (!candidate) throw new Error(`No available ${type.toLowerCase()} numbers in ${countryCode} right now.`);
 
-  const purchase = await axios.post(
+  const purchase = new URLSearchParams({
+    PhoneNumber: candidate.phone_number,
+    SmsUrl: `${appUrl}/webhooks/millie-sms`,
+    SmsMethod: 'POST'
+  });
+  if (bundleSid) purchase.set('BundleSid', bundleSid);
+  const addressSid = (process.env.TWILIO_ADDRESS_SID || '').trim();
+  if (addressSid) purchase.set('AddressSid', addressSid);
+
+  const purchased = await axios.post(
     `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json`,
-    new URLSearchParams({
-      PhoneNumber: candidate.phone_number,
-      SmsUrl: `${process.env.APP_URL || ''}/webhooks/millie-sms`,
-      SmsMethod: 'POST'
-    }),
+    purchase,
     { auth: { username: sid, password: token }, timeout: 15000 }
   );
-  return { phoneNumber: purchase.data.phone_number, providerRef: purchase.data.sid };
+  return { phoneNumber: purchased.data.phone_number, providerRef: purchased.data.sid };
 }
 
 async function sendAdamSms({ from, to, body }) {

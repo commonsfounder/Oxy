@@ -548,35 +548,55 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
     const normalized = parseInboundSms(req.body, providerName);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
+    const { findOrCreateParticipant } = require('./services/participants');
+    const { getOrCreateConversation, appendEvent, findOpenConversationsForParticipant } = require('./services/external-conversations');
+    const { classifyReply } = require('./services/reply-policy');
+    const { normalizePhoneNumber, routeInboundSms } = require('./services/phone-pool');
+    const fromAddress = normalizePhoneNumber(normalized.fromAddress) || normalized.fromAddress;
+
+    // A user's own number first; otherwise a shared pool number, routed by who texted it.
     const { data: handles } = await supabase
       .from('millie_identity_handles')
       .select('*')
       .eq('channel_type', 'phone_sms')
       .eq('handle_value', normalized.toAddress)
       .eq('status', 'active');
-    const handle = handles?.[0];
-    if (!handle) {
-      log('warn', 'millie_sms.inbound.no_matching_handle', { to: normalized.toAddress });
-      return;
+    const handle = handles?.[0] || null;
+
+    let userId;
+    let conversation = null;
+    let identity = null;
+    if (handle) {
+      const { data: identities } = await supabase.from('millie_identities').select('*').eq('id', handle.millie_identity_id);
+      identity = identities?.[0];
+      if (!identity) return;
+      userId = identity.user_id;
+    } else {
+      const route = await routeInboundSms(supabase, { toAddress: normalized.toAddress, fromAddress });
+      if (route.kind !== 'routed') {
+        // Not shown to anyone: an ambiguous reply shown to the wrong user leaks another
+        // user's conversation, and an unknown sender has no conversation to belong to.
+        log('warn', `millie_sms.inbound.${route.kind === 'not_pool' ? 'no_matching_handle' : route.kind}`, {
+          to: normalized.toAddress, userCount: route.userCount
+        });
+        return;
+      }
+      conversation = route.conversation;
+      userId = conversation.user_id;
     }
-    const { data: identities } = await supabase.from('millie_identities').select('*').eq('id', handle.millie_identity_id);
-    const identity = identities?.[0];
-    if (!identity) return;
 
-    const { findOrCreateParticipant } = require('./services/participants');
-    const { getOrCreateConversation, appendEvent, findOpenConversationsForParticipant } = require('./services/external-conversations');
-    const { classifyReply } = require('./services/reply-policy');
-
-    const { participant, address } = await findOrCreateParticipant(supabase, identity.user_id, {
-      displayName: normalized.fromAddress, channelType: 'phone_sms', addressValue: normalized.fromAddress
+    const { participant, address } = await findOrCreateParticipant(supabase, userId, {
+      displayName: fromAddress, channelType: 'phone_sms', addressValue: fromAddress
     });
 
-    const openConversations = await findOpenConversationsForParticipant(supabase, participant.id);
-    const conversation = openConversations.length
-      ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
-      : (await getOrCreateConversation(supabase, {
-        userId: identity.user_id, adamIdentityId: identity.id, participantId: participant.id
-      })).conversation;
+    if (!conversation) {
+      const openConversations = await findOpenConversationsForParticipant(supabase, participant.id);
+      conversation = openConversations.length
+        ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
+        : (await getOrCreateConversation(supabase, {
+          userId, adamIdentityId: identity.id, participantId: participant.id
+        })).conversation;
+    }
 
     const decision = classifyReply(normalized.body);
     const event = await appendEvent(supabase, {
@@ -584,16 +604,16 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
       channelType: 'phone_sms',
       direction: 'inbound',
       participantAddressId: address.id,
-      adamIdentityHandleId: handle.id,
+      adamIdentityHandleId: handle?.id || null,
       providerEventId: normalized.providerMessageId,
       body: normalized.body,
       needsDecision: decision === 'ask',
       rawProviderPayload: req.body
     });
     await surfaceInboundExternalReply({
-      userId: identity.user_id,
+      userId,
       channelType: 'phone_sms',
-      fromAddress: normalized.fromAddress,
+      fromAddress,
       body: normalized.body,
       decision,
       conversationId: conversation.id,
@@ -601,7 +621,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
       requestTaskId: conversation.request_task_id || null,
       eventId: event?.id || null
     });
-    log('info', 'millie_sms.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
+    log('info', 'millie_sms.inbound.received', { userId, conversationId: conversation.id, decision });
   } catch (err) {
     log('error', 'millie_sms.inbound.error', { error: err.message });
   }

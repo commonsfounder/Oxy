@@ -14,10 +14,12 @@ async function findParticipantByAddress(supabase, userId, channelType, addressVa
     .eq('address_value', normalized);
   if (error || !addresses?.length) return null;
 
+  // The same address can belong to several users (two people texting one garage), so every
+  // matching address is checked against this user, not only the first.
   const { data: participants } = await supabase
     .from('participants')
     .select('*')
-    .eq('id', addresses[0].participant_id)
+    .in('id', [...new Set(addresses.map(a => a.participant_id))])
     .eq('user_id', userId);
   return participants?.[0] || null;
 }

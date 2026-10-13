@@ -76,7 +76,8 @@ const USER_DATA_RESOURCES = Object.freeze([
   // read, exported, or deleted as part of an account operation.
   { name: 'rate_limits', ownership: { kind: 'global', reason: 'process-wide abuse-control state; not owned by an account' }, export: 'exclude', excludeReason: 'global/system state' },
   { name: 'browser_fastpaths', ownership: { kind: 'global', reason: 'shared host optimisation learned across accounts' }, export: 'exclude', excludeReason: 'global/system state' },
-  { name: 'browser_learned_recipes', ownership: { kind: 'global', reason: 'shared host recipe knowledge' }, export: 'exclude', excludeReason: 'global/system state' }
+  { name: 'browser_learned_recipes', ownership: { kind: 'global', reason: 'shared host recipe knowledge' }, export: 'exclude', excludeReason: 'global/system state' },
+  { name: 'phone_number_pool', ownership: { kind: 'global', reason: 'Oxy-owned phone numbers shared across accounts; which account a number is talking to lives on external_conversations' }, export: 'exclude', excludeReason: 'global/system state' }
 ]);
 
 function direct(column = 'user_id') {
