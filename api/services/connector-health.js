@@ -20,6 +20,16 @@ function diagnoseConnectorIssue(action, result = {}) {
   const connectorId = connectorForAction(action?.type || action?.action);
   if (!connectorId || result.success !== false) return {};
 
+  if (result.notConnected === true) {
+    return {
+      connectorId,
+      healthStatus: 'not_connected',
+      recoveryAction: { type: 'open_connector_settings', connectorId },
+      cardText: `Connect ${humanConnectorName(connectorId)} in Settings.`,
+      retryable: true
+    };
+  }
+
   const error = String(result.error || '').trim();
   if (!error) return { connectorId, healthStatus: 'failed' };
 

@@ -1,5 +1,11 @@
 const UNAVAILABLE_ERROR = 'That capability is not available yet. No action was taken.';
-const DISABLED_ERROR = 'This connection is disabled. Re-enable it in Settings before trying again.';
+const { humanConnectorName } = require('./connector-health');
+
+// Most people who hit this have never connected the service, so "re-enable" sent them looking
+// for a switch that was never there. Name the service and the step.
+function notConnectedError(connectorId) {
+  return `${humanConnectorName(connectorId)} is not connected. Connect it in Settings to use this.`;
+}
 
 function createDeclaredAdapterInvoker({
   executeInline,
@@ -26,7 +32,7 @@ function createDeclaredAdapterInvoker({
           ? context.enabledConnectors
           : await getEnabledConnectors(userId, context.trace || null);
         if (!enabledConnectors.includes(adapter.id)) {
-          return { success: false, outcome: 'unavailable', unavailable: true, error: DISABLED_ERROR };
+          return { success: false, outcome: 'unavailable', unavailable: true, notConnected: true, error: notConnectedError(adapter.id) };
         }
       }
       return dispatchConnector({ connectorId: adapter.id, userId, type, input: enrichedInput, context });
@@ -39,5 +45,5 @@ function createDeclaredAdapterInvoker({
 module.exports = {
   createDeclaredAdapterInvoker,
   UNAVAILABLE_ERROR,
-  DISABLED_ERROR
+  notConnectedError
 };

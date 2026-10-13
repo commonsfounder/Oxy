@@ -57,3 +57,23 @@ test('connector health names user-facing connector brands', () => {
   assert.equal(humanConnectorName('trainline'), 'Trainline');
   assert.equal(humanConnectorName('github'), 'GitHub');
 });
+
+test('a service that was never connected asks to connect it, not to reconnect or re-enable it', async () => {
+  const { createDeclaredAdapterInvoker } = require('../../api/services/declared-adapter-invoker');
+  const invoke = createDeclaredAdapterInvoker({
+    executeInline: async () => ({ success: true }),
+    dispatchConnector: async () => { throw new Error('must not dispatch to a connector that is not connected'); },
+    getEnabledConnectors: async () => []
+  });
+  const action = { type: 'get_calendar_events', input: { when: 'tomorrow' } };
+  const result = await invoke({ adapter: { kind: 'connector', id: 'google', requiresConnection: true }, userId: 'u1', type: action.type, input: action.input });
+
+  assert.equal(result.success, false);
+  assert.equal(result.notConnected, true);
+  assert.equal(result.error, 'Google is not connected. Connect it in Settings to use this.');
+
+  const diagnosis = diagnoseConnectorIssue(action, result);
+  assert.equal(diagnosis.healthStatus, 'not_connected');
+  assert.deepEqual(diagnosis.recoveryAction, { type: 'open_connector_settings', connectorId: 'google' });
+  assert.equal(diagnosis.cardText, 'Connect Google in Settings.');
+});

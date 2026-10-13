@@ -8473,9 +8473,36 @@ app.get('/install-shortcut', (_req, res) => {
   }
 });
 
+// The public root. It used to send an index.html that is not in the repo, so the deployed host
+// answered its own homepage with an error.
 app.get('/', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.resolve(__dirname, '..', 'index.html'));
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adam</title>
+  <style>
+    :root{--bg:#F6F9FD;--ink:#101721;--muted:#5C697A;--accent:#135EE1;--line:rgba(16,23,33,.11)}
+    @media (prefers-color-scheme:dark){:root{--bg:#0C1118;--ink:#EEF2F8;--muted:#9AA6B6;--accent:#5B92F2;--line:rgba(238,242,248,.14)}}
+    body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{max-width:620px;margin:0 auto;padding:72px 20px 56px}
+    .mark{font-weight:700;letter-spacing:.18em;font-size:14px}
+    h1{font-size:32px;line-height:1.15;letter-spacing:-.01em;margin:40px 0 14px}
+    p{color:var(--muted);margin:0 0 14px}
+    a{color:var(--accent);text-decoration:none}
+    nav{border-top:1px solid var(--line);margin-top:44px;padding-top:16px;font-size:14px;display:flex;gap:18px;flex-wrap:wrap}
+  </style>
+</head>
+<body><main>
+  <div class="mark">ADAM</div>
+  <h1>Give it the outcome. Adam does the legwork.</h1>
+  <p>Adam works across your browser, email, calendar and messages to finish real tasks. Payments and anything irreversible wait for your approval.</p>
+  <p>Currently in a private pilot. <a href="mailto:support@oxy.app?subject=Adam%20pilot">Ask to join</a>.</p>
+  <nav><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a></nav>
+</main></body>
+</html>`);
 });
 
 // Sentry error handler must be last
