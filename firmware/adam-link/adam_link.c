@@ -194,6 +194,8 @@ adam_link_result_t adam_link_result(adam_link_t *link, int status, uint64_t now_
     if (status >= 200 && status < 300) {
         link->failures = 0;
         link->retry_at_ms = 0;
+        link->ever_ok = 1;
+        link->last_ok_ms = now_ms;
         return ADAM_LINK_OK;
     }
     if (status == 401 || status == 403) {
@@ -212,6 +214,11 @@ adam_link_result_t adam_link_result(adam_link_t *link, int status, uint64_t now_
 
 int adam_link_may_send(const adam_link_t *link, uint64_t now_ms) {
     return !link->unpaired && now_ms >= link->retry_at_ms;
+}
+
+int adam_link_heartbeat_due(const adam_link_t *link, uint64_t now_ms) {
+    if (!adam_link_may_send(link, now_ms)) return 0;
+    return !link->ever_ok || now_ms < link->last_ok_ms || now_ms - link->last_ok_ms >= ADAM_HEARTBEAT_MS;
 }
 
 // Days since 1970-01-01 -> civil date (Howard Hinnant's algorithm); no gmtime needed.

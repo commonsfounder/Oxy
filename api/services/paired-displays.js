@@ -307,10 +307,17 @@ async function respondToUrgent(supabase, displayId, token, eventId, response, no
   return { authorized: true, found: true, response };
 }
 
+// Any authenticated contact from a display or device. The app shows a device as online while this is
+// recent, so a device that only speaks or reports sounds must still be seen.
+async function markSeen(supabase, displayId, now = new Date()) {
+  const { error } = await supabase.from('paired_displays').update({ last_seen_at: new Date(now).toISOString() }).eq('id', displayId);
+  if (error) throw error;
+}
+
 async function pollNextRender(supabase, displayId, token, now = new Date()) {
   const display = await displayForToken(supabase, displayId, token);
   if (!display) return null;
-  await supabase.from('paired_displays').update({ last_seen_at: new Date(now).toISOString() }).eq('id', displayId);
+  await markSeen(supabase, displayId, now);
   const { data, error } = await supabase.from('display_render_events').select('*')
     .eq('display_id', displayId).is('acked_at', null).gt('expires_at', new Date(now).toISOString())
     .order('created_at', { ascending: true }).limit(1);
@@ -369,6 +376,7 @@ module.exports = {
   listDisplays,
   revokeDisplay,
   displayForToken,
+  markSeen,
   queueRender,
   queueUrgent,
   respondToUrgent,

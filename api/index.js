@@ -843,7 +843,7 @@ app.use((req, res, next) => {
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
     (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/(?:ask|voice|sounds)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
+    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/(?:ask|voice|sounds|heartbeat)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
@@ -8841,6 +8841,7 @@ app.post('/display/:id/voice', express.raw({ type: ['audio/wav', 'audio/x-wav', 
     const pairedDisplays = require('./services/paired-displays');
     const display = await pairedDisplays.displayForToken(supabase, req.params.id, displayBearerToken(req));
     if (!display) return res.status(401).json({ error: 'Device authorization is invalid.' });
+    pairedDisplays.markSeen(supabase, display.id).catch(() => {});
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Send the recording as audio/wav.' });
     displayAsk.checkAskRate(display.id);
     // ?stream=1: the reply is spoken as it is synthesised, as raw 16 kHz 16-bit mono PCM
@@ -8895,6 +8896,21 @@ app.post('/display/:id/voice', express.raw({ type: ['audio/wav', 'audio/x-wav', 
   }
 });
 
+// A paired home device saying it is still there. The app shows a device online while it has been
+// seen in the last few minutes; devices send this every minute when nothing else has gone out.
+app.post('/display/:id/heartbeat', async (req, res) => {
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const display = await pairedDisplays.displayForToken(supabase, req.params.id, displayBearerToken(req));
+    if (!display) return res.status(401).json({ error: 'Device authorization is invalid.' });
+    await pairedDisplays.markSeen(supabase, display.id);
+    res.json({ ok: true, heartbeatSeconds: 60 });
+  } catch (e) {
+    log('warn', 'device.heartbeat.failed', { error: e.message });
+    res.status(503).json({ error: 'Could not record that.' });
+  }
+});
+
 // Sounds a paired home device recognised on its own (alarm patterns, the household sound model).
 // The device sends keys and scores only; wording, ids and whether to interrupt are decided here,
 // through the same policy as the phone's sound events.
@@ -8903,6 +8919,7 @@ app.post('/display/:id/sounds', async (req, res) => {
     const pairedDisplays = require('./services/paired-displays');
     const display = await pairedDisplays.displayForToken(supabase, req.params.id, displayBearerToken(req));
     if (!display) return res.status(401).json({ error: 'Device authorization is invalid.' });
+    pairedDisplays.markSeen(supabase, display.id).catch(() => {});
     const { deviceSoundEvents } = require('./services/device-sounds');
     const now = new Date();
     const { events, ignored } = deviceSoundEvents(req.body?.events, { now, room: display.display_name || null });

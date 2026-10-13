@@ -101,13 +101,21 @@ typedef struct {
     uint32_t failures;
     uint64_t retry_at_ms;   // monotonic ms; don't send before this
     uint8_t unpaired;       // the token was refused: stop, forget it, show "pair again"
+    uint8_t ever_ok;
+    uint64_t last_ok_ms;    // monotonic ms of the last 2xx from Adam, of any kind
 } adam_link_t;
+
+// The app shows the device online while Adam has heard from it in the last 3 minutes. Any request
+// that succeeds counts; a heartbeat (POST /display/{id}/heartbeat) fills the gaps.
+#define ADAM_HEARTBEAT_MS 60000u
 
 void adam_link_init(adam_link_t *link);
 // Feed every HTTP outcome (status 0 = no response). jitter_ms: any value in [0, 1000) from a
 // random source, so a houseful of devices don't retry in lockstep after an outage.
 adam_link_result_t adam_link_result(adam_link_t *link, int http_status, uint64_t now_ms, uint32_t jitter_ms);
 int adam_link_may_send(const adam_link_t *link, uint64_t now_ms);
+// A heartbeat is due when nothing has succeeded for ADAM_HEARTBEAT_MS (and the link may send).
+int adam_link_heartbeat_due(const adam_link_t *link, uint64_t now_ms);
 
 // ISO-8601 UTC with milliseconds, e.g. 2026-10-13T09:59:30.250Z. out needs 25 bytes.
 void adam_iso8601(uint64_t unix_ms, char out[25]);

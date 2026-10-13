@@ -86,6 +86,12 @@ Do these in order on the Mac, against production after deploying this branch.
    reply audio (median and worst of 20), alarm-to-phone-notification time, behaviour across a Wi-Fi
    drop (sounds queue and arrive afterwards; a 401 forgets the token and logs "pair it again").
 
+## Showing online in the app
+
+The app shows a device online while Adam has heard from it in the last 3 minutes. Every voice turn
+and sound report counts; `adam_net_heartbeat()` sends `POST /display/{id}/heartbeat` only after 60 s
+with nothing else successful, so call it from any loop that runs every few seconds.
+
 ## Known limits
 
 - Streaming starts playback once the words are known; the words themselves still wait for the whole

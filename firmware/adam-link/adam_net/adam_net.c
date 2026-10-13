@@ -208,6 +208,18 @@ esp_err_t adam_net_voice_stream(adam_net_t *net, const int16_t *pcm, size_t samp
     return err;
 }
 
+esp_err_t adam_net_heartbeat(adam_net_t *net) {
+    if (!net->token[0] || !adam_link_heartbeat_due(&net->link, mono_ms())) return ESP_OK;
+    esp_http_client_handle_t c = open_post(net, "heartbeat", "application/json", 10000);
+    if (!c) return ESP_ERR_NO_MEM;
+    esp_http_client_set_post_field(c, "{}", 2);
+    esp_err_t err = esp_http_client_perform(c);
+    int status = err == ESP_OK ? esp_http_client_get_status_code(c) : 0;
+    esp_http_client_cleanup(c);
+    if (adam_link_result(&net->link, status, mono_ms(), esp_random() % 1000) == ADAM_LINK_UNPAIRED) forget_pairing(net);
+    return err;
+}
+
 void adam_net_heard_alarm(adam_net_t *net, alarm_kind_t kind) {
     const char *key = adam_alarm_key(kind);
     if (!key) return;

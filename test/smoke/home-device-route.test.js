@@ -47,6 +47,8 @@ voiceProvider.streamSpeechOpenAI = async function* () {
 const pairedDisplays = require('../../api/services/paired-displays');
 const DISPLAY = { id: 'disp-1', user_id: 'user-1', display_name: 'Kitchen' };
 pairedDisplays.displayForToken = async (_supabase, id, token) => (id === DISPLAY.id && token === 'tok-1' ? DISPLAY : null);
+const seen = [];
+pairedDisplays.markSeen = async (_supabase, id) => { seen.push(id); };
 pairedDisplays.redeemPairingChallenge = async (_supabase, body) => {
   if (body.challengeId !== 'chal-1' || body.code !== 'ABC123') {
     const error = new Error('That pairing code is not correct.');
@@ -129,6 +131,32 @@ test('a streamed reply arrives as raw 16 kHz PCM, identical to the downloaded on
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a device is seen whenever it speaks, reports a sound or sends its heartbeat; a bad token is not', async () => {
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (path, token, body = '{}', type = 'application/json') => fetch(`${base}${path}`, {
+    method: 'POST', headers: { 'Content-Type': type, ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body
+  });
+  try {
+    seen.length = 0;
+    const ok = await post('/display/disp-1/heartbeat', 'tok-1');
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { ok: true, heartbeatSeconds: 60 });
+    assert.deepEqual(seen, ['disp-1']);
+
+    assert.equal((await post('/display/disp-1/heartbeat', 'wrong')).status, 401);
+    assert.equal((await post('/display/disp-1/heartbeat')).status, 401);
+    assert.deepEqual(seen, ['disp-1'], 'a refused request never marks the device seen');
+
+    await post('/display/disp-1/sounds', 'tok-1', JSON.stringify({ events: [{ sound: 'knock', confidence: 0.9, occurredAt: new Date().toISOString() }] }));
+    require('../../api/services/display-ask')._reset();
+    await post('/display/disp-1/voice', 'tok-1', tone(300, 1, 16000), 'audio/wav');
+    assert.deepEqual(seen, ['disp-1', 'disp-1', 'disp-1']);
+  } finally {
+    server.close();
   }
 });
 

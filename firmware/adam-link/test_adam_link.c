@@ -137,7 +137,22 @@ static void test_ring(void) {
     assert(adam_ring_read(&r, out, 64) == 10 && adam_ring_done(&r));
 }
 
+static void test_heartbeat(void) {
+    adam_link_t l;
+    adam_link_init(&l);
+    assert(adam_link_heartbeat_due(&l, 0));                       // never heard back yet
+    adam_link_result(&l, 200, 1000, 0);                          // e.g. a voice turn succeeded
+    assert(!adam_link_heartbeat_due(&l, 1000 + ADAM_HEARTBEAT_MS - 1));
+    assert(adam_link_heartbeat_due(&l, 1000 + ADAM_HEARTBEAT_MS));
+    adam_link_result(&l, 503, 70000, 0);                         // backing off: no heartbeat spam
+    assert(!adam_link_heartbeat_due(&l, 70500));
+    assert(adam_link_heartbeat_due(&l, 72000));
+    adam_link_result(&l, 401, 72000, 0);                         // unpaired: silent until paired again
+    assert(!adam_link_heartbeat_due(&l, 10000000));
+}
+
 int main(void) {
+    test_heartbeat();
     test_ring();
     test_iso8601();
     test_wav();

@@ -49,6 +49,10 @@ void adam_net_heard_alarm(adam_net_t *net, alarm_kind_t kind);
 void adam_net_heard_model(adam_net_t *net, const se_class_cfg_t *cfg, int classes, const se_event_t *events, int n);
 esp_err_t adam_net_flush_sounds(adam_net_t *net);
 
+// Tells Adam the device is still there when nothing else has gone out for a minute. Call it from
+// any loop that runs at least every few seconds; it sends only when due.
+esp_err_t adam_net_heartbeat(adam_net_t *net);
+
 uint64_t adam_net_unix_ms(void);   // 0 until SNTP has set the clock
 
 #ifdef __cplusplus
