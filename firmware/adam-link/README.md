@@ -97,5 +97,8 @@ with nothing else successful, so call it from any loop that runs every few secon
 - Streaming starts playback once the words are known; the words themselves still wait for the whole
   agent turn. Speaking a first sentence earlier is the next latency win.
 - No wake word: push-to-talk only.
-- Pairing a box uses the display-pairing flow and a laptop. On-device pairing (code on the screen)
-  is not built.
+- On-device pairing is server-side only so far: `POST /devices/pairing` gives the box a code to show
+  (`ABC DEF`, no 0/O/1/I/L) plus a poll secret; the person types the code in the app
+  (`POST /agent/devices/claim`); the box polls `POST /devices/pairing/poll` every `pollSeconds` and
+  gets its display id and token once. Codes last 10 minutes and are single-use. The firmware side
+  (show the code, poll, save to NVS) is not written yet; until then pair with the laptop flow above.

@@ -843,7 +843,7 @@ app.use((req, res, next) => {
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
     (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/(?:ask|voice|sounds|heartbeat)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
+    || (req.method === 'POST' && (req.path === '/display/pair' || req.path === '/devices/pairing' || req.path === '/devices/pairing/poll' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/(?:ask|voice|sounds|heartbeat)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
@@ -8957,6 +8957,48 @@ app.put('/agent/displays/:id/urgent', requireSessionAuth, async (req, res) => {
   } catch (e) {
     if (e?.code === 'not_paired') return res.status(404).json({ error: e.message });
     res.status(500).json({ error: 'Could not change that.' });
+  }
+});
+
+// Pairing that starts on a home device: it asks for a code and shows it on its screen.
+app.post('/devices/pairing', (req, res) => {
+  try {
+    const { startDevicePairing } = require('./services/device-pairing');
+    res.json(startDevicePairing({ name: req.body?.name, source: req.ip }));
+  } catch (e) {
+    res.status(e.status || 503).json({ error: e.message, code: e.code });
+  }
+});
+
+// The device checks whether its code has been typed into the app yet.
+app.post('/devices/pairing/poll', (req, res) => {
+  const { pollDevicePairing } = require('./services/device-pairing');
+  const result = pollDevicePairing({ requestId: req.body?.requestId, pollSecret: req.body?.pollSecret });
+  res.status(result.status === 'expired' ? 410 : 200).json(result);
+});
+
+// The signed-in person typed the code from the device's screen. The device becomes an ordinary
+// paired display (same challenge/redeem path as a browser), and collects its token on its next poll.
+app.post('/agent/devices/claim', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const { claimDevicePairing } = require('./services/device-pairing');
+    const baseUrl = process.env.APP_URL || ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.get('host'));
+    const display = await claimDevicePairing({
+      userId,
+      code: req.body?.code,
+      createPairing: async (owner, displayName) => {
+        const challenge = await pairedDisplays.createPairingChallenge(supabase, owner, { baseUrl, displayName });
+        return pairedDisplays.redeemPairingChallenge(supabase, { challengeId: challenge.id, code: challenge.code, displayName });
+      }
+    });
+    res.json({ display });
+  } catch (e) {
+    if (e.code === 'invalid_code' || e.code === 'too_fast') return res.status(e.status).json({ error: e.message, code: e.code });
+    log('warn', 'device.claim.failed', { error: e.message });
+    res.status(503).json({ error: 'Pairing is unavailable right now.' });
   }
 });
 
