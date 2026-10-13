@@ -313,63 +313,80 @@ function fakeFetch(routes) {
   const impl = async (url, init = {}) => {
     calls.push({ url: String(url), init });
     const path = new URL(url).pathname;
-    const handler = routes[path] || routes[path.replace(/\/[^/]+$/, '/:id')];
+    const key = `${init.method || 'GET'} ${path}`;
+    const handler = routes[key] || routes[`${init.method || 'GET'} ${path.replace(/\/[^/]+$/, '/:id')}`];
     if (!handler) return new Response('not found', { status: 404 });
     const { status = 200, body } = handler(String(url), init);
-    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+    return new Response(JSON.stringify(body), { status });
   };
   return { impl, calls };
 }
 
-test('ElevenLabs: the call is registered with its brief, the fixed opening line and the time limit', async () => {
+function useElevenLabsEnv() {
   process.env.ELEVENLABS_API_KEY = 'xi-test';
   process.env.ELEVENLABS_AGENT_ID = 'agent_1';
-  const twiml = '<?xml version="1.0"?><Response><Connect><Stream url="wss://api.elevenlabs.io/x"/></Connect></Response>';
-  const { impl, calls } = fakeFetch({ '/v1/convai/twilio/register-call': () => ({ body: twiml }) });
-  const out = await elevenlabsEngine.registerCall({ from: '+447700900000', to: '+442071234567', brief: 'BRIEF', firstMessage: 'Hello, this is Adam.', maxSeconds: 360, callId: 'c1', fetchImpl: impl });
-  assert.equal(out, twiml);
+  process.env.ELEVENLABS_PHONE_NUMBER_ID = 'phnum_1';
+}
+
+test('ElevenLabs places the call itself, with the brief, the fixed opening line and the time limit', async () => {
+  useElevenLabsEnv();
+  const { impl, calls } = fakeFetch({ 'POST /v1/convai/twilio/outbound-call': () => ({ body: { success: true, message: 'ok', conversation_id: 'conv_1', callSid: 'CA1' } }) });
+  const placed = await elevenlabsEngine.placeCall({ to: '+442071234567', brief: 'BRIEF', firstMessage: 'Hello, this is Adam.', maxSeconds: 360, callId: 'c1', fetchImpl: impl });
+  assert.deepEqual(placed, { conversationId: 'conv_1', callSid: 'CA1' });
   assert.equal(calls[0].init.headers['xi-api-key'], 'xi-test');
-  const body = JSON.parse(calls[0].init.body);
-  assert.deepEqual(body, {
-    agent_id: 'agent_1', from_number: '+447700900000', to_number: '+442071234567', direction: 'outbound',
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    agent_id: 'agent_1', agent_phone_number_id: 'phnum_1', to_number: '+442071234567',
     conversation_initiation_client_data: {
       conversation_config_override: { agent: { prompt: { prompt: 'BRIEF' }, first_message: 'Hello, this is Adam.' }, conversation: { max_duration_seconds: 360 } },
-      dynamic_variables: { adam_call_id: 'c1' }
+      dynamic_variables: { forward_to: '', adam_call_id: 'c1' }
     }
   });
-  const quoted = fakeFetch({ '/v1/convai/twilio/register-call': () => ({ body: JSON.stringify(twiml) }) });
-  assert.equal(await elevenlabsEngine.registerCall({ fetchImpl: quoted.impl }), twiml);
-  const refused = fakeFetch({ '/v1/convai/twilio/register-call': () => ({ status: 422, body: { detail: 'override not allowed' } }) });
-  await assert.rejects(elevenlabsEngine.registerCall({ fetchImpl: refused.impl }), /returned 422/);
+  const refused = fakeFetch({ 'POST /v1/convai/twilio/outbound-call': () => ({ body: { success: false, message: 'Number not verified', conversation_id: null, callSid: null } }) });
+  await assert.rejects(elevenlabsEngine.placeCall({ to: '+44', fetchImpl: refused.impl }), /Number not verified/);
+  const error = fakeFetch({ 'POST /v1/convai/twilio/outbound-call': () => ({ status: 422, body: { detail: 'bad' } }) });
+  await assert.rejects(elevenlabsEngine.placeCall({ to: '+44', fetchImpl: error.impl }), /returned 422/);
 });
 
-test('ElevenLabs: the conversation is found by Twilio call id, and waited for until written', async () => {
+test('a conversation is read once ElevenLabs has finished writing it', async () => {
+  useElevenLabsEnv();
   let status = 'processing';
-  const { impl } = fakeFetch({
-    '/v1/convai/conversations': () => ({ body: { conversations: [{ conversation_id: 'other' }, { conversation_id: 'mine' }] } }),
-    '/v1/convai/conversations/:id': url => url.endsWith('/other')
-      ? { body: { conversation_id: 'other', status: 'done', metadata: { phone_call: { call_sid: 'CA-other' } }, transcript: [] } }
-      : { body: { conversation_id: 'mine', status, metadata: { call_duration_secs: 74, phone_call: { call_sid: 'CA42' } },
-        transcript: [{ role: 'agent', message: 'Hello, this is Adam.' }, { role: 'user', message: 'Friday is full, 9:15 works.' }, { role: 'agent', message: null }] } }
-  });
-  assert.deepEqual(await elevenlabsEngine.findConversation({ callSid: 'CA42', sinceUnix: 1, fetchImpl: impl }), { pending: true });
+  const { impl } = fakeFetch({ 'GET /v1/convai/conversations/:id': () => ({ body: { conversation_id: 'conv_1', status,
+    metadata: { call_duration_secs: 74, termination_reason: 'end_call tool' },
+    transcript: [{ role: 'agent', message: 'Hello, this is Adam.' }, { role: 'user', message: 'Friday is full, 9:15 works.' }, { role: 'agent', message: null }] } }) });
+  assert.deepEqual(await elevenlabsEngine.getConversation({ conversationId: 'conv_1', fetchImpl: impl }), { pending: true });
   status = 'done';
-  const found = await elevenlabsEngine.findConversation({ callSid: 'CA42', sinceUnix: 1, fetchImpl: impl });
+  const found = await elevenlabsEngine.getConversation({ conversationId: 'conv_1', fetchImpl: impl });
   assert.equal(found.seconds, 74);
+  assert.equal(found.failed, false);
   assert.deepEqual(found.transcript, [{ speaker: 'adam', text: 'Hello, this is Adam.' }, { speaker: 'them', text: 'Friday is full, 9:15 works.' }]);
-  assert.equal(await elevenlabsEngine.findConversation({ callSid: 'CA-none', sinceUnix: 1, fetchImpl: impl }), null);
 });
 
-test('ElevenLabs agent: phone audio both ways, hang-up and voicemail tools, overrides only for what each call sets', () => {
-  const agent = elevenlabsEngine.agentDefinition({ voiceId: 'voice_1' });
-  assert.equal(agent.conversation_config.asr.user_input_audio_format, 'ulaw_8000');
-  assert.equal(agent.conversation_config.tts.agent_output_audio_format, 'ulaw_8000');
-  assert.equal(agent.conversation_config.tts.voice_id, 'voice_1');
-  assert.deepEqual(Object.keys(agent.conversation_config.agent.prompt.built_in_tools), ['end_call', 'voicemail_detection']);
-  assert.equal(agent.conversation_config.agent.prompt.built_in_tools.voicemail_detection.params.voicemail_message, undefined, 'no message left on voicemail');
-  assert.deepEqual(agent.platform_settings.overrides.conversation_config_override, {
-    agent: { first_message: true, prompt: { prompt: true } }, conversation: { max_duration_seconds: true }
+test('the agent: phone audio, hang-up/voicemail/transfer tools, the callback webhook, and narrow overrides', () => {
+  const agent = elevenlabsEngine.agentDefinition({ voiceId: 'voice_1', webhookUrl: 'https://adam.example/webhooks/calls/elevenlabs-inbound', webhookSecret: 's3cret' });
+  const cfg = agent.conversation_config;
+  assert.equal(cfg.asr.user_input_audio_format, 'ulaw_8000');
+  assert.equal(cfg.tts.agent_output_audio_format, 'ulaw_8000');
+  assert.deepEqual(Object.keys(cfg.agent.prompt.built_in_tools), ['end_call', 'voicemail_detection', 'transfer_to_number']);
+  assert.equal(cfg.agent.prompt.built_in_tools.voicemail_detection.params.voicemail_message, undefined, 'nothing is left on voicemail');
+  const transfer = cfg.agent.prompt.built_in_tools.transfer_to_number.params.transfers[0];
+  assert.deepEqual(transfer.transfer_destination, { type: 'phone_dynamic_variable', phone_number: '{{forward_to}}' });
+  assert.match(transfer.condition, /Never on calls Adam placed/);
+  assert.equal(agent.platform_settings.overrides.enable_conversation_initiation_client_data_from_webhook, true);
+  assert.deepEqual(agent.platform_settings.overrides.conversation_config_override, { agent: { first_message: true, prompt: { prompt: true } }, conversation: { max_duration_seconds: true } });
+  assert.deepEqual(agent.platform_settings.workspace_overrides.conversation_initiation_client_data_webhook,
+    { url: 'https://adam.example/webhooks/calls/elevenlabs-inbound', request_headers: { 'x-adam-webhook-secret': 's3cret' } });
+});
+
+test('setup imports the Twilio number into ElevenLabs and links it to the agent', async () => {
+  useElevenLabsEnv();
+  const { impl, calls } = fakeFetch({
+    'POST /v1/convai/phone-numbers': () => ({ body: { phone_number_id: 'phnum_9' } }),
+    'PATCH /v1/convai/phone-numbers/:id': () => ({ body: {} })
   });
+  assert.equal(await elevenlabsEngine.importTwilioNumber({ phoneNumber: '+447700900000', sid: 'AC1', token: 'tok', agentId: 'agent_1', fetchImpl: impl }), 'phnum_9');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { provider: 'twilio', phone_number: '+447700900000', label: 'Adam', sid: 'AC1', token: 'tok', supports_inbound: true, supports_outbound: true });
+  assert.equal(calls[1].url, 'https://api.elevenlabs.io/v1/convai/phone-numbers/phnum_9');
+  assert.deepEqual(JSON.parse(calls[1].init.body), { agent_id: 'agent_1' });
 });
 
 test('outcome extraction asks only for what was said, and treats any offer or payment as needing a decision', () => {
@@ -381,71 +398,104 @@ test('outcome extraction asks only for what was said, and treats any offer or pa
   assert.match(prompt, /deposit, payment or the person's agreement, use "needs_decision"/);
 });
 
-test('ElevenLabs call end to end: placed with an answer URL, connected on answer, result read from the transcript', async () => {
-  process.env.TWILIO_PHONE_NUMBER = '+447700900000';
-  const placed = [];
+function elevenLabsRuntime(overrides = {}) {
   const saved = [];
-  const registered = [];
-  let lookups = 0;
+  const raised = [];
+  const engine = { ...elevenlabsEngine, placeCall: async () => ({ conversationId: 'conv_1', callSid: 'CA1' }), getConversation: async () => ({ pending: true }), ...overrides.engine };
   businessCalls.configure({
-    engine: 'elevenlabs',
-    saveMessage: async (...args) => saved.push(args), raise: async () => {}, countCallsToday: async () => 0,
-    twilio: { create: async params => { placed.push(params); return { callSid: 'CA9' }; } },
-    elevenlabs: {
-      registerCall: async args => { registered.push(args); return '<Response><Connect/></Response>'; },
-      findConversation: async ({ callSid }) => {
-        lookups += 1;
-        assert.equal(callSid, 'CA9');
-        return lookups < 2 ? { pending: true } : { seconds: 80, transcript: [{ speaker: 'adam', text: 'Hello, this is Adam.' }, { speaker: 'them', text: 'Booked, under Patel.' }] };
+    engine: 'elevenlabs', sleep: async () => {}, countCallsToday: async () => 0,
+    saveMessage: async (...args) => saved.push(args), raise: async (...args) => raised.push(args),
+    elevenlabs: engine, ...overrides.runtime
+  });
+  return { saved, raised };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const dishoom = { phone: '020 7123 4567', business_name: 'Dishoom', goal: 'Book a table for 4 on Friday at 7:30pm' };
+
+test('a whole ElevenLabs call: placed with no Twilio settings in Adam, followed by id, result read from the transcript', async () => {
+  delete process.env.TWILIO_PHONE_NUMBER;
+  const placed = [];
+  let reads = 0;
+  const { saved } = elevenLabsRuntime({
+    engine: {
+      placeCall: async args => { placed.push(args); return { conversationId: 'conv_7', callSid: 'CA7' }; },
+      getConversation: async ({ conversationId }) => {
+        assert.equal(conversationId, 'conv_7');
+        reads += 1;
+        return reads < 3 ? { pending: true } : { seconds: 80, transcript: [{ speaker: 'adam', text: 'Hello, this is Adam.' }, { speaker: 'them', text: 'Booked, under Patel.' }] };
       }
     },
-    extractOutcome: async (request, transcript) => {
-      assert.equal(request.businessName, 'Dishoom');
-      assert.equal(transcript.length, 2);
-      return '{"status":"done","summary":"Booked for 4 at 7:30 Friday.","reference":"under Patel"}';
-    },
-    sleep: async () => {}
+    runtime: { extractOutcome: async () => '{"status":"done","summary":"Booked for 4 at 7:30 Friday.","reference":"under Patel"}' }
   });
-  const { id } = await businessCalls.startCall({ userId: 'u1', fromNumber: '+447700900000', baseUrl: 'https://adam.example', onBehalfOf: 'Sam',
-    input: { phone: '020 7123 4567', business_name: 'Dishoom', goal: 'Book a table for 4 on Friday at 7:30pm' } });
-  assert.equal(placed[0].Url, `https://adam.example/webhooks/calls/${id}/answer`);
-  assert.equal(placed[0].Twiml, undefined);
-
-  assert.equal(await businessCalls.handleAnswer(id, { CallSid: 'CA9', From: '+447700900000', To: '+442071234567' }), '<Response><Connect/></Response>');
-  assert.equal(registered[0].firstMessage, 'Hello, this is Adam, an AI assistant calling on behalf of Sam.');
-  assert.match(registered[0].brief, /Never give or agree to card numbers/);
-  assert.equal(registered[0].maxSeconds, 360);
-  assert.match(await businessCalls.handleAnswer(id, { CallSid: 'CA9' }), /<Hangup\/>/, 'a second answer for the same call is refused');
-  assert.match(await businessCalls.handleAnswer('unknown', {}), /<Hangup\/>/);
-
-  await businessCalls.handleStatus(id, { CallStatus: 'completed', CallSid: 'CA9' });
-  assert.equal(lookups, 2);
+  await businessCalls.startCall({ userId: 'u1', fromNumber: null, baseUrl: '', onBehalfOf: 'Sam', input: dishoom });
+  assert.equal(placed[0].to, '+442071234567');
+  assert.equal(placed[0].firstMessage, 'Hello, this is Adam, an AI assistant calling on behalf of Sam.');
+  assert.equal(placed[0].maxSeconds, 360);
+  assert.match(placed[0].brief, /Never give or agree to card numbers/);
+  for (let i = 0; i < 20 && !saved.length; i++) await settle();
+  assert.equal(reads, 3);
   assert.equal(saved[0][2].text, 'Called Dishoom (1 min). Booked for 4 at 7:30 Friday. Reference: under Patel.');
   assert.match(saved[0][2].call.transcript, /Them: Booked, under Patel\./);
 });
 
-test('ElevenLabs: unanswered, no transcript, or an unreadable result is never reported as success', async () => {
-  const saved = [];
-  const base = { saveMessage: async (...args) => saved.push(args), raise: async () => {}, countCallsToday: async () => 0,
-    twilio: { create: async () => ({ callSid: 'CA1' }) }, sleep: async () => {}, engine: 'elevenlabs' };
-  const input = { phone: '+442071234567', business_name: 'Dishoom', goal: 'Ask about tonight' };
-  const start = () => businessCalls.startCall({ userId: 'u', fromNumber: '+447700900000', baseUrl: 'https://adam.example', input });
+test('ElevenLabs: unanswered, failed, or unreadable calls are never reported as success', async () => {
+  const cases = [
+    [{ seconds: 0, transcript: [{ speaker: 'adam', text: 'Hello, this is Adam.' }] }, null, 'Call to Dishoom. No one answered. Nothing was agreed.'],
+    [{ failed: true, seconds: 0, transcript: [] }, null, 'Call to Dishoom. The call could not be placed. Nothing was agreed.'],
+    [{ seconds: 20, transcript: [{ speaker: 'them', text: 'Hello?' }] }, 'not json', /Nothing was agreed\.$/]
+  ];
+  for (const [conversation, extracted, expected] of cases) {
+    const { saved } = elevenLabsRuntime({ engine: { getConversation: async () => conversation }, runtime: { extractOutcome: async () => extracted } });
+    await businessCalls.startCall({ userId: 'u', input: dishoom });
+    for (let i = 0; i < 20 && !saved.length; i++) await settle();
+    if (expected instanceof RegExp) assert.match(saved[0][2].text, expected); else assert.equal(saved[0][2].text, expected);
+  }
+  const { saved } = elevenLabsRuntime({ engine: { placeCall: async () => { throw new Error('Number not verified'); } } });
+  await assert.rejects(businessCalls.startCall({ userId: 'u', input: dishoom }), /couldn't place the call: Number not verified/);
+  assert.equal(saved.length, 0);
+});
 
-  businessCalls.configure({ ...base, elevenlabs: { findConversation: async () => null } });
-  let { id } = await start();
-  await businessCalls.handleStatus(id, { CallStatus: 'completed' });
-  assert.equal(saved.at(-1)[2].text, 'Call to Dishoom. No one answered. Nothing was agreed.');
+test('a callback is matched to its person: offered a transfer to their phone, told at once, and sent the message after', async () => {
+  const { raised, saved } = elevenLabsRuntime({
+    engine: { getConversation: async () => ({ seconds: 40, transcript: [{ speaker: 'them', text: 'We can do Friday at 7:30 after all.' }] }) },
+    runtime: {
+      findCallback: async caller => (caller === '+442071234567' ? { userId: 'u1', businessName: 'Dishoom', goal: 'Book a table for 4 on Friday', userPhone: '07700 900123', userName: 'Sam' } : null),
+      extractOutcome: async () => '{"status":"needs_decision","summary":"They can do Friday at 7:30 after all.","offer":"Friday 7:30pm"}'
+    }
+  });
+  const data = await businessCalls.handleElevenLabsInbound({ caller_id: '+442071234567', conversation_id: 'conv_cb' });
+  assert.equal(data.dynamic_variables.forward_to, '+447700900123');
+  assert.match(data.conversation_config_override.agent.prompt.prompt, /answering a call from Dishoom\. Adam called them recently for Sam about: Book a table for 4 on Friday/);
+  assert.match(data.conversation_config_override.agent.prompt.prompt, /use transfer_to_number/);
+  assert.equal(data.conversation_config_override.agent.first_message, 'Hello, this is Adam, an AI assistant for Sam. Thanks for calling back.');
+  assert.equal(raised[0][1].title, 'Dishoom is calling back');
+  for (let i = 0; i < 20 && !saved.length; i++) await settle();
+  assert.equal(saved[0][2].text, 'Dishoom called back. They can do Friday at 7:30 after all. They offered: Friday 7:30pm. Nothing is confirmed until you say so.');
+});
 
-  businessCalls.configure({ ...base, elevenlabs: { registerCall: async () => '<Response/>', findConversation: async () => ({ pending: true }) } });
-  ({ id } = await start());
-  await businessCalls.handleAnswer(id, { CallSid: 'CA1' });
-  await businessCalls.handleStatus(id, { CallStatus: 'completed' });
-  assert.equal(saved.at(-1)[2].text, 'Call to Dishoom. The call ended before I could confirm anything. Nothing was agreed.');
+test('a callback with no saved phone takes a message; an unknown or shared caller learns nothing and nobody is told', async () => {
+  const { raised } = elevenLabsRuntime({ runtime: { findCallback: async caller => ({
+    '+442071234567': { userId: 'u1', businessName: 'Dishoom', userPhone: null },
+    '+442070000000': { ambiguous: true } }[caller] || null) } });
+  const noPhone = await businessCalls.handleElevenLabsInbound({ caller_id: '+442071234567' });
+  assert.equal(noPhone.dynamic_variables.forward_to, '');
+  assert.match(noPhone.conversation_config_override.agent.prompt.prompt, /cannot be put through right now\. Take a message\./);
+  assert.match(raised[0][1].body, /their number is \+442071234567/);
+  raised.length = 0;
+  for (const caller of ['+442070000000', '+442075555555', 'anonymous', undefined]) {
+    const data = await businessCalls.handleElevenLabsInbound({ caller_id: caller });
+    assert.equal(data.dynamic_variables.forward_to, '');
+    assert.equal(data.conversation_config_override.agent.prompt.prompt, elevenlabsEngine.INBOUND_FALLBACK_PROMPT);
+  }
+  assert.equal(raised.length, 0);
+});
 
-  businessCalls.configure({ ...base, extractOutcome: async () => 'not json at all',
-    elevenlabs: { registerCall: async () => '<Response/>', findConversation: async () => ({ seconds: 30, transcript: [{ speaker: 'them', text: 'Hello?' }] }) } });
-  ({ id } = await start());
-  await businessCalls.handleAnswer(id, { CallSid: 'CA1' });
-  await businessCalls.handleStatus(id, { CallStatus: 'completed' });
-  assert.match(saved.at(-1)[2].text, /Nothing was agreed\.$/);
+test('the callback webhook only answers ElevenLabs (shared secret header)', () => {
+  process.env.ELEVENLABS_WEBHOOK_SECRET = 'hook-secret';
+  assert.equal(businessCalls.validWebhookSecret('hook-secret'), true);
+  assert.equal(businessCalls.validWebhookSecret('hook-secreT'), false);
+  assert.equal(businessCalls.validWebhookSecret(undefined), false);
+  delete process.env.ELEVENLABS_WEBHOOK_SECRET;
+  assert.equal(businessCalls.validWebhookSecret('anything'), false, 'no secret configured means nothing is accepted');
 });

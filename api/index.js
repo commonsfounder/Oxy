@@ -607,15 +607,21 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
   }
 });
 
-// Twilio: a business call was answered. Returns TwiML connecting it to the ElevenLabs agent.
-app.post('/webhooks/calls/:id/answer', express.urlencoded({ extended: false }), async (req, res) => {
+// ElevenLabs asks here who is calling before its agent answers Adam's number (configured on the
+// agent by scripts/setup-calls.js, with the shared secret header). Answers with that call's prompt.
+app.post('/webhooks/calls/elevenlabs-inbound', express.json(), async (req, res) => {
   const businessCalls = require('./services/business-calls');
-  const url = `${String(process.env.APP_URL || '').replace(/\/+$/, '')}/webhooks/calls/${req.params.id}/answer`;
-  if (!businessCalls.validTwilioSignature(url, req.body || {}, req.get('X-Twilio-Signature'))) {
-    log('warn', 'business_call.answer.bad_signature', { callId: req.params.id });
+  if (!businessCalls.validWebhookSecret(req.get('x-adam-webhook-secret'))) {
+    log('warn', 'business_call.elevenlabs_inbound.bad_secret', {});
     return res.status(403).end();
   }
-  res.type('text/xml').send(await businessCalls.handleAnswer(req.params.id, req.body || {}));
+  try {
+    res.json({ type: 'conversation_initiation_client_data', ...(await businessCalls.handleElevenLabsInbound(req.body || {})) });
+  } catch (error) {
+    log('warn', 'business_call.elevenlabs_inbound.failed', { error: error.message });
+    const { clientData, INBOUND_FALLBACK_PROMPT } = require('./services/call-engine-elevenlabs');
+    res.json({ type: 'conversation_initiation_client_data', ...clientData({ prompt: INBOUND_FALLBACK_PROMPT, firstMessage: 'Hello, this is Adam, an AI assistant.' }) });
+  }
 });
 
 // Twilio reports the end of a business call here. Only calls that never connected (no answer,
@@ -9967,7 +9973,9 @@ businessCalls.configure({
     const match = businessCalls.callbackFromLog(data, caller);
     if (!match || match.ambiguous) return match;
     const preferences = await getPreferenceMap(match.userId).catch(() => ({}));
-    return { ...match, userPhone: preferences['checkout_profile.phone'] || null };
+    let userName = preferences['checkout_profile.name'] || '';
+    try { const parsed = JSON.parse(userName); if (typeof parsed === 'string') userName = parsed; } catch { /* plain text */ }
+    return { ...match, userPhone: preferences['checkout_profile.phone'] || null, userName: String(userName).trim().split(/\s+/)[0] || null };
   }
 });
 
