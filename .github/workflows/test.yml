@@ -1,0 +1,28 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Placeholders so the app module loads. Tests that need the real database skip themselves
+      # with the reason (test/support/real-database.js); run them locally against Supabase.
+      SUPABASE_URL: http://127.0.0.1:9
+      SUPABASE_KEY: ci-placeholder
+      OXY_SESSION_SECRET: ci-placeholder-session-secret-not-used-anywhere
+      OPENAI_API_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium-headless-shell
+      - run: node --check api/index.js
+      - run: npm run check:undef
+      - run: npm test

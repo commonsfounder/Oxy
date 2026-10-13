@@ -3,7 +3,7 @@
 require('dotenv').config();
 
 const assert = require('node:assert/strict');
-const test = require('node:test');
+const test = require('../support/real-database');
 
 const app = require('../../api/index');
 const scheduledTasks = require('../../api/services/scheduled-tasks');
