@@ -13,6 +13,7 @@ const ACTION_NAMES = Object.freeze({
   send_adam_email: 'Message',
   send_adam_sms: 'Message',
   make_call: 'Call',
+  call_business: 'Call',
   create_reminder: 'Reminder',
   update_reminder: 'Reminder',
   create_calendar_event: 'Calendar event',

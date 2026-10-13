@@ -37,7 +37,28 @@ const ACTION_CONTRACTS = {
     risk: 'high',
     required: ['contact'],
     inputExample: { contact: 'name' },
+    guidance: 'Opens a call from the person\'s own phone, for them to talk themselves (friends, family, anyone they want to speak to). When they want Adam to ring a business and sort something out for them, use call_business instead.',
     successSummary: 'Call opened',
+    failureSummary: 'Call failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  call_business: {
+    adapter: { kind: 'inline' },
+    risk: 'high',
+    required: ['phone', 'business_name', 'goal'],
+    optional: ['details', 'fallback', 'language', 'on_behalf_of'],
+    aliases: { phone: ['number', 'to'], business_name: ['business', 'name'], goal: ['purpose', 'ask'] },
+    inputExample: {
+      phone: 'the business\'s phone number, e.g. +442071234567 (look it up first with find_place or web_search if you don\'t have it)',
+      business_name: 'Dishoom Covent Garden',
+      goal: 'book a table for 4 this Friday at 7:30pm',
+      details: ['Booking name: Sam Patel', 'Party of 4', 'Callback number: the one Adam is calling from'],
+      fallback: 'any time between 7 and 8:30pm, or Saturday at the same time',
+      on_behalf_of: 'Sam'
+    },
+    guidance: 'Adam phones a business itself with a live voice and reports back: for things only a phone call can do (a restaurant with no online booking, a cancellation list, a question a website can\'t answer). Not for personal contacts, emergencies, or anything needing payment on the call — Adam will not give card details or agree to charges, so a booking that needs a deposit comes back for the person to decide. List in details exactly what Adam may tell them, and nothing more.',
+    successSummary: 'Calling',
     failureSummary: 'Call failed',
     confirmation: 'review_required',
     executionMode: 'review'

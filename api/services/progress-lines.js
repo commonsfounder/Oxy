@@ -30,6 +30,7 @@ const pick = (specific, general) => (specific ? specific : general);
 const LINES = {
   send_message: (i) => pick(person(i.contact) && `Writing to ${person(i.contact)}`, 'Writing your message'),
   make_call: (i) => pick(person(i.contact) && `Calling ${person(i.contact)}`, 'Placing the call'),
+  call_business: (i) => pick(detail(i.business_name) && `Calling ${detail(i.business_name)}`, 'Calling the business'),
   create_reminder: (i) => pick(detail(i.title) && `Setting a reminder: ${detail(i.title)}`, 'Setting a reminder'),
   play_music: (i) => pick(detail(i.query) && `Playing ${detail(i.query)}`, 'Putting some music on'),
   play_game: () => 'Setting up a game',

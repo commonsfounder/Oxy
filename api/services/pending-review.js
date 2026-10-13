@@ -154,6 +154,15 @@ function reviewDetailForAction(action, cardInfo = null) {
       return [input.choice_label, input.service].filter(Boolean).join('\n') || 'Appointment choice';
     case 'make_call':
       return input.contact ? `Contact: ${input.contact}` : '';
+    case 'call_business': {
+      const details = Array.isArray(input.details) ? input.details.join('; ') : input.details;
+      return [
+        [input.business_name, input.phone].filter(Boolean).join(' · '),
+        input.goal,
+        details ? `Adam may tell them: ${details}` : 'Adam won\'t share any of your details',
+        'Says it is an AI assistant. Won\'t pay or commit to anything.'
+      ].filter(Boolean).join('\n');
+    }
     case 'stripe_charge':
     case 'spend_from_concierge_via_stripe':
     case 'spend_from_concierge_account':

@@ -18,8 +18,9 @@ const media = require('./media');
 const play = require('./play');
 const appointments = require('./appointments');
 const assistant = require('./assistant');
+const calls = require('./calls');
 
-const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser, email, money, media, play, appointments, assistant];
+const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser, email, money, media, play, appointments, assistant, calls];
 
 const handlers = Object.create(null);
 for (const mod of MODULES) {

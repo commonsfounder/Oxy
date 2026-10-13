@@ -14,6 +14,7 @@ if (require.main === module) {
   const PORT = Number(process.env.PORT) || 3000;
   const server = http.createServer(app);
   server.on('upgrade', (req, socket, head) => {
+    if (require('./api/services/business-calls').handleUpgrade(req, socket, head)) return;
     if (!require('./api/services/browser-live-view').handleUpgrade(req, socket, head)) socket.destroy();
   });
   server.listen(PORT, '0.0.0.0', () => {

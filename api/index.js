@@ -607,6 +607,21 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
   }
 });
 
+// Twilio reports the end of a business call here. Only calls that never connected (no answer,
+// busy, failed) are reported from this route; a connected call reports when its audio ends.
+app.post('/webhooks/calls/:id/status', express.urlencoded({ extended: false }), async (req, res) => {
+  const businessCalls = require('./services/business-calls');
+  const url = `${String(process.env.APP_URL || '').replace(/\/+$/, '')}/webhooks/calls/${req.params.id}/status`;
+  if (!businessCalls.validTwilioSignature(url, req.body || {}, req.get('X-Twilio-Signature'))) {
+    log('warn', 'business_call.status.bad_signature', { callId: req.params.id });
+    return res.status(403).end();
+  }
+  res.status(204).end();
+  await businessCalls.handleStatus(req.params.id, req.body || {}).catch(error => {
+    log('warn', 'business_call.status.failed', { callId: req.params.id, error: error.message });
+  });
+});
+
 // Adam's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
 app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
@@ -9889,6 +9904,27 @@ app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
     res.json({ available: false, balance: null, error: 'No real concierge balance is connected.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Business calls finish minutes after the action that placed them, so they report through these.
+require('./services/business-calls').configure({
+  saveMessage: (userId, role, content) => saveMessage(userId, role, content),
+  raise: async (userId, notification) => {
+    const queued = await notificationDelivery.raise(userId, {
+      ...notification,
+      urgency: notifications.gradeUrgency({ category: notification.category, minutesUntil: 0 })
+    });
+    if (queued?.ok) await notificationDelivery.deliverPending(userId);
+    return queued;
+  },
+  countCallsToday: async userId => {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const { count } = await supabase.from('action_log').select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('status', 'executed').like('action', '%"type":"call_business"%')
+      .gte('created_at', since.toISOString());
+    return count || 0;
   }
 });
 

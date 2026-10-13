@@ -57,6 +57,7 @@ const DESCRIBERS = {
   send_adam_email: (p) => ({ summary: `Emailed ${pick(p, 'to') || 'someone'}`, kind: 'sent' }),
   send_adam_sms: (p) => ({ summary: `Texted ${pick(p, 'to', 'contact') || 'someone'}`, kind: 'sent' }),
   make_call: (p) => ({ summary: `Called ${pick(p, 'contact') || 'someone'}`, kind: 'sent' }),
+  call_business: (p) => ({ summary: `Calling ${pick(p, 'business_name') || 'a business'}`, kind: 'sent' }),
   create_reminder: (p) => ({ summary: `Set a reminder${pick(p, 'title') ? `: ${pick(p, 'title')}` : ''}`, kind: 'did' }),
   play_music: (p) => ({ summary: `Played ${pick(p, 'query') || 'music'}`, kind: 'did' }),
   book_uber: (p) => ({ summary: `Opened an Uber to ${pick(p, 'destination', 'query', 'place', 'address') || 'a place'}`, kind: 'did', usedLocation: true }),

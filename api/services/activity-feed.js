@@ -63,6 +63,7 @@ function describeAction(type, input = {}) {
     case 'book_uber': case 'book_lyft': return 'Booked a ride';
     case 'book_appointment': return 'Booked an appointment';
     case 'make_call': return who ? `Opened a call to ${who}` : 'Opened a call';
+    case 'call_business': return input.business_name ? `Called ${clean(input.business_name, 40)}` : 'Called a business';
     case 'create_scheduled_task': case 'create_agent_task': return `Set up ${quoted(input.title || input.goal) || 'a task'}`;
     case 'web_search': return `Looked up ${quoted(input.query) || 'something online'}`;
     case 'get_emails': case 'search_emails': return 'Checked your email';
