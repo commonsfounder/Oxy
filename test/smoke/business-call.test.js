@@ -241,3 +241,64 @@ test('a call nobody answers is reported as such; the daily cap and missing setup
   await assert.rejects(businessCalls.startCall({ userId: 'u', fromNumber: null, baseUrl: 'https://adam.example', input }), { code: 'no_number' });
   await assert.rejects(businessCalls.startCall({ userId: 'u', fromNumber: '+447700900000', baseUrl: '', input }), { code: 'not_configured' });
 });
+
+// --- callbacks to the shared number ----------------------------------------------------------
+
+test('a business calling back is put through to the person Adam called for, without revealing their number', async () => {
+  process.env.TWILIO_PHONE_NUMBER = '+447700900000';
+  const raised = [];
+  const lookups = [];
+  businessCalls.configure({
+    saveMessage: async () => {}, raise: async (...args) => raised.push(args), countCallsToday: async () => 0,
+    findCallback: async caller => {
+      lookups.push(caller);
+      return { '+442071234567': { userId: 'u1', businessName: 'Dishoom', userPhone: '07700 900123' },
+        '+442079999999': { userId: 'u2', businessName: 'Barbers', userPhone: null },
+        '+442070000000': { ambiguous: true } }[caller] || null;
+    }
+  });
+
+  const through = await businessCalls.handleInboundCall({ from: '+442071234567' });
+  assert.match(through, /<Dial timeout="25" callerId="\+447700900000"><Number>\+447700900123<\/Number><\/Dial>/);
+  assert.equal(raised[0][0], 'u1');
+  assert.equal(raised[0][1].title, 'Dishoom is calling back');
+  assert.match(raised[0][1].body, /Putting them through to you now from \+447700900000/);
+
+  const noPhone = await businessCalls.handleInboundCall({ from: '020 7999 9999' });
+  assert.doesNotMatch(noPhone, /<Dial/);
+  assert.match(raised[1][1].body, /Call them back on \+442079999999\. Add your phone number in Settings/);
+
+  raised.length = 0;
+  for (const from of ['+442070000000', '+442075555555', 'anonymous', '']) {
+    const twiml = await businessCalls.handleInboundCall({ from });
+    assert.doesNotMatch(twiml, /<Dial/);
+    assert.match(twiml, /cannot take calls/);
+  }
+  assert.equal(raised.length, 0, 'an unknown or ambiguous caller tells nobody anything');
+  assert.deepEqual(lookups, ['+442071234567', '+442079999999', '+442070000000', '+442075555555']);
+});
+
+test('calls go out from the shared number, the brief points callbacks at it, and the log can find who it was for', async () => {
+  process.env.TWILIO_PHONE_NUMBER = '+447700900000';
+  const placed = [];
+  businessCalls.configure({ saveMessage: async () => {}, raise: async () => {}, countCallsToday: async () => 0,
+    twilio: { create: async params => { placed.push(params); return { callSid: 'CA1' }; } } });
+  const { handlers } = require('../../api/actions/calls');
+  const previous = process.env.APP_URL;
+  process.env.APP_URL = 'https://adam.example';
+  try {
+    const result = await handlers.call_business({
+      userId: 'u1',
+      params: { phone: '020 7123 4567', business_name: 'Dishoom', goal: 'Ask about a table tonight' },
+      deps: { getPreferenceMap: async () => ({ 'checkout_profile.name': '"Sam Patel"' }) }
+    });
+    assert.equal(result.outcome, 'incomplete');
+    assert.equal(result.text, 'Calling Dishoom (+442071234567) now. I\'ll tell you what they say.');
+    assert.equal(placed[0].From, '+447700900000');
+    const call = [...businessCalls._calls.values()].find(c => c.request.phone === '+442071234567');
+    assert.match(call.brief, /ask them to ring the number you are calling from; it reaches Sam\. Never give out any other number\./);
+    assert.equal(call.disclosure, 'Hello, this is Adam, an AI assistant calling on behalf of Sam.');
+  } finally {
+    if (previous === undefined) delete process.env.APP_URL; else process.env.APP_URL = previous;
+  }
+});

@@ -622,6 +622,22 @@ app.post('/webhooks/calls/:id/status', express.urlencoded({ extended: false }), 
   });
 });
 
+// Someone rang Adam's shared number back. Twilio's Voice URL for that number points here.
+app.post('/webhooks/calls/inbound', express.urlencoded({ extended: false }), async (req, res) => {
+  const businessCalls = require('./services/business-calls');
+  const url = `${String(process.env.APP_URL || '').replace(/\/+$/, '')}/webhooks/calls/inbound`;
+  if (!businessCalls.validTwilioSignature(url, req.body || {}, req.get('X-Twilio-Signature'))) {
+    log('warn', 'business_call.inbound.bad_signature', {});
+    return res.status(403).end();
+  }
+  try {
+    res.type('text/xml').send(await businessCalls.handleInboundCall({ from: req.body?.From }));
+  } catch (error) {
+    log('warn', 'business_call.inbound.failed', { error: error.message });
+    res.type('text/xml').send('<Response><Say>Sorry, this number cannot take calls right now.</Say></Response>');
+  }
+});
+
 // Adam's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
 app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
@@ -9908,7 +9924,8 @@ app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
 });
 
 // Business calls finish minutes after the action that placed them, so they report through these.
-require('./services/business-calls').configure({
+const businessCalls = require('./services/business-calls');
+businessCalls.configure({
   saveMessage: (userId, role, content) => saveMessage(userId, role, content),
   raise: async (userId, notification) => {
     const queued = await notificationDelivery.raise(userId, {
@@ -9921,10 +9938,20 @@ require('./services/business-calls').configure({
   countCallsToday: async userId => {
     const since = new Date();
     since.setUTCHours(0, 0, 0, 0);
-    const { count } = await supabase.from('action_log').select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'executed').like('action', '%"type":"call_business"%')
-      .gte('created_at', since.toISOString());
-    return count || 0;
+    const { data } = await supabase.from('action_log').select('action')
+      .eq('user_id', userId).eq('status', 'executed').gte('created_at', since.toISOString()).limit(500);
+    return businessCalls.callsInLog(data).length;
+  },
+  // Who Adam last called this number for, over the past two weeks. Two different people means
+  // nobody is put through: a callback must never reach the wrong person.
+  findCallback: async caller => {
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase.from('action_log').select('user_id, action, created_at')
+      .eq('status', 'executed').gte('created_at', since).order('created_at', { ascending: false }).limit(5000);
+    const match = businessCalls.callbackFromLog(data, caller);
+    if (!match || match.ambiguous) return match;
+    const preferences = await getPreferenceMap(match.userId).catch(() => ({}));
+    return { ...match, userPhone: preferences['checkout_profile.phone'] || null };
   }
 });
 

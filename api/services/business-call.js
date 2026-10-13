@@ -86,6 +86,7 @@ function buildCallBrief(request, { onBehalfOf }) {
       `say you will check with ${onBehalfOf} and get back to them, then end the call.`,
     '- You may ask them to pencil something in or hold it, and you may join a waiting or cancellation list, but say it still needs confirming.',
     '- Do not share anything not listed above (addresses, dates of birth, account numbers, other people\'s details).',
+    `- If they need to call back, ask them to ring the number you are calling from; it reaches ${onBehalfOf}. Never give out any other number.`,
     '- If you reach voicemail, an automated menu you cannot get through, or the wrong business, call report_outcome and end the call.',
     '- If the other person asks you to stop calling or is upset, apologise, end the call and report it.',
     '',

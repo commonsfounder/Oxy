@@ -14,10 +14,11 @@ function firstName(value) {
 }
 
 async function callBusiness({ userId, params, context, deps }) {
-  const { supabase, getPreferenceMap } = deps;
-  const { getActiveHandle } = require('../services/adam-identity');
-  const handle = await getActiveHandle(supabase, userId, 'phone_sms').catch(() => null);
-  const fromNumber = handle?.handle_value || process.env.TWILIO_PHONE_NUMBER || null;
+  const { getPreferenceMap } = deps;
+  // Every call goes out from Adam's one shared number. A business that rings it back is put
+  // through to the person it called for (see business-calls.js handleInboundCall), so nobody
+  // needs a number of their own and their own number is never given out.
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER || null;
   const preferences = getPreferenceMap ? await getPreferenceMap(userId).catch(() => ({})) : {};
   const onBehalfOf = firstName(params?.on_behalf_of) || firstName(preferences['checkout_profile.name']);
 
@@ -32,7 +33,8 @@ async function callBusiness({ userId, params, context, deps }) {
     return {
       success: true,
       outcome: 'incomplete',
-      text: `Calling ${request.businessName} now. I'll tell you what they say.`,
+      // The dialled number is in the logged text on purpose: it is how a callback finds this person.
+      text: `Calling ${request.businessName} (${request.phone}) now. I'll tell you what they say.`,
       cardText: `${request.businessName} · ${request.phone} · ${request.goal}`,
       actionSummary: 'Calling'
     };

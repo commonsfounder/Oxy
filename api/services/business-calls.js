@@ -15,7 +15,7 @@ const calls = new Map();
 const MEDIA_PATH = /^\/calls\/media\/([a-f0-9]{32})\/([a-f0-9]{64})$/;
 let runtime = null;
 
-// saveMessage(userId, role, content), raise(userId, notification), countCallsToday(userId),
+// saveMessage(userId, role, content), raise(userId, notification), countCallsToday(userId), findCallback(e164),
 // openRealtime() -> WebSocket, twilio: { create(params), hangUp(callSid) }.
 function configure(deps) {
   runtime = { ...deps };
@@ -156,6 +156,63 @@ async function handleStatus(callId, params) {
   if (endedBy && !call.bridged) await report(call, { outcome: null, endedBy, seconds: 0 });
 }
 
+// action_log.action is a jsonb column holding the JSON text written by serializeLoggedAction, so
+// rows are matched here rather than with a SQL LIKE (which Postgres refuses on jsonb).
+function loggedCall(row) {
+  let value = row?.action;
+  try { if (typeof value === 'string') value = JSON.parse(value); } catch { return null; }
+  return value?.type === 'call_business' ? value : null;
+}
+
+function callsInLog(rows) {
+  return (rows || []).map(loggedCall).filter(Boolean);
+}
+
+// Newest-first action_log rows -> who this number was called for. More than one person: ambiguous.
+function callbackFromLog(rows, caller) {
+  const hits = (rows || []).filter(row => String(loggedCall(row)?.resultText || '').includes(`(${caller})`));
+  const users = [...new Set(hits.map(row => row.user_id))];
+  if (users.length !== 1) return users.length ? { ambiguous: true } : null;
+  return { userId: users[0], businessName: loggedCall(hits[0]).input?.business_name || null };
+}
+
+function say(text) {
+  return `<Say>${xmlAttr(text)}</Say>`;
+}
+
+// Someone rang Adam's shared number. If it is a business Adam called for exactly one person
+// recently, they are put through to that person's own phone (shown as Adam's number, so the
+// person's number is never revealed) and the person is told who is calling. Anything else gets a
+// short spoken explanation; nothing is recorded.
+//
+// runtime.findCallback(callerE164) -> { userId, businessName, userPhone } | { ambiguous: true } | null
+async function handleInboundCall({ from }) {
+  const NOT_FOR_YOU = say('This number is used by Adam, an AI assistant, to make calls for people. It cannot take calls. Goodbye.');
+  let caller;
+  try { caller = (require('./business-call')).normalizeCallNumber(from); } catch { return `<Response>${NOT_FOR_YOU}</Response>`; }
+  const match = await (runtime?.findCallback || (async () => null))(caller).catch(() => null);
+  if (!match || match.ambiguous) return `<Response>${NOT_FOR_YOU}</Response>`;
+
+  let userPhone = null;
+  try { userPhone = match.userPhone ? (require('./business-call')).normalizeCallNumber(match.userPhone) : null; } catch { userPhone = null; }
+  const business = match.businessName || caller;
+  await runtime.raise(match.userId, {
+    category: 'action_required',
+    title: `${business} is calling back`,
+    body: userPhone
+      ? `They rang Adam's number about your request. Putting them through to you now from ${process.env.TWILIO_PHONE_NUMBER || 'Adam\'s number'}.`
+      : `They rang Adam's number about your request. Call them back on ${caller}. Add your phone number in Settings and Adam will put callbacks through to you.`,
+    dedupeKey: `business-callback:${caller}:${Math.floor(Date.now() / 60000)}`,
+    sourceRef: { businessCallback: caller }
+  }).catch(() => {});
+
+  if (!userPhone) {
+    return `<Response>${say('Thanks for calling back. They have been told you called and will ring you back. Goodbye.')}</Response>`;
+  }
+  const callerId = process.env.TWILIO_PHONE_NUMBER ? ` callerId="${xmlAttr(process.env.TWILIO_PHONE_NUMBER)}"` : '';
+  return `<Response>${say('Thanks for calling back. Connecting you now.')}<Dial timeout="25"${callerId}><Number>${xmlAttr(userPhone)}</Number></Dial>${say('They could not answer. They have been told you called. Goodbye.')}</Response>`;
+}
+
 // For the HTTP server's 'upgrade' event. Returns false when the path isn't a call stream.
 function handleUpgrade(req, socket, head) {
   const match = MEDIA_PATH.exec(String(req.url || '').split('?')[0]);
@@ -186,6 +243,9 @@ function handleUpgrade(req, socket, head) {
 module.exports = {
   configure,
   startCall,
+  callsInLog,
+  callbackFromLog,
+  handleInboundCall,
   handleStatus,
   handleUpgrade,
   validTwilioSignature,
