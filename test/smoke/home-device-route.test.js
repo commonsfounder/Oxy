@@ -93,6 +93,12 @@ test('pair, speak and report a sound with the same calls the firmware makes', as
     assert.match(csv, /^key,type,encoding,value\nadam,namespace,,\n/);
     assert.match(csv, /token,data,string,"tok-1"/);
     assert.match(csv, /wifi_ssid,data,string,"Home ""5G"""/);
+
+    // Self-pairing box: Wi-Fi and the server only, no laptop pairing needed.
+    const fresh = (await run('node', [script, 'nvs', '--ssid', 'Home', '--password', 'pw', '--server', 'https://adam.example/'],
+      { env: { ...process.env, ADAM_HOME_DEVICE_STATE: path.join(dir, 'none.json') } })).stdout;
+    assert.match(fresh, /base_url,data,string,"https:\/\/adam\.example"\n/);
+    assert.doesNotMatch(fresh, /token|display_id/);
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });

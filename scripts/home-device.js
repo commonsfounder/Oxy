@@ -9,6 +9,8 @@
 //      --stream plays the reply as it is synthesised and reports time to first audio)
 //      node scripts/home-device.js sound smoke_alarm [--confidence 0.95] [--sustained]
 //   4. node scripts/home-device.js nvs --ssid HOME --password … > adam-nvs.csv
+//      or, to let the box pair itself (it shows a code to type into the app), skip steps 1-3:
+//      node scripts/home-device.js nvs --ssid HOME --password … --server https://… > adam-nvs.csv
 //      then: nvs_partition_gen.py generate adam-nvs.csv adam-nvs.bin 0x6000
 //            parttool.py --port PORT write_partition --partition-name=nvs --input adam-nvs.bin
 //
@@ -107,18 +109,23 @@ async function sound(args) {
 }
 
 // NVS CSV for ESP-IDF's nvs_partition_gen.py. Keys match firmware/adam-link/esp-idf/adam_net.c.
+// With --server and no laptop pairing, only Wi-Fi and the server go in; the box pairs itself.
 function nvs(args) {
-  const state = loadState();
+  const server = option(args, '--server');
+  const state = server ? { baseUrl: server.replace(/\/+$/, '') } : loadState();
   const ssid = option(args, '--ssid');
   const password = option(args, '--password', '');
-  if (!ssid) throw new Error('Usage: nvs --ssid NAME --password PASS');
+  if (!ssid) throw new Error('Usage: nvs --ssid NAME --password PASS [--server URL]');
+  if (!/^https?:\/\/[^\s"]+$/.test(state.baseUrl || '')) throw new Error('The server must be a URL like https://example.com');
   const field = value => `"${String(value).replace(/"/g, '""')}"`;
   const rows = [
     'key,type,encoding,value',
     'adam,namespace,,',
     `base_url,data,string,${field(state.baseUrl)}`,
-    `display_id,data,string,${field(state.displayId)}`,
-    `token,data,string,${field(state.token)}`,
+    ...(server ? [] : [
+      `display_id,data,string,${field(state.displayId)}`,
+      `token,data,string,${field(state.token)}`
+    ]),
     `wifi_ssid,data,string,${field(ssid)}`,
     `wifi_pass,data,string,${field(password)}`
   ];

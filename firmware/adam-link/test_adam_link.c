@@ -151,7 +151,50 @@ static void test_heartbeat(void) {
     assert(!adam_link_heartbeat_due(&l, 10000000));
 }
 
+static void test_pairing(void) {
+    char out[128], body[256];
+    assert(adam_json_string("{\"a\":1,\"b\":{\"code\":\"no\"},\"code\":\"ABC DEF\"}", "code", out, sizeof out) == 7 && !strcmp(out, "ABC DEF"));
+    assert(adam_json_string(" { \"k\" : \"q\\\"\\\\/\" } ", "k", out, sizeof out) == 4 && !strcmp(out, "q\"\\/"));
+    assert(adam_json_string("{\"k\":\"caf\\u00e9\"}", "k", out, sizeof out) == -1);       // not decoded: refuse
+    assert(adam_json_string("{\"k\":\"abcdef\"}", "k", out, 4) == -1);                    // too long: refuse
+    assert(adam_json_string("{\"k\":12}", "k", out, sizeof out) == -1);
+    assert(adam_json_string("{\"k\":\"open", "k", out, sizeof out) == -1);
+    assert(adam_json_string("[\"k\",\"v\"]", "k", out, sizeof out) == -1);
+    assert(adam_json_string("{\"a\":[1,\"]\",{}],\"k\":\"v\"}", "k", out, sizeof out) == 1);
+    assert(adam_json_string("<html>502 Bad Gateway</html>", "k", out, sizeof out) == -1);
+
+    assert(adam_pair_start_body("Kid's \"room\"\n", body, sizeof body) > 0);
+    assert(!strcmp(body, "{\"name\":\"Kid's \\\"room\\\"\"}"));
+    assert(adam_pair_start_body("Kitchen", body, 12) == -1);
+
+    // The server's actual reply shape (api/services/device-pairing.js).
+    adam_pairing_t p;
+    const char *start = "{\"requestId\":\"0123456789abcdef0123456789abcdef\",\"code\":\"K7M 2QX\","
+        "\"pollSecret\":\"aabbccddeeff00112233445566778899aabbccddeeff0011\","
+        "\"expiresAt\":\"2026-10-13T12:40:00.000Z\",\"pollSeconds\":3}";
+    assert(adam_pair_parse_start(start, &p) == 0);
+    assert(!strcmp(p.code, "K7M 2QX") && p.poll_ms == 3000);
+    assert(adam_pair_poll_body(&p, body, sizeof body) > 0);
+    assert(!strcmp(body, "{\"requestId\":\"0123456789abcdef0123456789abcdef\","
+        "\"pollSecret\":\"aabbccddeeff00112233445566778899aabbccddeeff0011\"}"));
+    assert(adam_pair_parse_start("{\"error\":\"Too many pairing requests.\"}", &p) == -1 && !p.code[0]);
+    assert(adam_pair_parse_start("{\"requestId\":\"r\",\"code\":\"ABC DEF\",\"pollSecret\":\"s\",\"pollSeconds\":0}", &p) == 0 && p.poll_ms == 1000);
+
+    char id[64], token[96];
+    assert(adam_pair_parse_poll(200, "{\"status\":\"pending\"}", id, sizeof id, token, sizeof token) == ADAM_PAIR_PENDING);
+    assert(adam_pair_parse_poll(410, "{\"status\":\"expired\"}", id, sizeof id, token, sizeof token) == ADAM_PAIR_EXPIRED);
+    assert(adam_pair_parse_poll(400, "", id, sizeof id, token, sizeof token) == ADAM_PAIR_EXPIRED);
+    assert(adam_pair_parse_poll(503, "", id, sizeof id, token, sizeof token) == ADAM_PAIR_BAD);   // retry the poll
+    assert(adam_pair_parse_poll(0, NULL, id, sizeof id, token, sizeof token) == ADAM_PAIR_BAD);
+    assert(adam_pair_parse_poll(200, "{\"status\":\"paired\",\"displayId\":\"9b2f1c1e-4d1a-4c8e-9a51-0e3c2f7d8a10\","
+        "\"name\":\"Kitchen\",\"token\":\"Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6\"}",
+        id, sizeof id, token, sizeof token) == ADAM_PAIR_PAIRED);
+    assert(!strcmp(id, "9b2f1c1e-4d1a-4c8e-9a51-0e3c2f7d8a10") && !strcmp(token, "Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6"));
+    assert(adam_pair_parse_poll(200, "{\"status\":\"paired\",\"displayId\":\"d\"}", id, sizeof id, token, sizeof token) == ADAM_PAIR_BAD && !id[0]);
+}
+
 int main(void) {
+    test_pairing();
     test_heartbeat();
     test_ring();
     test_iso8601();

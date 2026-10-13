@@ -120,6 +120,33 @@ int adam_link_heartbeat_due(const adam_link_t *link, uint64_t now_ms);
 // ISO-8601 UTC with milliseconds, e.g. 2026-10-13T09:59:30.250Z. out needs 25 bytes.
 void adam_iso8601(uint64_t unix_ms, char out[25]);
 
+// ---- Pairing from the device ------------------------------------------------------------------
+// POST /devices/pairing {"name"}  ->  {"requestId","code":"ABC DEF","pollSecret","pollSeconds"}
+//   show the code; the person types it in the app;
+// POST /devices/pairing/poll {"requestId","pollSecret"}  ->  {"status":"pending"} | 410 expired |
+//   {"status":"paired","displayId","token"} (handed over once: save it before anything else).
+
+typedef struct {
+    char request_id[65];
+    char poll_secret[97];
+    char code[8];          // "ABC DEF", ready to draw
+    uint32_t poll_ms;
+} adam_pairing_t;
+
+typedef enum { ADAM_PAIR_PENDING = 0, ADAM_PAIR_PAIRED, ADAM_PAIR_EXPIRED, ADAM_PAIR_BAD } adam_pair_status_t;
+
+// Top-level string value of `key` in a JSON object, unescaped (\" \\ \/ only; others refuse).
+// Returns its length, or -1 if absent, not a string, malformed or longer than cap - 1.
+int adam_json_string(const char *json, const char *key, char *out, size_t cap);
+// Request bodies. Return the length, or -1 if cap is too small.
+int adam_pair_start_body(const char *name, char *out, size_t cap);
+int adam_pair_poll_body(const adam_pairing_t *p, char *out, size_t cap);
+// 0, or -1 if the reply is not a usable pairing request.
+int adam_pair_parse_start(const char *json, adam_pairing_t *p);
+// http_status is the poll's HTTP status; 410 (or any 4xx) means ask for a new code.
+adam_pair_status_t adam_pair_parse_poll(int http_status, const char *json,
+                                        char *display_id, size_t id_cap, char *token, size_t token_cap);
+
 #ifdef __cplusplus
 }
 #endif

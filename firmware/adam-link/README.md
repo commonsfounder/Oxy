@@ -86,6 +86,25 @@ Do these in order on the Mac, against production after deploying this branch.
    reply audio (median and worst of 20), alarm-to-phone-notification time, behaviour across a Wi-Fi
    drop (sounds queue and arrive afterwards; a 401 forgets the token and logs "pair it again").
 
+## Pairing from the box
+
+No laptop pairing needed: provision Wi-Fi and the server only, and the box pairs itself.
+
+```sh
+node scripts/home-device.js nvs --ssid 'Home' --password '…' --server https://… > adam-nvs.csv   # then step 2 above
+```
+```c
+if (adam_net_start(&net) == ESP_OK && !adam_net_paired(&net))
+    adam_net_pair(&net, "Kitchen", draw_code, NULL, 0);   // draw_code("K7M 2QX", ctx): put it on the screen
+```
+
+`adam_net_pair` asks `POST /devices/pairing` for a code (`ABC DEF`, no 0/O/1/I/L), shows it, and
+polls `POST /devices/pairing/poll` every 3 s until the person types it in the app. The token is
+handed over once and goes straight to NVS. A code lasts 10 minutes; when it expires (or the server
+restarts) the box shows a fresh one. After a 401 (`adam_net_paired()` turns false), call it again.
+The parsing and request bodies are `adam_pair_*` in `adam_link.c`, host-tested and checked against
+the real server's replies; `adam_net_pair` itself is unbuilt glue like the rest of `adam_net/`.
+
 ## Showing online in the app
 
 The app shows a device online while Adam has heard from it in the last 3 minutes. Every voice turn
@@ -97,8 +116,5 @@ with nothing else successful, so call it from any loop that runs every few secon
 - Streaming starts playback once the words are known; the words themselves still wait for the whole
   agent turn. Speaking a first sentence earlier is the next latency win.
 - No wake word: push-to-talk only.
-- On-device pairing is server-side only so far: `POST /devices/pairing` gives the box a code to show
-  (`ABC DEF`, no 0/O/1/I/L) plus a poll secret; the person types the code in the app
-  (`POST /agent/devices/claim`); the box polls `POST /devices/pairing/poll` every `pollSeconds` and
-  gets its display id and token once. Codes last 10 minutes and are single-use. The firmware side
-  (show the code, poll, save to NVS) is not written yet; until then pair with the laptop flow above.
+- The app has no screen yet for typing a device's code; until it does, claim one with
+  `POST /agent/devices/claim {"code":"ABC DEF"}` as the signed-in person.

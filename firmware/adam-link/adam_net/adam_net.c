@@ -79,9 +79,12 @@ esp_err_t adam_net_start(adam_net_t *net) {
     nvs_handle_t h;
     if (nvs_open("adam", NVS_READONLY, &h) != ESP_OK) return ESP_ERR_NOT_FOUND;
     err = read_str(h, "base_url", net->base_url, sizeof net->base_url);
-    if (err == ESP_OK) err = read_str(h, "display_id", net->display_id, sizeof net->display_id);
-    if (err == ESP_OK) err = read_str(h, "token", net->token, sizeof net->token);
     if (err == ESP_OK) err = read_str(h, "wifi_ssid", ssid, sizeof ssid);
+    // Not paired yet is fine: adam_net_pair() fills these in.
+    if (read_str(h, "display_id", net->display_id, sizeof net->display_id) != ESP_OK ||
+        read_str(h, "token", net->token, sizeof net->token) != ESP_OK) {
+        net->display_id[0] = net->token[0] = '\0';
+    }
     if (err == ESP_OK && read_str(h, "wifi_pass", pass, sizeof pass) != ESP_OK) pass[0] = '\0';
     nvs_close(h);
     if (err != ESP_OK) return ESP_ERR_NOT_FOUND;
@@ -106,8 +109,103 @@ esp_err_t adam_net_start(adam_net_t *net) {
     esp_netif_sntp_init(&sntp);
 
     xEventGroupWaitBits(s_wifi, WIFI_UP, pdFALSE, pdTRUE, pdMS_TO_TICKS(20000));
-    ESP_LOGI(TAG, "paired as %s with %s", net->display_id, net->base_url);
+    if (net->token[0]) ESP_LOGI(TAG, "paired as %s with %s", net->display_id, net->base_url);
+    else ESP_LOGI(TAG, "online, not paired with %s yet", net->base_url);
     return ESP_OK;
+}
+
+int adam_net_paired(const adam_net_t *net) { return net->token[0] && !net->link.unpaired; }
+
+// POST a small JSON body to base_url + path (no device token) and read the reply into out.
+static esp_err_t post_json(const adam_net_t *net, const char *path, const char *body, char *out, size_t cap, int *status) {
+    char url[192];
+    snprintf(url, sizeof url, "%s%s", net->base_url, path);
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 10000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 1024,
+        .buffer_size_tx = 1024,
+    };
+    *status = 0;
+    out[0] = '\0';
+    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    if (!c) return ESP_ERR_NO_MEM;
+    esp_http_client_set_header(c, "Content-Type", "application/json");
+    int len = (int)strlen(body);
+    esp_err_t err = esp_http_client_open(c, len);
+    if (err == ESP_OK && esp_http_client_write(c, body, len) != len) err = ESP_FAIL;
+    if (err == ESP_OK && esp_http_client_fetch_headers(c) < 0) err = ESP_FAIL;
+    if (err == ESP_OK) {
+        *status = esp_http_client_get_status_code(c);
+        size_t got = 0;
+        for (int r; got + 1 < cap && (r = esp_http_client_read(c, out + got, (int)(cap - 1 - got))) > 0;) got += (size_t)r;
+        out[got] = '\0';
+    }
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    return err;
+}
+
+esp_err_t adam_net_pair(adam_net_t *net, const char *name, adam_show_code_fn show_code, void *ctx, uint32_t minutes) {
+    static char reply[512];
+    char body[256];
+    adam_pairing_t p = {0};
+    char display_id[sizeof net->display_id], token[sizeof net->token];
+    uint64_t give_up = minutes ? mono_ms() + (uint64_t)minutes * 60000u : 0;
+    uint32_t wait_ms = 3000;
+    int status;
+
+    while (!give_up || mono_ms() < give_up) {
+        if (!p.code[0]) {
+            // Ask for a code; on failure back off (rate limit, server down, Wi-Fi still coming up).
+            if (adam_pair_start_body(name, body, sizeof body) < 0) return ESP_ERR_INVALID_ARG;
+            if (post_json(net, "/devices/pairing", body, reply, sizeof reply, &status) == ESP_OK && status == 200 &&
+                adam_pair_parse_start(reply, &p) == 0) {
+                show_code(p.code, ctx);
+                wait_ms = p.poll_ms;
+            } else {
+                ESP_LOGW(TAG, "pairing: no code yet (HTTP %d)", status);
+                wait_ms = wait_ms < 30000 ? wait_ms * 2 : 30000;
+            }
+            vTaskDelay(pdMS_TO_TICKS(wait_ms));
+            continue;
+        }
+        adam_pair_poll_body(&p, body, sizeof body);
+        esp_err_t err = post_json(net, "/devices/pairing/poll", body, reply, sizeof reply, &status);
+        switch (err == ESP_OK ? adam_pair_parse_poll(status, reply, display_id, sizeof display_id, token, sizeof token) : ADAM_PAIR_BAD) {
+        case ADAM_PAIR_PAIRED: {
+            // The server hands the token over once: it goes to flash before anything else.
+            nvs_handle_t h;
+            err = nvs_open("adam", NVS_READWRITE, &h);
+            if (err == ESP_OK) {
+                err = nvs_set_str(h, "display_id", display_id);
+                if (err == ESP_OK) err = nvs_set_str(h, "token", token);
+                if (err == ESP_OK) err = nvs_commit(h);
+                nvs_close(h);
+            }
+            strlcpy(net->display_id, display_id, sizeof net->display_id);
+            strlcpy(net->token, token, sizeof net->token);
+            adam_link_init(&net->link);
+            memset(token, 0, sizeof token);
+            if (err != ESP_OK) ESP_LOGW(TAG, "paired, but saving to NVS failed (%d): this lasts until restart", (int)err);
+            ESP_LOGI(TAG, "paired as %s", net->display_id);
+            return ESP_OK;
+        }
+        case ADAM_PAIR_EXPIRED:
+            p.code[0] = '\0';           // ten minutes passed or the server restarted: show a new code
+            wait_ms = 3000;
+            continue;
+        case ADAM_PAIR_PENDING:
+            break;
+        case ADAM_PAIR_BAD:
+            ESP_LOGW(TAG, "pairing poll failed (HTTP %d); retrying", status);
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(p.poll_ms));
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 static esp_http_client_handle_t open_post(adam_net_t *net, const char *route, const char *type, int timeout_ms) {

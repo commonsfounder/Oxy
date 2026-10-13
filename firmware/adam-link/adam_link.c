@@ -241,3 +241,176 @@ void adam_iso8601(uint64_t unix_ms, char out[25]) {
     memcpy(out, tmp, 24);
     out[24] = '\0';
 }
+
+// ---- Pairing from the device ------------------------------------------------------------------
+
+static const char *skip_ws(const char *s) {
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    return s;
+}
+
+// Reads a JSON string starting at the opening quote. Writes up to cap - 1 bytes (if out) and returns
+// the pointer past the closing quote, or NULL. *len is the unescaped length; *ok is 0 if it did not fit
+// or used an escape we don't decode.
+static const char *read_string(const char *s, char *out, size_t cap, size_t *len, int *ok) {
+    *len = 0;
+    *ok = 1;
+    if (*s++ != '"') return NULL;
+    while (*s && *s != '"') {
+        char ch = *s++;
+        if (ch == '\\') {
+            ch = *s++;
+            if (ch != '"' && ch != '\\' && ch != '/') {
+                *ok = 0;
+                if (!ch) return NULL;
+                if (ch == 'u') for (int i = 0; i < 4 && *s; i++) s++;
+            }
+        } else if ((unsigned char)ch < 0x20) {
+            return NULL;
+        }
+        if (out && *len + 1 < cap) out[*len] = ch;
+        else *ok = 0;
+        (*len)++;
+    }
+    if (*s != '"') return NULL;
+    if (out && cap) out[*len < cap ? *len : cap - 1] = '\0';
+    return s + 1;
+}
+
+// Skips any JSON value; NULL if malformed.
+static const char *skip_value(const char *s) {
+    s = skip_ws(s);
+    size_t len;
+    int ok;
+    if (*s == '"') return read_string(s, NULL, 0, &len, &ok);
+    if (*s == '{' || *s == '[') {
+        int depth = 0;
+        while (*s) {
+            if (*s == '"') { s = read_string(s, NULL, 0, &len, &ok); if (!s) return NULL; continue; }
+            if (*s == '{' || *s == '[') depth++;
+            else if (*s == '}' || *s == ']') { if (--depth == 0) return s + 1; }
+            s++;
+        }
+        return NULL;
+    }
+    const char *start = s;
+    while (*s && *s != ',' && *s != '}' && *s != ']' && *s != ' ' && *s != '\n' && *s != '\r' && *s != '\t') s++;
+    return s == start ? NULL : s;
+}
+
+// Finds the value of a top-level key; NULL if absent or malformed.
+static const char *find_key(const char *json, const char *key) {
+    const char *s = skip_ws(json);
+    if (*s++ != '{') return NULL;
+    char name[32];
+    for (;;) {
+        s = skip_ws(s);
+        if (*s == '}') return NULL;
+        size_t len;
+        int ok;
+        s = read_string(s, name, sizeof name, &len, &ok);
+        if (!s) return NULL;
+        s = skip_ws(s);
+        if (*s++ != ':') return NULL;
+        s = skip_ws(s);
+        if (ok && !strcmp(name, key)) return s;
+        s = skip_value(s);
+        if (!s) return NULL;
+        s = skip_ws(s);
+        if (*s == ',') s++;
+        else if (*s != '}') return NULL;
+    }
+}
+
+int adam_json_string(const char *json, const char *key, char *out, size_t cap) {
+    const char *v = json ? find_key(json, key) : NULL;
+    if (!v || *v != '"' || !cap) return -1;
+    size_t len;
+    int ok;
+    if (!read_string(v, out, cap, &len, &ok) || !ok) { out[0] = '\0'; return -1; }
+    return (int)len;
+}
+
+static int json_uint(const char *json, const char *key, uint32_t *value) {
+    const char *v = find_key(json, key);
+    if (!v || *v < '0' || *v > '9') return -1;
+    uint32_t n = 0;
+    while (*v >= '0' && *v <= '9' && n < 100000) n = n * 10 + (uint32_t)(*v++ - '0');
+    *value = n;
+    return 0;
+}
+
+// Writes s as a JSON string (quotes included). Control characters are dropped. -1 if it doesn't fit.
+static int put_json_string(char *out, size_t cap, size_t *at, const char *s) {
+    if (*at + 1 >= cap) return -1;
+    out[(*at)++] = '"';
+    for (; *s; s++) {
+        unsigned char ch = (unsigned char)*s;
+        if (ch < 0x20) continue;
+        if (ch == '"' || ch == '\\') { if (*at + 1 >= cap) return -1; out[(*at)++] = '\\'; }
+        if (*at + 1 >= cap) return -1;
+        out[(*at)++] = (char)ch;
+    }
+    if (*at + 1 >= cap) return -1;
+    out[(*at)++] = '"';
+    out[*at] = '\0';
+    return 0;
+}
+
+static int put_raw(char *out, size_t cap, size_t *at, const char *s) {
+    size_t n = strlen(s);
+    if (*at + n >= cap) return -1;
+    memcpy(out + *at, s, n + 1);
+    *at += n;
+    return 0;
+}
+
+int adam_pair_start_body(const char *name, char *out, size_t cap) {
+    size_t at = 0;
+    if (put_raw(out, cap, &at, "{\"name\":") || put_json_string(out, cap, &at, name ? name : "") ||
+        put_raw(out, cap, &at, "}")) return -1;
+    return (int)at;
+}
+
+int adam_pair_poll_body(const adam_pairing_t *p, char *out, size_t cap) {
+    size_t at = 0;
+    if (put_raw(out, cap, &at, "{\"requestId\":") || put_json_string(out, cap, &at, p->request_id) ||
+        put_raw(out, cap, &at, ",\"pollSecret\":") || put_json_string(out, cap, &at, p->poll_secret) ||
+        put_raw(out, cap, &at, "}")) return -1;
+    return (int)at;
+}
+
+int adam_pair_parse_start(const char *json, adam_pairing_t *p) {
+    memset(p, 0, sizeof *p);
+    uint32_t seconds = 3;
+    if (!json || adam_json_string(json, "requestId", p->request_id, sizeof p->request_id) <= 0 ||
+        adam_json_string(json, "pollSecret", p->poll_secret, sizeof p->poll_secret) <= 0 ||
+        adam_json_string(json, "code", p->code, sizeof p->code) <= 0) {
+        memset(p, 0, sizeof *p);
+        return -1;
+    }
+    json_uint(json, "pollSeconds", &seconds);
+    if (seconds < 1) seconds = 1;
+    if (seconds > 30) seconds = 30;
+    p->poll_ms = seconds * 1000u;
+    return 0;
+}
+
+adam_pair_status_t adam_pair_parse_poll(int http_status, const char *json,
+                                        char *display_id, size_t id_cap, char *token, size_t token_cap) {
+    char status[16];
+    if (display_id && id_cap) display_id[0] = '\0';
+    if (token && token_cap) token[0] = '\0';
+    if (http_status >= 400 && http_status < 500 && http_status != 429) return ADAM_PAIR_EXPIRED;
+    if (http_status != 200 || !json || adam_json_string(json, "status", status, sizeof status) < 0) return ADAM_PAIR_BAD;
+    if (!strcmp(status, "pending")) return ADAM_PAIR_PENDING;
+    if (!strcmp(status, "expired")) return ADAM_PAIR_EXPIRED;
+    if (strcmp(status, "paired")) return ADAM_PAIR_BAD;
+    if (adam_json_string(json, "displayId", display_id, id_cap) <= 0 ||
+        adam_json_string(json, "token", token, token_cap) <= 0) {
+        if (display_id && id_cap) display_id[0] = '\0';
+        if (token && token_cap) token[0] = '\0';
+        return ADAM_PAIR_BAD;
+    }
+    return ADAM_PAIR_PAIRED;
+}

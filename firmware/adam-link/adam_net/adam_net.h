@@ -29,8 +29,17 @@ typedef struct {
 } adam_net_t;
 
 // Reads namespace "adam" (written by scripts/home-device.js nvs), joins Wi-Fi and starts SNTP.
-// ESP_ERR_NOT_FOUND: not provisioned/paired yet.
+// ESP_ERR_NOT_FOUND: no Wi-Fi or server in NVS. ESP_OK with adam_net_paired() false: online but not
+// paired yet; call adam_net_pair().
 esp_err_t adam_net_start(adam_net_t *net);
+int adam_net_paired(const adam_net_t *net);
+
+// Pairs from the device: asks Adam for a code, calls show_code("ABC DEF") so the board can draw it
+// (and again with a fresh code if the old one expires), and polls until the person types it into the
+// app. Saves the display id and token to NVS. Blocks; run it from a task, not the audio path.
+// Gives up after `minutes` (0: keep trying) with ESP_ERR_TIMEOUT.
+typedef void (*adam_show_code_fn)(const char *code, void *ctx);
+esp_err_t adam_net_pair(adam_net_t *net, const char *name, adam_show_code_fn show_code, void *ctx, uint32_t minutes);
 
 // One spoken turn. Sends the recording as WAV and reads Adam's spoken reply (16 kHz mono WAV) into
 // reply. *status is the HTTP status (0 if no response). A 401 forgets the pairing.
