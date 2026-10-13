@@ -135,6 +135,27 @@ function normalizeOutcome(raw) {
   };
 }
 
+// For engines that don't report through a tool (ElevenLabs): read the finished transcript into the
+// same outcome set. Facts only from what the business said; anything unclear is not 'done'.
+function outcomeExtractionPrompt(request, transcript) {
+  const lines = (transcript || []).slice(-60)
+    .map(line => `${line.speaker === 'adam' ? 'Adam' : 'Business'}: ${String(line.text || '').slice(0, 400)}`)
+    .join('\n');
+  return [
+    `Adam, an AI assistant, phoned ${request.businessName} to: ${request.goal}`,
+    request.fallback ? `Acceptable alternative: ${request.fallback}` : '',
+    '',
+    'Transcript:',
+    lines || '(empty)',
+    '',
+    'Return only JSON: {"status": one of "done", "needs_decision", "not_possible", "no_answer", "voicemail", "wrong_number", "refused",',
+    '"summary": one or two plain sentences of what the business said, "offer": any time/price/condition they offered or null,',
+    '"reference": any booking reference, name it is under, or person spoken to, or null}.',
+    'Use "done" only if the business clearly confirmed exactly what was asked. If they offered something different, or',
+    'anything needs a deposit, payment or the person\'s agreement, use "needs_decision". Never infer what was not said.'
+  ].filter(line => line !== '').join('\n');
+}
+
 // What the person is told afterwards. A call that ended without a reported outcome is reported as
 // unknown, never as success.
 function describeOutcome({ businessName, outcome, endedBy, seconds }) {
@@ -171,5 +192,6 @@ module.exports = {
   disclosureLine,
   normalizeCallNumber,
   normalizeOutcome,
+  outcomeExtractionPrompt,
   validateCallRequest
 };

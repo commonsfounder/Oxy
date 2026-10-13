@@ -7,16 +7,22 @@
 const crypto = require('node:crypto');
 const axios = require('axios');
 const {
-  DAILY_CALL_CAP, MAX_CALL_SECONDS, buildCallBrief, describeOutcome, disclosureLine, validateCallRequest
+  DAILY_CALL_CAP, MAX_CALL_SECONDS, buildCallBrief, describeOutcome, disclosureLine, normalizeOutcome, validateCallRequest
 } = require('./business-call');
 const { bridgeCall } = require('./call-bridge');
+const elevenlabs = require('./call-engine-elevenlabs');
 
 const calls = new Map();
 const MEDIA_PATH = /^\/calls\/media\/([a-f0-9]{32})\/([a-f0-9]{64})$/;
 let runtime = null;
 
 // saveMessage(userId, role, content), raise(userId, notification), countCallsToday(userId), findCallback(e164),
-// openRealtime() -> WebSocket, twilio: { create(params), hangUp(callSid) }.
+// openRealtime() -> WebSocket, twilio: { create(params), hangUp(callSid) },
+// extractOutcome(request, transcript) -> raw outcome, engine: 'elevenlabs' | 'realtime',
+// elevenlabs: { registerCall, findConversation }, sleep(ms).
+//
+// Two voice engines, same rules around them: ElevenLabs Agents (default when ELEVENLABS_API_KEY
+// and ELEVENLABS_AGENT_ID are set) or Adam's own bridge to OpenAI Realtime (call-bridge.js).
 function configure(deps) {
   runtime = { ...deps };
 }
@@ -81,8 +87,9 @@ async function startCall({ userId, input, fromNumber, baseUrl, onBehalfOf }) {
 
   const id = crypto.randomBytes(16).toString('hex');
   const who = String(onBehalfOf || '').trim() || 'a customer';
+  const engine = runtime.engine || (elevenlabs.configured() ? 'elevenlabs' : 'realtime');
   const call = {
-    id, userId, request,
+    id, userId, request, engine,
     brief: buildCallBrief(request, { onBehalfOf: who }),
     disclosure: disclosureLine(who),
     callSid: null,
@@ -90,16 +97,20 @@ async function startCall({ userId, input, fromNumber, baseUrl, onBehalfOf }) {
     createdAt: Date.now()
   };
   calls.set(id, call);
-  const host = baseUrl.replace(/^https:\/\//, '').replace(/\/+$/, '');
-  const twiml = `<Response><Connect><Stream url="${xmlAttr(`wss://${host}/calls/media/${id}/${mediaToken(id)}`)}"/></Connect></Response>`;
+  const base = baseUrl.replace(/\/+$/, '');
+  const host = base.replace(/^https:\/\//, '');
+  // ElevenLabs: Twilio asks /answer what to do once someone picks up. Realtime: stream straight to Adam.
+  const connect = engine === 'elevenlabs'
+    ? { Url: `${base}/webhooks/calls/${id}/answer`, Method: 'POST' }
+    : { Twiml: `<Response><Connect><Stream url="${xmlAttr(`wss://${host}/calls/media/${id}/${mediaToken(id)}`)}"/></Connect></Response>` };
   try {
     const { callSid } = await (runtime.twilio || twilioRest).create({
       To: request.phone,
       From: fromNumber,
-      Twiml: twiml,
+      ...connect,
       TimeLimit: String(MAX_CALL_SECONDS + 30),
       Timeout: '30',
-      StatusCallback: `${baseUrl.replace(/\/+$/, '')}/webhooks/calls/${id}/status`,
+      StatusCallback: `${base}/webhooks/calls/${id}/status`,
       StatusCallbackEvent: 'completed',
       StatusCallbackMethod: 'POST'
     });
@@ -109,7 +120,8 @@ async function startCall({ userId, input, fromNumber, baseUrl, onBehalfOf }) {
     throw callError('call_failed', `I couldn't place the call: ${error.response?.data?.message || error.message}`);
   }
   // A call Twilio never reports back on must not sit in memory forever.
-  setTimeout(() => report(call, { outcome: null, endedBy: 'unknown', seconds: 0 }), (MAX_CALL_SECONDS + 180) * 1000).unref?.();
+  // (ElevenLabs results arrive a minute or two after the call, so that engine gets longer.)
+  setTimeout(() => report(call, { outcome: null, endedBy: 'unknown', seconds: 0 }), (MAX_CALL_SECONDS + (engine === 'elevenlabs' ? 480 : 180)) * 1000).unref?.();
   return { id, request };
 }
 
@@ -146,6 +158,45 @@ function validTwilioSignature(url, params, signature, token = process.env.TWILIO
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Twilio: the call was answered. Connect it to the ElevenLabs agent with this call's brief, and the
+// fixed opening line as the agent's first message, so the disclosure never depends on the model.
+async function handleAnswer(callId, params = {}) {
+  const call = calls.get(callId);
+  if (!call || call.engine !== 'elevenlabs' || call.answered) return '<Response><Hangup/></Response>';
+  call.answered = true;
+  if (params.CallSid) call.callSid = params.CallSid;
+  try {
+    return await (runtime.elevenlabs || elevenlabs).registerCall({
+      from: params.From, to: params.To, brief: call.brief, firstMessage: call.disclosure, maxSeconds: MAX_CALL_SECONDS, callId: call.id
+    });
+  } catch (error) {
+    call.answerError = error.message;
+    return `<Response>${say('Sorry, wrong number. Goodbye.')}<Hangup/></Response>`;
+  }
+}
+
+// After an ElevenLabs call: find its conversation by Twilio call id, wait for it to be written, and
+// have Adam's own model read the transcript into the fixed outcome set. No transcript, no outcome:
+// it is then reported as unconfirmed, never as success.
+async function collectOutcome(call, { attempts = 10, delayMs = 12000 } = {}) {
+  const engine = runtime.elevenlabs || elevenlabs;
+  const sleep = runtime.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const sinceUnix = call.createdAt / 1000 - 60;
+  let found = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    found = await engine.findConversation({ callSid: call.callSid, sinceUnix }).catch(() => ({ pending: true }));
+    if (found && !found.pending) break;
+    found = null;
+    if (attempt < attempts - 1) await sleep(delayMs);
+  }
+  if (!found || !found.transcript.length) {
+    return report(call, { outcome: null, endedBy: call.answerError ? 'failed' : 'hung_up', seconds: found?.seconds || 0 });
+  }
+  let outcome = null;
+  try { outcome = normalizeOutcome(await runtime.extractOutcome(call.request, found.transcript)); } catch { outcome = null; }
+  return report(call, { outcome, endedBy: 'hung_up', seconds: found.seconds, transcript: found.transcript });
+}
+
 async function handleStatus(callId, params) {
   const call = calls.get(callId);
   if (!call) return;
@@ -153,7 +204,12 @@ async function handleStatus(callId, params) {
   const endedBy = { 'no-answer': 'no_answer', busy: 'busy', failed: 'failed', canceled: 'failed' }[status];
   // A completed call is reported by the bridge when its audio stream ends; this only covers calls
   // that never connected.
-  if (endedBy && !call.bridged) await report(call, { outcome: null, endedBy, seconds: 0 });
+  if (endedBy && !call.bridged && !call.answered) return report(call, { outcome: null, endedBy, seconds: 0 });
+  if (status === 'completed' && call.engine === 'elevenlabs') {
+    if (!call.answered) return report(call, { outcome: null, endedBy: 'no_answer', seconds: 0 });
+    if (params.CallSid) call.callSid = params.CallSid;
+    return collectOutcome(call);
+  }
 }
 
 // action_log.action is a jsonb column holding the JSON text written by serializeLoggedAction, so
@@ -245,6 +301,8 @@ module.exports = {
   startCall,
   callsInLog,
   callbackFromLog,
+  collectOutcome,
+  handleAnswer,
   handleInboundCall,
   handleStatus,
   handleUpgrade,

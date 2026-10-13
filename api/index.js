@@ -607,6 +607,17 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
   }
 });
 
+// Twilio: a business call was answered. Returns TwiML connecting it to the ElevenLabs agent.
+app.post('/webhooks/calls/:id/answer', express.urlencoded({ extended: false }), async (req, res) => {
+  const businessCalls = require('./services/business-calls');
+  const url = `${String(process.env.APP_URL || '').replace(/\/+$/, '')}/webhooks/calls/${req.params.id}/answer`;
+  if (!businessCalls.validTwilioSignature(url, req.body || {}, req.get('X-Twilio-Signature'))) {
+    log('warn', 'business_call.answer.bad_signature', { callId: req.params.id });
+    return res.status(403).end();
+  }
+  res.type('text/xml').send(await businessCalls.handleAnswer(req.params.id, req.body || {}));
+});
+
 // Twilio reports the end of a business call here. Only calls that never connected (no answer,
 // busy, failed) are reported from this route; a connected call reports when its audio ends.
 app.post('/webhooks/calls/:id/status', express.urlencoded({ extended: false }), async (req, res) => {
@@ -9926,6 +9937,11 @@ app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
 // Business calls finish minutes after the action that placed them, so they report through these.
 const businessCalls = require('./services/business-calls');
 businessCalls.configure({
+  extractOutcome: async (request, transcript) => {
+    const { outcomeExtractionPrompt } = require('./services/business-call');
+    const result = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: outcomeExtractionPrompt(request, transcript) }] }], config: {} });
+    return parseLooseJson(result.text);
+  },
   saveMessage: (userId, role, content) => saveMessage(userId, role, content),
   raise: async (userId, notification) => {
     const queued = await notificationDelivery.raise(userId, {
