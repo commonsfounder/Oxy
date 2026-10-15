@@ -593,6 +593,20 @@ async function deferScheduledTask(task, now = new Date()) {
 }
 
 // Mark a one-shot or condition task as fulfilled so a retried sweep can't double-run it.
+// A reminder that came due long ago is not run late: "message her in five minutes" a month on is wrong,
+// and a watch past its end date has nothing left to watch. They are closed, not run.
+const MISSED_ONCE_GRACE_MINUTES = 60;
+
+function staleScheduledReason(task, now = new Date()) {
+  const nowMs = now.getTime();
+  if (task.recurrence === 'once') {
+    const due = new Date(task.next_run_at).getTime();
+    if (Number.isFinite(due) && nowMs - due > MISSED_ONCE_GRACE_MINUTES * 60000) return 'missed';
+  }
+  if (task.recurrence === 'poll' && task.expires_at && new Date(task.expires_at).getTime() <= nowMs) return 'expired';
+  return null;
+}
+
 async function completeScheduledTask(task, now = new Date()) {
   await getSupabase().from('scheduled_tasks').update({
     completed: true,
@@ -627,6 +641,7 @@ async function advanceScheduledTask(task, now = new Date()) {
 }
 
 module.exports = {
+  staleScheduledReason,
   describeSchedule,
   buildScheduledRunInstruction,
   scheduledConditionTriggered,

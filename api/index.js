@@ -5983,6 +5983,12 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
   }
 
   for (const due of dueTasks.slice(0, 3)) {
+    const staleReason = scheduledTasks.staleScheduledReason(due, now);
+    if (staleReason) {
+      await scheduledTasks.completeScheduledTask(due, now).catch(() => {});
+      logger.log?.(`[scheduled] closed ${staleReason} task ${due.id} (${due.title}) without running it`);
+      continue;
+    }
     const claimed = await scheduledTasks.claimScheduledTask(due, now).catch(() => null);
     if (!claimed) continue;
 
