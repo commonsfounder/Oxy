@@ -67,13 +67,13 @@ struct PairedDisplaysView: View {
     private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
     @State private var displays: [PairedDisplay] = []
     @State private var pairingName = ""
-    @State private var challenge: DisplayPairingChallenge?
+    @State private var code = ""
+    @State private var notice: String?
     @State private var pendingRevoke: PairedDisplay?
     @State private var showRevokeConfirmation = false
     @State private var isLoading = false
     @State private var isWorking = false
     @State private var errorMessage: String?
-    @State private var copied = false
 
     var body: some View {
         SettingsPage(title: "Displays", isRoot: true) {
@@ -81,64 +81,34 @@ struct PairedDisplaysView: View {
                 ErrorBanner(message: errorMessage, onRetry: { Task { await loadDisplays() } })
             }
 
-            SettingsGroup(title: "Pair a display") {
+            if let notice {
+                SettingsStatement(text: notice, solid: true)
+                    .padding(.horizontal, 4)
+            }
+
+            SettingsGroup(title: "Add a screen") {
                 VStack(alignment: .leading, spacing: 14) {
-                    AppLineField(placeholder: "Name (optional)", text: $pairingName)
-                    Button {
-                        HapticManager.shared.impact(.light)
-                        Task { await createPairing() }
-                    } label: {
-                        Text(isWorking ? "Creating code…" : "Create pairing code")
-                            .font(.appBody(15, weight: .medium))
-                            .foregroundStyle(Color.appOnAction)
-                            .padding(.horizontal, 20)
-                            .frame(minHeight: 44)
-                            .background(Capsule().fill(Color.appAction))
+                    Text("On the screen, open \(displayAddress). It shows 4 digits. Type them here.")
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appMuted)
+                    AppLineField(placeholder: "Name, like Kitchen (optional)", text: $pairingName)
+                    AppLineField(placeholder: "4 digits", text: $code)
+                        .keyboardType(.numberPad)
+                        .disabled(isWorking)
+                    if isWorking {
+                        Text("Adding…")
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.appMuted)
                     }
-                    .buttonStyle(.appScale(0.97))
-                    .disabled(isWorking)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .settingsSurface()
             }
-
-            if let challenge {
-                SettingsGroup(title: "On the display") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Open this link, then enter the code")
-                            .font(.appBody(14))
-                            .foregroundStyle(Color.appMuted)
-                        Text(challenge.displayUrl)
-                            .font(.appMono(12))
-                            .foregroundStyle(Color.appInk)
-                            .textSelection(.enabled)
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(challenge.code)
-                                .font(.appMono(32, weight: .semibold))
-                                .foregroundStyle(Color.appInk)
-                                .textSelection(.enabled)
-                            Spacer()
-                            Button {
-                                UIPasteboard.general.string = challenge.code
-                                HapticManager.shared.success()
-                                copied = true
-                            } label: {
-                                Text(copied ? "Copied" : "Copy code")
-                                    .font(.appBody(14, weight: .medium))
-                                    .foregroundStyle(Color.appAccent)
-                                    .frame(minHeight: 44)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text("Works once. Expires in 10 minutes.")
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .settingsSurface()
-                }
+            .onChange(of: code) { _, newValue in
+                let digits = String(newValue.filter(\.isNumber).prefix(4))
+                if digits != newValue { code = digits }
+                if digits.count == 4 { Task { await addScreen(digits) } }
             }
 
             SettingsGroup(title: "Paired") {
@@ -195,14 +165,29 @@ struct PairedDisplaysView: View {
         isLoading = false
     }
 
-    private func createPairing() async {
+    private var displayAddress: String {
+        let base = APIClient.shared.baseURL
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+        return base + "/display"
+    }
+
+    private func addScreen(_ digits: String) async {
+        guard !isWorking else { return }
         isWorking = true
         errorMessage = nil
-        copied = false
+        notice = nil
         do {
-            challenge = try await PairedDisplaysService.createPairing(displayName: pairingName)
+            let added = try await PairedDisplaysService.claim(code: digits, name: pairingName)
+            displays.insert(added, at: 0)
+            notice = "\(added.name) is added."
+            pairingName = ""
+            code = ""
+            HapticManager.shared.success()
         } catch {
-            errorMessage = "Couldn’t start pairing."
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn’t add that screen."
+            code = ""
+            HapticManager.shared.error()
         }
         isWorking = false
     }

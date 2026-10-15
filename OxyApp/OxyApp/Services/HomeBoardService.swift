@@ -87,11 +87,8 @@ enum DisplayTimestampParser {
     }
 }
 
-struct DisplayPairingChallenge: Codable, Equatable {
-    let id: String
-    let code: String
-    let expiresAt: String
-    let displayUrl: String
+private struct ClaimedDisplayResponse: Codable {
+    let display: PairedDisplay
 }
 
 private struct PairedDisplaysResponse: Codable {
@@ -99,13 +96,13 @@ private struct PairedDisplaysResponse: Codable {
 }
 
 enum PairedDisplaysService {
-    static func createPairing(displayName: String? = nil) async throws -> DisplayPairingChallenge {
-        var body: [String: Any] = [:]
-        if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            body["displayName"] = displayName
+    static func claim(code: String, name: String?) async throws -> PairedDisplay {
+        var body: [String: Any] = ["code": code]
+        if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["displayName"] = name
         }
-        let data = try await APIClient.shared.request(path: "/agent/displays/pairing", method: "POST", body: body)
-        return try JSONDecoder().decode(DisplayPairingChallenge.self, from: data)
+        let data = try await APIClient.shared.request(path: "/agent/displays/claim", method: "POST", body: body)
+        return try JSONDecoder().decode(ClaimedDisplayResponse.self, from: data).display
     }
 
     static func fetchDisplays() async throws -> [PairedDisplay] {

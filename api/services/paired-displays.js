@@ -8,6 +8,8 @@ const sceneRuntime = require('./scene-runtime');
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const EVENT_TTL_MS = 15 * 60 * 1000;
 const SCENE_TTL_MS = 6 * 60 * 60 * 1000;
+const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
+const MAX_PAIRING_ATTEMPTS = 5;
 const MAX_DISPLAY_NAME = 80;
 const MAX_TITLE = 160;
 const MAX_BODY = 2000;
@@ -141,6 +143,8 @@ async function createPairingChallenge(supabase, userId, {
   };
 }
 
+const pairingAttempts = new Map();
+
 async function redeemPairingChallenge(supabase, {
   challengeId,
   code,
@@ -156,9 +160,19 @@ async function redeemPairingChallenge(supabase, {
   if (new Date(challenge.expires_at).getTime() <= new Date(now).getTime()) {
     throw displayDomainError('invalid_pairing', 'That pairing request expired. Start a new one from the app.');
   }
-  if (!safeEqual(challenge.code_hash, hashSecret(String(code).replace(/\s/g, '').toUpperCase()))) {
-    throw displayDomainError('invalid_pairing', 'That pairing code is not correct.');
+  if (!safeEqual(challenge.code_hash, hashSecret(String(code).replace(/[^A-Za-z0-9]/g, '').toUpperCase()))) {
+    // Five wrong codes burn the request, so a seen link cannot be guessed at for ten minutes.
+    const attempts = (pairingAttempts.get(challenge.id) || 0) + 1;
+    pairingAttempts.set(challenge.id, attempts);
+    if (pairingAttempts.size > 500) pairingAttempts.delete(pairingAttempts.keys().next().value);
+    if (attempts >= MAX_PAIRING_ATTEMPTS) {
+      pairingAttempts.delete(challenge.id);
+      await supabase.from('display_pairing_challenges').update({ consumed_at: new Date(now).toISOString() }).eq('id', challenge.id);
+      throw displayDomainError('invalid_pairing', 'Too many wrong codes. Start a new pairing from the app.');
+    }
+    throw displayDomainError('invalid_pairing', 'That code is not right. Check it in the app and try again.');
   }
+  pairingAttempts.delete(challenge.id);
 
   const token = makeToken(randomBytes);
   // The claim, display insert, and challenge link are one database transaction. A
@@ -351,9 +365,111 @@ async function acknowledgeRender(supabase, displayId, token, eventId, now = new 
     : { authorized: true, acknowledged: true, alreadyAcknowledged: true };
 }
 
+// Screens poll every 2s, so a screen that is on and online takes the event within a few seconds.
+// Waits for that, then says what is true: shown, or sent but not picked up.
+async function awaitDelivery(supabase, userId, eventId, {
+  timeoutMs = 6000,
+  intervalMs = 750,
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+} = {}) {
+  const read = async () => {
+    const { data, error } = await supabase.from('display_render_events').select('id, display_id, acked_at')
+      .eq('id', eventId).eq('user_id', userId).maybeSingle();
+    if (error) throw error;
+    return data;
+  };
+  let waited = 0;
+  let row = await read();
+  while (row && !row.acked_at && waited < timeoutMs) {
+    await sleep(intervalMs);
+    waited += intervalMs;
+    row = await read();
+  }
+  if (!row) return { shown: false, reason: 'missing' };
+  if (row.acked_at) return { shown: true };
+  const { data: display } = await supabase.from('paired_displays').select('display_name, last_seen_at')
+    .eq('id', row.display_id).maybeSingle();
+  return {
+    shown: false,
+    reason: 'not_picked_up',
+    name: cleanText(display?.display_name, 'The screen', MAX_DISPLAY_NAME),
+    lastSeenAt: display?.last_seen_at || null
+  };
+}
+
+// A screen introduces itself and shows a short code; the signed-in person types it in the app.
+// The screen gets its key now and keeps it; only a hash is stored, and it works once the code is claimed.
+function makeEnrollmentCode(randomInt = crypto.randomInt) {
+  return String(randomInt(0, 10000)).padStart(4, '0');
+}
+
+async function createEnrollment(supabase, { now = new Date(), randomBytes = crypto.randomBytes, randomInt = crypto.randomInt } = {}) {
+  const nowIso = new Date(now).toISOString();
+  await supabase.from('display_enrollments').delete().is('claimed_at', null).lt('expires_at', nowIso);
+  const token = makeToken(randomBytes);
+  const expiresAt = new Date(new Date(now).getTime() + ENROLLMENT_TTL_MS).toISOString();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const code = makeEnrollmentCode(randomInt);
+    const { data, error } = await supabase.from('display_enrollments').insert({
+      code, token_hash: hashSecret(token), expires_at: expiresAt
+    }).select().single();
+    if (!error) return { id: data.id, code, token, expiresAt: data.expires_at || expiresAt };
+    if (error.code !== '23505') throw error;
+  }
+  throw displayDomainError('enrollment_busy', 'Could not make a code. Try again.');
+}
+
+async function enrollmentStatus(supabase, enrollmentId, token, now = new Date()) {
+  if (!enrollmentId || !token) return null;
+  const { data, error } = await supabase.from('display_enrollments').select('*')
+    .eq('id', enrollmentId).eq('token_hash', hashSecret(token)).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  if (data.claimed_at && data.display_id) {
+    const { data: display } = await supabase.from('paired_displays').select('*').eq('id', data.display_id).maybeSingle();
+    return { status: 'paired', display: summarizeDisplay(display) };
+  }
+  if (new Date(data.expires_at).getTime() <= new Date(now).getTime()) return { status: 'expired' };
+  return { status: 'waiting', expiresAt: data.expires_at };
+}
+
+const claimAttempts = new Map();
+
+async function claimEnrollment(supabase, userId, { code, displayName, now = new Date() } = {}) {
+  assertUser(userId);
+  const clean = String(code ?? '').replace(/\D/g, '');
+  if (clean.length !== 4) throw displayDomainError('invalid_code', 'Enter the 4 digits shown on the screen.');
+  const nowMs = new Date(now).getTime();
+  const recent = (claimAttempts.get(userId) || []).filter(at => nowMs - at < 10 * 60 * 1000);
+  if (recent.length >= 8) throw displayDomainError('too_many_tries', 'Too many tries. Wait a few minutes and try again.');
+  const { data, error } = await supabase.rpc('claim_display_enrollment', {
+    p_code: clean,
+    p_user_id: userId,
+    p_display_name: cleanText(displayName, null, MAX_DISPLAY_NAME),
+    p_now: new Date(now).toISOString()
+  });
+  if (error) {
+    if (error.code === 'P0001') {
+      claimAttempts.set(userId, [...recent, nowMs]);
+      throw displayDomainError('invalid_code', 'That code is not on a screen right now. Check the screen and try again.');
+    }
+    throw error;
+  }
+  claimAttempts.delete(userId);
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.display) throw new Error('Pairing service returned an invalid response.');
+  return { display: summarizeDisplay(result.display) };
+}
+
 module.exports = {
+  createEnrollment,
+  enrollmentStatus,
+  claimEnrollment,
+  ENROLLMENT_TTL_MS,
+  awaitDelivery,
   DisplayDomainError,
   PAIRING_TTL_MS,
+  MAX_PAIRING_ATTEMPTS,
   EVENT_TTL_MS,
   SCENE_TTL_MS,
   URGENT_TTL_MS,

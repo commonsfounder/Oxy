@@ -21,6 +21,7 @@ const USER_DATA_RESOURCES = Object.freeze([
   { name: 'preferences', ownership: direct(), deletionOrder: 660, jsonColumns: ['value'], redactionColumns: ['value (structured secrets)'] },
   { name: 'devices', ownership: direct(), deletionOrder: 650, secretColumns: ['push_token'] },
   { name: 'paired_displays', ownership: direct(), deletionOrder: 648, secretColumns: ['token_hash'] },
+  { name: 'display_enrollments', ownership: parent('paired_displays', 'id', 'display_id'), deletionOrder: 649, export: 'exclude', excludeReason: 'one-time pairing state', secretColumns: ['token_hash'] },
   { name: 'display_pairing_challenges', ownership: direct(), deletionOrder: 647, export: 'exclude', excludeReason: 'one-time pairing secret', secretColumns: ['code_hash'] },
   { name: 'display_render_events', ownership: direct(), deletionOrder: 646 },
   { name: 'native_context', ownership: direct(), deletionOrder: 640 },

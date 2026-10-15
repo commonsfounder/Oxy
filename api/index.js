@@ -794,8 +794,8 @@ app.use((req, res, next) => {
   // A nearby browser display is not a signed-in app client. Its page and its
   // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
   const publicDisplayRoute =
-    (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
-    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path) || /^\/display\/[^/]+\/(voice|sensors|sound|signal)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
+    (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path) || /^\/display\/enroll\/[^/]+$/.test(req.path)))
+    || (req.method === 'POST' && (req.path === '/display/pair' || req.path === '/display/enroll' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path) || /^\/display\/[^/]+\/ask$/.test(req.path) || /^\/display\/[^/]+\/(voice|sensors|sound|signal)$/.test(req.path) || /^\/display\/[^/]+\/events\/[^/]+\/respond$/.test(req.path)));
   if (publicDisplayRoute) {
     return next();
   }
@@ -8664,6 +8664,11 @@ function displayPageHtml() {
     '.urgent .row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}.urgent button{border-radius:99px;padding:16px 30px;font-size:22px;background:transparent;color:#f5f1ec;border:1.5px solid #8f8781;font-weight:600}.urgent button.main{background:#f5f1ec;color:#111;border-color:#f5f1ec}',
     '@keyframes urgentpulse{50%{transform:scale(1.08);border-color:#FFC15E}}@media (prefers-reduced-motion:reduce){.urgent .ring{animation:none}}',
     'body.scene main{padding:0;display:block}body.scene section{width:100%;height:100vh}iframe{border:0;width:100%;height:100vh;display:block}',
+    '.pair{max-width:460px;margin:0 auto;display:flex;flex-direction:column;gap:14px}.pair h1{margin:0}.pair .eyebrow{margin:0;font-size:13px;letter-spacing:.04em;color:#8f8781}.pair .lede{margin:0 0 6px}',
+    '.pair input{border-radius:14px;margin:0;font-size:17px}.pair input.code{font:600 clamp(28px,7vw,40px) ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-align:center;text-transform:uppercase;padding:18px 12px}',
+    '.pair input:focus{outline:2px solid #e97961;outline-offset:2px;border-color:transparent}.pair button.main{border-radius:99px;padding:16px 24px;font-size:17px}.pair button:disabled{opacity:.55;cursor:default}',
+    '.pair .error{margin:0;min-height:1.5em;color:#F0A23A;font-size:15px}.idle{text-align:center}.idle .eyebrow{margin:0 0 10px;font-size:13px;letter-spacing:.04em;color:#8f8781}.idle h1{margin:0 0 12px}',
+    '.enroll{text-align:center}.enroll .eyebrow{margin:0 auto 10px;font-size:13px;letter-spacing:.04em;color:#8f8781}.enroll h1{margin:0 0 6px}.enroll .digits{font:600 clamp(72px,20vw,168px) ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;margin:.15em 0 .1em .16em;color:#f5f1ec;line-height:1}.enroll p{margin:0 auto;max-width:30em}',
     '.muted{font-size:13px;color:#8f8781}</style></head><body><main><section id="app"></section></main>',
     '<script>',
     'const app=document.getElementById("app");',
@@ -8672,14 +8677,23 @@ function displayPageHtml() {
     'if(params.has("mode"))localStorage.setItem("milgrain_display_mode",voiceMode?"voice":"text");',
     'const savedId=localStorage.getItem("milgrain_display_id");',
     'const savedToken=localStorage.getItem("milgrain_display_token");',
-    'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Adam.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
+    'function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}',
+    'function fmtCode(v){const c=String(v||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase().slice(0,8);return c.length>4?c.slice(0,4)+"-"+c.slice(4):c}',
+    'let enrolling=false;const sleep=ms=>new Promise(r=>setTimeout(r,ms));',
+    'function showCode(d){document.body.classList.remove("scene");app.textContent="";const box=el("div","enroll");const digits=el("div","digits",d.code);digits.setAttribute("aria-label","Pairing code "+d.code.split("").join(" "));box.append(el("p","eyebrow","Adam"),el("h1",null,"Add this screen"),digits,el("p",null,"On your phone, open Adam, then Displays, then Add a screen, and enter this code."));app.appendChild(box)}',
+    'function showWaiting(){if(app.firstChild)return;const box=el("div","enroll");box.append(el("p","eyebrow","Adam"),el("h1",null,"Getting ready\\u2026"));app.appendChild(box)}',
+    'async function waitClaim(d){for(;;){await sleep(2000);let r;try{r=await fetch("/display/enroll/"+encodeURIComponent(d.id),{headers:{Authorization:"Bearer "+d.token}})}catch(e){continue}if(r.status===401)return false;if(!r.ok)continue;const s=await r.json();if(s.status==="expired")return false;if(s.status==="paired"){localStorage.setItem("milgrain_display_id",s.display.id);localStorage.setItem("milgrain_display_token",d.token);localStorage.setItem("milgrain_display_name",s.display.name||"");renderIdle();return true}}}',
+    'function startEnroll(){if(enrolling)return;enrolling=true;showWaiting();(async()=>{for(;;){try{const r=await fetch("/display/enroll",{method:"POST"});if(!r.ok)throw new Error("enroll");const d=await r.json();showCode(d);if(await waitClaim(d)){enrolling=false;poll();return}}catch(e){await sleep(3000)}}})()}',
+    'function needPairing(){if(params.get("challenge")){if(!document.getElementById("pair"))renderPair(true)}else startEnroll()}',
+    'function renderIdle(){document.body.classList.remove("scene");app.textContent="";const box=el("div","idle");box.append(el("p","eyebrow","Adam"),el("h1",null,localStorage.getItem("milgrain_display_name")||"Ready"),el("p",null,"Waiting for something to show."));app.appendChild(box)}',
+    'function renderPair(auto){document.body.classList.remove("scene");app.textContent="";const box=el("div","pair");const code=el("input","code");code.id="code";code.placeholder="XXXX-XXXX";code.setAttribute("autocomplete","one-time-code");code.setAttribute("autocapitalize","characters");code.setAttribute("spellcheck","false");code.setAttribute("inputmode","text");code.setAttribute("aria-label","Pairing code");const name=el("input");name.id="name";name.placeholder="Name this screen (optional)";name.setAttribute("maxlength","80");name.setAttribute("aria-label","Screen name");const go=el("button","main","Pair screen");go.id="pair";const err=el("p","error");err.id="error";err.setAttribute("role","alert");box.append(el("p","eyebrow","Adam"),el("h1",null,"Pair this screen"),el("p","lede","Enter the code shown in the Adam app."),code,name,go,err);app.appendChild(box);const hashCode=new URLSearchParams(location.hash.slice(1)).get("code");if(hashCode)code.value=fmtCode(hashCode);code.addEventListener("input",()=>{code.value=fmtCode(code.value);err.textContent=""});[code,name].forEach(f=>f.addEventListener("keydown",e=>{if(e.key==="Enter")go.click()}));go.onclick=async()=>{if(code.value.replace(/-/g,"").length<8){err.textContent="The code has 8 letters and numbers.";code.focus();return}go.disabled=true;go.textContent="Pairing\\u2026";err.textContent="";try{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:code.value,displayName:name.value})});const data=await response.json().catch(()=>({}));if(!response.ok){err.textContent=data.error||"Pairing failed. Try again.";go.disabled=false;go.textContent="Pair screen";code.focus();return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);localStorage.setItem("milgrain_display_name",data.display.name||"");history.replaceState(null,"","/display");renderIdle();poll()}catch(e){err.textContent="Could not reach Adam. Check the connection and try again.";go.disabled=false;go.textContent="Pair screen"}};if(auto&&hashCode&&params.get("challenge"))go.click()}',
     'function renderUrgent(event){document.body.classList.remove("scene");app.textContent="";const box=document.createElement("div");box.className="urgent";const ring=document.createElement("div");ring.className="ring";const h=document.createElement("h1");h.textContent=event.title;const p=document.createElement("p");p.className="big";p.textContent=event.body;const meta=document.createElement("p");meta.className="muted";const when=new Date(event.urgent.at);meta.textContent=(event.urgent.room?event.urgent.room+" · ":"")+(isNaN(when)?"":when.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));const row=document.createElement("div");row.className="row";[["got_it","I\u2019ve got it"],["false_alarm","False alarm"]].forEach(a=>{const b=document.createElement("button");b.textContent=a[1];b.className=a[0]==="got_it"?"main":"";b.onclick=async()=>{b.disabled=true;const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");try{await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(event.id)+"/respond",{method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({response:a[0]})})}catch(e){}app.textContent="";const done=document.createElement("p");done.className="muted";done.textContent="Noted";app.appendChild(done)};row.appendChild(b)});box.append(ring,h,p,meta,row);app.appendChild(box)}',
     'function renderEvent(event){if(event.urgent){renderUrgent(event);return}if(event.scene&&event.scene.srcdoc){document.body.classList.add("scene");app.innerHTML="";const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");frame.setAttribute("title",event.title);frame.srcdoc=event.scene.srcdoc;app.appendChild(frame);window.sceneFrame=frame;return}document.body.classList.remove("scene");app.innerHTML="<p class=\\"muted\\">Adam</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
     'window.addEventListener("message",e=>{const f=window.sceneFrame;if(!f||e.source!==f.contentWindow||!e.data)return;if(typeof e.data.adamSay==="string"){if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(e.data.adamSay.slice(0,400));u.lang="en-GB";window.speechSynthesis.speak(u)}return}if(typeof e.data.adamAsk!=="string")return;const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token)return;fetch("/display/"+encodeURIComponent(id)+"/ask",{method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({text:e.data.adamAsk})})});',
     'document.addEventListener("click",event=>{if(event.target?.id==="pair")localStorage.setItem("milgrain_display_mode",voiceMode?"voice":"text")});',
     'const renderTextEvent=renderEvent;renderEvent=event=>{renderTextEvent(event);if(voiceMode&&"speechSynthesis" in window){window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(event.title+". "+event.body);utterance.lang="en-GB";window.speechSynthesis.speak(utterance)}};',
-    'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){renderPair();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");renderPair();return}if(!response.ok)return;const data=await response.json();if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
-    'if(savedId&&savedToken)poll();else renderPair();setInterval(poll,2000);',
+    'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){needPairing();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");app.textContent="";needPairing();return}if(!response.ok)return;const data=await response.json();if(!data.event){if(!app.firstChild)renderIdle();return}if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
+    'if(savedId&&savedToken)poll();else needPairing();setInterval(poll,2000);',
     '</script></body></html>'
   ].join('');
 }
@@ -8688,7 +8702,7 @@ app.get('/display', (_req, res) => {
   res.type('html').send(displayPageHtml());
 });
 
-app.post('/display/pair', async (req, res) => {
+app.post('/display/pair', createRateLimiter(20, 60 * 1000), async (req, res) => {
   try {
     const pairedDisplays = require('./services/paired-displays');
     const result = await pairedDisplays.redeemPairingChallenge(supabase, req.body || {});
@@ -8698,9 +8712,43 @@ app.post('/display/pair', async (req, res) => {
     if (e?.code === 'invalid_pairing_input') {
       return res.status(400).json({ error: 'The pairing link and code are required.' });
     }
-    if (e?.code === 'invalid_pairing' || e?.code === 'P0001') {
-      return res.status(400).json({ error: 'That pairing code is invalid or expired.' });
-    }
+    if (e?.code === 'invalid_pairing') return res.status(400).json({ error: e.message });
+    if (e?.code === 'P0001') return res.status(400).json({ error: 'That pairing code is invalid or expired.' });
+    res.status(503).json({ error: 'Pairing is temporarily unavailable.' });
+  }
+});
+
+app.post('/display/enroll', createRateLimiter(30, 60 * 1000), async (_req, res) => {
+  try {
+    const enrollment = await require('./services/paired-displays').createEnrollment(supabase);
+    res.json(enrollment);
+  } catch (e) {
+    log('warn', 'display.enroll.failed', { error: e.message });
+    res.status(503).json({ error: 'Pairing is temporarily unavailable.' });
+  }
+});
+
+app.get('/display/enroll/:id', async (req, res) => {
+  try {
+    const status = await require('./services/paired-displays').enrollmentStatus(supabase, req.params.id, displayBearerToken(req));
+    if (!status) return res.status(401).json({ error: 'Unauthorized' });
+    res.json(status);
+  } catch (e) {
+    res.status(503).json({ error: 'Pairing is temporarily unavailable.' });
+  }
+});
+
+app.post('/agent/displays/claim', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json(await require('./services/paired-displays').claimEnrollment(supabase, userId, {
+      code: req.body?.code,
+      displayName: req.body?.displayName
+    }));
+  } catch (e) {
+    if (e?.code === 'invalid_code' || e?.code === 'too_many_tries') return res.status(400).json({ error: e.message });
+    log('warn', 'display.claim.failed', { userId, error: e.message });
     res.status(503).json({ error: 'Pairing is temporarily unavailable.' });
   }
 });

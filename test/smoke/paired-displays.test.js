@@ -127,7 +127,7 @@ test('pairing challenge is one-time, expires, and never stores the raw code', as
     () => pairedDisplays.redeemPairingChallenge(db, {
       challengeId: challenge.id, code: 'BBBBBBBB', now, randomBytes: deterministicRandom
     }),
-    /not correct/
+    /not right/
   );
   const redeemed = await pairedDisplays.redeemPairingChallenge(db, {
     challengeId: challenge.id, code: challenge.code, displayName: 'Kitchen screen', now,
@@ -529,4 +529,44 @@ test('urgent screens only go to displays that were opted in, and a tap only reco
 
   const plain = await pairedDisplays.queueRender(db, 'user-1', { displayId: display.id, title: 'Dinner', body: '7:30pm', now });
   assert.equal((await pairedDisplays.respondToUrgent(db, display.id, token, plain.id, 'got_it', now)).found, false);
+});
+
+test('awaitDelivery reports shown once the screen acknowledges, and not-picked-up when it never does', async () => {
+  const noWait = { timeoutMs: 1500, intervalMs: 500 };
+  const supabase = fakeSupabase();
+  supabase.tables.paired_displays.push({ id: 'd1', user_id: 'u1', display_name: 'Kitchen', last_seen_at: null });
+  const event = await pairedDisplays.queueRender(supabase, 'u1', { displayId: 'd1', title: 'Dinner', body: '7:30pm' });
+
+  let sleeps = 0;
+  const ackedLater = await pairedDisplays.awaitDelivery(supabase, 'u1', event.id, {
+    ...noWait,
+    sleep: async () => {
+      sleeps += 1;
+      if (sleeps === 2) supabase.tables.display_render_events[0].acked_at = '2026-08-23T00:00:09.000Z';
+    }
+  });
+  assert.equal(ackedLater.shown, true);
+
+  const second = await pairedDisplays.queueRender(supabase, 'u1', { displayId: 'd1', title: 'Again', body: 'x' });
+  const never = await pairedDisplays.awaitDelivery(supabase, 'u1', second.id, { ...noWait, sleep: async () => {} });
+  assert.equal(never.shown, false);
+  assert.equal(never.reason, 'not_picked_up');
+  assert.equal(never.name, 'Kitchen');
+});
+
+test('a pairing code accepts dashes and lower case, and five wrong codes burn the request', async () => {
+  const supabase = fakeSupabase();
+  const first = await pairedDisplays.createPairingChallenge(supabase, 'u1', { baseUrl: 'https://x.test' });
+  const dashed = first.code.slice(0, 4).toLowerCase() + '-' + first.code.slice(4).toLowerCase();
+  const paired = await pairedDisplays.redeemPairingChallenge(supabase, { challengeId: first.id, code: dashed, displayName: 'Kitchen' });
+  assert.equal(paired.display.name, 'Kitchen');
+
+  const second = await pairedDisplays.createPairingChallenge(supabase, 'u1', { baseUrl: 'https://x.test' });
+  for (let i = 0; i < pairedDisplays.MAX_PAIRING_ATTEMPTS; i += 1) {
+    await assert.rejects(pairedDisplays.redeemPairingChallenge(supabase, { challengeId: second.id, code: 'WRONG123' }), { code: 'invalid_pairing' });
+  }
+  await assert.rejects(
+    pairedDisplays.redeemPairingChallenge(supabase, { challengeId: second.id, code: second.code }),
+    { code: 'invalid_pairing', message: 'That pairing request is no longer valid.' }
+  );
 });

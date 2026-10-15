@@ -28,17 +28,26 @@ async function renderToDisplay({ userId, action, params, enrichedParams, context
     kind: params?.kind,
     scene: params?.scene
   });
+  const delivery = await pairedDisplays.awaitDelivery(supabase, userId, event.id, deps.displayDelivery);
+  if (delivery.shown) {
+    return {
+      success: true,
+      outcome: 'completed',
+      eventId: event.id,
+      displayId: event.displayId,
+      text: 'On the screen now: ' + event.title,
+      actionSummary: 'Showing on display'
+    };
+  }
+  // Queued is not shown. The screen takes it the next time it is on and online.
   return {
-    // The server has queued the event; the display still has to poll and acknowledge
-    // it. Do not claim that a physical screen rendered anything until that boundary is
-    // observed.
     success: false,
     outcome: 'incomplete',
     incomplete: true,
     eventId: event.id,
     displayId: event.displayId,
-    text: 'Queued for the paired display: ' + event.title,
-    actionSummary: 'Queued for display'
+    text: (delivery.name || 'The screen') + ' has not picked that up yet; it will show when the screen is on and online.',
+    actionSummary: 'Sent, not shown yet'
   };
 }
 

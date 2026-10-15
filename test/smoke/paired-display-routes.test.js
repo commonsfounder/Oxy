@@ -41,7 +41,7 @@ function request(path, options = {}) {
 test('display receiver page is public while the app display list remains session-protected', async () => {
   const display = await request('/display');
   assert.equal(display.status, 200);
-  assert.match(display.body, /Pair this display/);
+  assert.match(display.body, /Pair this screen/);
   assert.match(display.body, /localStorage/);
   assert.match(display.body, /speechSynthesis/);
   assert.match(display.body, /milgrain_display_mode/);
