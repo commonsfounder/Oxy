@@ -90,7 +90,7 @@ function chatMessagesToResponsesInput(messages) {
 // Reasoning tokens count against max_output_tokens before any visible text, so the cap gets
 // headroom for the configured effort on top of what the caller asked for.
 function openAIResponsesBody({ model, messages, config = {}, stream = false }) {
-  const effort = openAIEffort();
+  const effort = config.reasoningEffort || openAIEffort();
   const { instructions, input } = chatMessagesToResponsesInput(messages);
   const body = {
     model,

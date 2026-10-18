@@ -56,7 +56,7 @@ async function planItinerary({ userId, action, params, context, deps }) {
   // A multi-day itinerary is a large JSON payload, and this file's default 768-token budget is
   // spent entirely on reasoning tokens before any visible output, returning empty text.
   const callModel = async (systemPrompt, prompt) => {
-    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
+    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000, reasoningEffort: 'medium' } });
     return res?.text || '';
   };
 
@@ -231,7 +231,7 @@ async function searchTravel({ userId, action, params, context, deps }) {
     const extracted = await generateBrain({
       model: FAST_MODEL,
       contents: [{ role: 'user', parts: [{ text: travelSearch.buildExtractionPrompt(kind, researchText, params || {}) }] }],
-      config: { maxOutputTokens: travelSearch.EXTRACTION_TOKENS }
+      config: { maxOutputTokens: travelSearch.EXTRACTION_TOKENS, reasoningEffort: 'low' }
     });
     options = travelSearch.parseTravelResults(kind, extracted.text || '');
   } catch (e) {
