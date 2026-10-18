@@ -55,6 +55,11 @@ function openAIEffort() {
   return process.env.OXY_CHAT_REASONING_EFFORT || 'high';
 }
 
+// Web search is retrieval, not reasoning; high effort made hotel and flight searches take 35-130s.
+function searchEffort() {
+  return process.env.OXY_SEARCH_REASONING_EFFORT || 'low';
+}
+
 // chat-style messages -> Responses API instructions + input items.
 function chatMessagesToResponsesInput(messages) {
   const instructions = [];
@@ -482,7 +487,7 @@ async function webSearchBrain({ model, prompt, provider }) {
       model,
       input: prompt,
       tools: [{ type: 'web_search' }],
-      reasoning: { effort: openAIEffort() }
+      reasoning: { effort: searchEffort() }
     });
     const text = responsesText(await res.json()).trim();
     return text;
