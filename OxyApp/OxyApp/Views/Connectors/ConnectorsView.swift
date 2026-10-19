@@ -484,7 +484,9 @@ private struct MoreAppsSection: View {
     ]
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
+            // Always present, so the load runs even while the list below is hidden.
+            Color.clear.frame(height: 0).task { await load() }
             if available {
                 VStack(alignment: .leading, spacing: 0) {
                     AppSectionHeader(title: "More apps")
@@ -506,7 +508,6 @@ private struct MoreAppsSection: View {
                 }
             }
         }
-        .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await load() } }
         }
