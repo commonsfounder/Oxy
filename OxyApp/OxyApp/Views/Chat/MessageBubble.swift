@@ -314,7 +314,7 @@ struct MessageBubble: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(reauth.recoveryAction?.label ?? "Sign in")
                         .sheet(isPresented: $showReauthSheet) {
-                            ReauthLoginSheet(site: site) {
+                            SiteSignInSheet(site: site) {
                                 onActionCommand?("keep going")
                             }
                         }

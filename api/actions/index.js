@@ -20,8 +20,9 @@ const appointments = require('./appointments');
 const assistant = require('./assistant');
 const photos = require('./photos');
 const settings = require('./settings');
+const siteLogins = require('./site-logins');
 
-const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser, email, money, media, play, appointments, assistant, photos, settings];
+const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser, email, money, media, play, appointments, assistant, photos, settings, siteLogins];
 
 const handlers = Object.create(null);
 for (const mod of MODULES) {

@@ -687,6 +687,30 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  ask_site_login: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['site'],
+    inputExample: { site: 'amazon.co.uk' },
+    paramHints: { site: 'the site, like amazon.co.uk' },
+    guidance: 'Use when a task needs the user signed in to a site (an order, an account page) and you have no saved login for it. The user signs in on the site inside the app, once; you never see the password. Ask for it only when you actually need that site.',
+    successSummary: 'Asked you to sign in',
+    failureSummary: 'Asked you to sign in',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  forget_site_login: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['site'],
+    inputExample: { site: 'amazon.co.uk' },
+    paramHints: { site: 'the site, like amazon.co.uk' },
+    guidance: 'Forget the saved login for a site when the user asks ("forget my Amazon login", "stop using my Argos sign-in").',
+    successSummary: 'Forgot a login',
+    failureSummary: 'Could not forget that login',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   change_setting: {
     adapter: { kind: 'inline' },
     risk: 'low',

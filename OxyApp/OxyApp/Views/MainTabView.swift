@@ -5,6 +5,9 @@ struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
     @State private var opened: ThreadMenuChoice?
+    #if DEBUG
+    @State private var debugSignInSite: String? = ProcessInfo.processInfo.environment["OXY_DEBUG_SIGNIN"]
+    #endif
     @State private var openedFrom: CGPoint?
 
     private var background: ThreadBackground { ThreadBackground(rawValue: backgroundRaw) ?? .automatic }
@@ -18,6 +21,11 @@ struct MainTabView: View {
             .preferredColorScheme(background.scheme)
             .id(accentColor + backgroundRaw)
             .overlay { revealOverlay }
+            #if DEBUG
+            .sheet(isPresented: Binding(get: { debugSignInSite != nil }, set: { if !$0 { debugSignInSite = nil } })) {
+                SiteSignInSheet(site: debugSignInSite ?? "") {}
+            }
+            #endif
             .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { _ in
                 opened = nil
             }

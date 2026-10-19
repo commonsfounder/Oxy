@@ -331,6 +331,15 @@ const ACTION_WORDING = Object.freeze({
     feed: (i) => withWho(i, 'Sent', 'a Telegram message'),
     approval: 'Message ready to send'
   },
+  ask_site_login: {
+    name: 'Sign in',
+    progress: (i) => pick(site(i.site) && `Getting you signed in to ${site(i.site)}`, 'Getting you signed in')
+  },
+  forget_site_login: {
+    name: 'Login',
+    progress: (i) => pick(site(i.site) && `Forgetting your ${site(i.site)} login`, 'Forgetting that login'),
+    summary: (p) => ({ summary: `Forgot your ${site(field(p, 'site')) || ''} login`.replace('  ', ' '), kind: 'did' })
+  },
   change_setting: {
     name: 'Setting',
     progress: () => 'Changing that setting',

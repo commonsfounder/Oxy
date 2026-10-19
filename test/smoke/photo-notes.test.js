@@ -69,3 +69,15 @@ test('a setting change is checked and handed to the phone', async () => {
   assert.equal((await handlers.change_setting({ params: { setting: 'spend_limit', value: 'off' } })).success, false);
   assert.equal((await handlers.change_setting({ params: { setting: 'appearance', value: 'pink' } })).success, false);
 });
+
+test('asking for a sign-in hands the phone a sign-in card, and forgetting removes only that site', async () => {
+  const { handlers } = require('../../api/actions/site-logins');
+  const ask = await handlers.ask_site_login({ params: { site: 'https://www.amazon.co.uk/gp/cart' } });
+  assert.equal(ask.recoveryAction.type, 'reauth_login');
+  assert.equal(ask.recoveryAction.site, 'amazon.co.uk');
+  const calls = [];
+  const supabase = { from: () => ({ delete: () => ({ eq: (c, v) => { calls.push([c, v]); return { eq: (c2, v2) => { calls.push([c2, v2]); return Promise.resolve({ error: null, count: 1 }); } }; } }) }) };
+  const out = await handlers.forget_site_login({ userId: 'u1', params: { site: 'amazon.co.uk' }, deps: { supabase } });
+  assert.deepEqual(calls, [['user_id', 'u1'], ['site', 'amazon.co.uk']]);
+  assert.match(out.text, /forgotten/);
+});
