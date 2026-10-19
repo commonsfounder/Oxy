@@ -48,7 +48,6 @@ struct MainTabView: View {
                     case .activity: AdamActivityView()
                     case .home: YourHomeView()
                     case .memory: MemoryView()
-                    case .apps: ConnectorsView()
                     case .settings, .privateChat: AdamYouView()
                     }
                 }
