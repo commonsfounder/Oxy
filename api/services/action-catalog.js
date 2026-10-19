@@ -29,6 +29,7 @@ const CONNECTOR_DEFINITIONS = Object.freeze({
   // Home Assistant is configured by the server's private URL/token pair rather than a
   // per-user OAuth row, so the adapter itself reports the honest unavailable state when
   // those settings are absent.
+  composio: { id: 'composio', modulePath: path.resolve(__dirname, '../../connectors/composio.js'), requiresConnection: false },
   home_assistant: { id: 'home_assistant', modulePath: path.resolve(__dirname, '../../connectors/home-assistant.js'), requiresConnection: false }
 });
 

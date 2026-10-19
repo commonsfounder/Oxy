@@ -7,11 +7,6 @@ const { TASKS, selectTasks, classify } = require('./real-user-task-matrix');
 
 const BASE = (process.env.BASE_URL || process.env.OXY_STRESS_API_URL || 'https://milgrain-live-2026.fly.dev').replace(/\/+$/, '');
 const USER = process.env.OXY_STRESS_USER || process.env.SMOKE_USER || 'user123';
-// The run writes tasks and chat history to this account, so a live deployment needs a test account named explicitly.
-if (/fly\.dev/.test(BASE) && !process.env.OXY_STRESS_USER) {
-  console.error('Refusing to run against a live deployment without OXY_STRESS_USER set to a test account (the run leaves tasks and messages behind).');
-  process.exit(1);
-}
 const TURN_TIMEOUT_MS = Number(process.env.OXY_STRESS_TURN_TIMEOUT_MS || 120000);
 // /chat caps a user at 30/min; staying under it measures the agent rather than the limiter.
 const DEFAULT_RATE_PER_MIN = Number(process.env.OXY_STRESS_RATE_PER_MIN || 25);
@@ -154,6 +149,10 @@ function report(results, wallMs, concurrency, { passes = result => HEALTHY.has(r
 }
 
 async function main() {
+  if (/fly\.dev/.test(BASE) && !process.env.OXY_STRESS_USER) {
+    console.error('Refusing to run against a live deployment without OXY_STRESS_USER set to a test account (the run leaves tasks and messages behind).');
+    process.exit(1);
+  }
   const options = parseArgs();
   const tasks = selectTasks(options);
   const unsafe = tasks.filter((task) => task.mode !== 'safe');

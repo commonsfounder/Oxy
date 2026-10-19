@@ -331,6 +331,15 @@ const ACTION_WORDING = Object.freeze({
     feed: (i) => withWho(i, 'Sent', 'a Telegram message'),
     approval: 'Message ready to send'
   },
+  connected_app_read: {
+    name: 'App',
+    progress: () => 'Checking one of your apps'
+  },
+  connected_app_act: {
+    name: 'App update',
+    progress: () => 'Updating one of your apps',
+    approval: 'Change ready to make'
+  },
   send_slack_message: {
     progress: (i) => pick(detail(i.channel) && `Posting in ${detail(i.channel)}`, 'Posting on Slack')
   },

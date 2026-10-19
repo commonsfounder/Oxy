@@ -1169,6 +1169,26 @@ const ACTION_CONTRACTS = {
   github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, paramHints: { action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review', adapter: { kind: 'connector', id: 'github' } },
   create_github_issue: { risk: 'medium', required: ['repo', 'title'], optional: ['body'], inputExample: { repo: 'owner/repo', title: 'Issue title', body: 'Details' }, successSummary: 'GitHub issue created', failureSummary: 'GitHub issue failed', confirmation: 'review_required', executionMode: 'review', adapter: { kind: 'connector', id: 'github' } },
   get_github_prs: { risk: 'low', required: ['repo'], inputExample: { repo: 'owner/repo' }, successSummary: 'GitHub pull requests loaded', failureSummary: 'GitHub pull requests failed', confirmation: 'none', adapter: { kind: 'connector', id: 'github' } },
+  connected_app_read: {
+    risk: 'low',
+    required: ['tool'],
+    optional: ['arguments'],
+    inputExample: { tool: 'LINEAR_LIST_LINEAR_ISSUES', arguments: {} },
+    paramHints: { tool: 'UPPER_SNAKE tool name of the connected app, starting with the app name; reads only (GET, LIST, SEARCH, FETCH, FIND)' },
+    guidance: 'Look something up in an app the user connected through the app catalogue (for example Linear, Asana, HubSpot). Reads only; use connected_app_act to change anything.',
+    successSummary: 'App checked', failureSummary: 'App check failed', confirmation: 'none',
+    adapter: { kind: 'connector', id: 'composio' }
+  },
+  connected_app_act: {
+    risk: 'medium',
+    required: ['tool'],
+    optional: ['arguments'],
+    inputExample: { tool: 'LINEAR_CREATE_LINEAR_ISSUE', arguments: { title: 'Fix the login bug' } },
+    paramHints: { tool: 'UPPER_SNAKE tool name of the connected app, starting with the app name' },
+    guidance: 'Create or change something in an app the user connected through the app catalogue. The user approves it first.',
+    successSummary: 'App updated', failureSummary: 'App update failed', confirmation: 'review_required', executionMode: 'review',
+    adapter: { kind: 'connector', id: 'composio' }
+  },
   track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none', adapter: { kind: 'connector', id: 'flights' } },
   edit_photo: { adapter: { kind: 'inline' },risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, paramHints: { brief: 'enhance|crop|filter' }, successSummary: 'Photo editing unavailable', failureSummary: 'Photo editing unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
   analyze_image: {

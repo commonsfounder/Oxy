@@ -4893,6 +4893,29 @@ const pendingActionConfirmLocks = new Set();
 
 // Concrete /connectors paths MUST stay above /connectors/:userId — see the note on
 // /memory/recent-entities. "agent-card" reads as a userId and returns 403 otherwise.
+// Apps from the hosted catalogue: the user taps Connect, signs in on the returned page, and comes back.
+const appCatalogue = require('./services/composio').createComposio();
+app.post('/connectors/apps/connect', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!appCatalogue.configured) return res.status(503).json({ error: 'The app catalogue is not set up yet.' });
+  try {
+    res.json(await appCatalogue.startConnection(userId, req.body?.toolkit));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/connectors/apps', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!appCatalogue.configured) return res.json({ configured: false, connections: [] });
+  try {
+    res.json({ configured: true, connections: await appCatalogue.listConnections(userId) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.get('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
