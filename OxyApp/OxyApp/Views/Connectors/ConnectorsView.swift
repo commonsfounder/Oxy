@@ -57,6 +57,7 @@ struct ConnectorsView: View {
                                 if !availableRows.isEmpty {
                                     section(title: "Add an app", connectors: availableRows)
                                 }
+                                MoreAppsSection()
                                 if !connectedRows.isEmpty {
                                     Text("You can disconnect an app at any time.")
                                         .font(.appBody(12))
@@ -457,4 +458,113 @@ struct ConnectorsResponse: Codable {
 #Preview {
     ConnectorsView()
         .environment(AppState())
+}
+
+
+// MARK: - More apps
+
+/// Apps from the hosted catalogue: tap Connect, sign in on the page that opens, come back.
+/// Hidden until the server has the catalogue switched on.
+private struct MoreAppsSection: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var available = false
+    @State private var connected: Set<String> = []
+    @State private var pending: String?
+    @State private var message: String?
+
+    private let apps: [(slug: String, name: String, caption: String)] = [
+        ("linear", "Linear", "Issues and projects"),
+        ("asana", "Asana", "Tasks and projects"),
+        ("trello", "Trello", "Boards and cards"),
+        ("hubspot", "HubSpot", "Contacts and deals"),
+        ("jira", "Jira", "Tickets"),
+        ("airtable", "Airtable", "Tables"),
+        ("todoist", "Todoist", "To-do lists"),
+        ("dropbox", "Dropbox", "Files")
+    ]
+
+    var body: some View {
+        Group {
+            if available {
+                VStack(alignment: .leading, spacing: 0) {
+                    AppSectionHeader(title: "More apps")
+                        .padding(.bottom, 12)
+                    VStack(spacing: 0) {
+                        ForEach(Array(apps.enumerated()), id: \.element.slug) { index, app in
+                            row(app)
+                            if index < apps.count - 1 { AppDivider() }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .settingsSurface(radius: 18)
+                    if let message {
+                        Text(message)
+                            .font(.appBody(12))
+                            .foregroundStyle(Color.appMuted)
+                            .padding(.top, 8)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load() } }
+        }
+    }
+
+    private func row(_ app: (slug: String, name: String, caption: String)) -> some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.name).font(.rowTitle).foregroundStyle(Color.appInk)
+                Text(app.caption).font(.rowSecondary).foregroundStyle(Color.appMuted)
+            }
+            Spacer(minLength: 8)
+            if connected.contains(app.slug) {
+                HStack(spacing: 6) {
+                    Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
+                    Text("Connected").font(.rowSecondary).foregroundStyle(Color.appSuccess)
+                }
+            } else if pending == app.slug {
+                ProgressView().scaleEffect(0.65).tint(Color.appMuted)
+            } else {
+                Button { Task { await connect(app.slug) } } label: {
+                    Text("Connect")
+                        .font(.appBody(14, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                }
+                .buttonStyle(.appScale(0.97))
+            }
+        }
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+    }
+
+    private func load() async {
+        guard let data = try? await APIClient.shared.request(path: "/connectors/apps"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let items = (json["connections"] as? [[String: Any]]) ?? []
+        await MainActor.run {
+            available = (json["configured"] as? Bool) == true
+            connected = Set(items.compactMap { ($0["connected"] as? Bool) == true ? $0["toolkit"] as? String : nil })
+            pending = nil
+        }
+    }
+
+    private func connect(_ slug: String) async {
+        await MainActor.run { pending = slug; message = nil }
+        do {
+            let data = try await APIClient.shared.request(path: "/connectors/apps/connect", method: "POST", body: ["toolkit": slug])
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let urlString = json["redirectUrl"] as? String, let url = URL(string: urlString) {
+                await MainActor.run { UIApplication.shared.open(url) }
+            } else {
+                await MainActor.run { pending = nil; message = "Couldn't open the sign-in page." }
+            }
+        } catch {
+            await MainActor.run { pending = nil; message = "Couldn't connect that app. Try again." }
+        }
+    }
 }
