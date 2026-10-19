@@ -116,10 +116,10 @@ struct SettingsPage<Content: View>: View {
             VStack(spacing: 0) {
                 ScreenHeaderView(title: title, onBack: isRoot && revealClose != nil ? nil : { dismiss() })
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 26) { content }
+                    VStack(alignment: .leading, spacing: 20) { content }
                         .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 10)
-                        .padding(.bottom, 48)
+                        .padding(.top, 4)
+                        .padding(.bottom, 40)
                 }
             }
         }
@@ -132,7 +132,7 @@ struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if let title {
                 Text(title)
                     .font(.appBody(13, weight: .medium))
@@ -215,8 +215,8 @@ struct SettingsRow<Trailing: View>: View {
             Spacer(minLength: 8)
             trailing
         }
-        .padding(.vertical, 10)
-        .frame(minHeight: subtitle == nil ? 50 : 60)
+        .padding(.vertical, 8)
+        .frame(minHeight: subtitle == nil ? 44 : 52)
         .contentShape(Rectangle())
     }
 }

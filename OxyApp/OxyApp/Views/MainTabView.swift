@@ -155,7 +155,12 @@ private struct AdamYouView: View {
 
     var body: some View {
         NavigationStack {
-            SettingsPage(title: "Settings", isRoot: true) {
+            ZStack {
+            Color.appBackground.ignoresSafeArea()
+            VStack(spacing: 0) {
+                ScreenHeaderView(title: "Settings")
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 20) {
                 SettingsList {
                     youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
                     SettingsRule(inset: 34)
@@ -197,6 +202,10 @@ private struct AdamYouView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 14)
+            }
+                .padding(.horizontal, AppSpacing.margin)
+                .padding(.bottom, 20)
+            }
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showBackendURLEditor) {

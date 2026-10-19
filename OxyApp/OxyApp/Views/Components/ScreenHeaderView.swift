@@ -31,13 +31,13 @@ struct ScreenHeaderView: View {
                 .foregroundStyle(Color.appInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .padding(.top, onBack == nil ? 10 : 2)
-                .padding(.bottom, 12)
+                .padding(.top, onBack == nil ? 8 : 0)
+                .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppSpacing.margin)
-        .padding(.top, 4)
+        .padding(.top, 2)
         // Opaque, and extended up through the status-bar inset, so scrolled content
         // can never ghost above or behind the header at the very top of the screen.
         .background(Color.appBackground.ignoresSafeArea(edges: .top))
