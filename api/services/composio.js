@@ -53,6 +53,16 @@ function createComposio({ env = process.env, http = null } = {}) {
     return (res?.items || []).map(item => ({ id: item.id, toolkit: item.toolkit?.slug || null, status: item.status || null, connected: item.status === 'ACTIVE' }));
   }
 
+  // Signs the user out of one app by deleting its connected accounts.
+  async function disconnect(userId, toolkit) {
+    requireConfigured();
+    if (!SLUG.test(String(toolkit || ''))) throw new Error('Pick an app to disconnect.');
+    const res = await send('GET', '/connected_accounts', { query: { user_ids: [userId], toolkit_slugs: [String(toolkit).toLowerCase()] } });
+    const ids = (res?.items || []).map(item => item.id).filter(Boolean);
+    for (const id of ids) await send('DELETE', `/connected_accounts/${id}`);
+    return { removed: ids.length };
+  }
+
   async function execute(userId, toolSlug, args = {}) {
     requireConfigured();
     if (!TOOL_SLUG.test(String(toolSlug || ''))) throw new Error('That is not a valid app tool name.');
@@ -60,7 +70,7 @@ function createComposio({ env = process.env, http = null } = {}) {
     return { successful: res?.successful === true, data: res?.data ?? null, error: res?.error || null };
   }
 
-  return { configured, startConnection, listConnections, execute, isReadTool: (slug) => READ_VERBS.test(String(slug || '')) };
+  return { configured, startConnection, listConnections, disconnect, execute, isReadTool: (slug) => READ_VERBS.test(String(slug || '')) };
 }
 
 function parseJson(text) {

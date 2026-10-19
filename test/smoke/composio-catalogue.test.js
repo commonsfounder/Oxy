@@ -63,3 +63,11 @@ test('a failed app call is reported as failed, not success', async () => {
   assert.equal(out.success, false);
   assert.match(out.error, /not found/);
 });
+
+test('disconnecting an app deletes only that app\'s connected accounts', async () => {
+  const { http, calls } = fake({ 'GET /connected_accounts': { items: [{ id: 'ca_1', status: 'ACTIVE', toolkit: { slug: 'linear' } }] }, 'DELETE /connected_accounts/ca_1': {} });
+  const out = await createComposio({ env: { COMPOSIO_API_KEY: 'k' }, http }).disconnect('u1', 'Linear');
+  assert.equal(out.removed, 1);
+  assert.deepEqual(calls[0].query, { user_ids: ['u1'], toolkit_slugs: ['linear'] });
+  assert.equal(calls[1].path, '/connected_accounts/ca_1');
+});

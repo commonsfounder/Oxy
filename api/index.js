@@ -4926,6 +4926,16 @@ app.post('/connectors/apps/connect', requireSessionAuth, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+app.delete('/connectors/apps/:toolkit', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!appCatalogue.configured) return res.status(503).json({ error: 'The app catalogue is not set up yet.' });
+  try {
+    res.json(await appCatalogue.disconnect(userId, req.params.toolkit));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get('/connectors/apps', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });

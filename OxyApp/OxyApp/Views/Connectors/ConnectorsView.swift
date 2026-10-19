@@ -3,316 +3,295 @@ import SwiftUI
 import UIKit
 #endif
 
+/// Everything Adam can connect to, grouped by what it is for, in plain words.
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var systemDismiss
-    @Environment(\.revealClose) private var revealClose
-    private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
+
     @State private var connectors: [Connector] = []
+    @State private var catalogueOn = false
+    @State private var catalogueConnected: Set<String> = []
+    @State private var pending: String?
     @State private var isLoading = true
-    
-    @State private var oauthStatus: [String: OAuthStatus] = [:]
-    @State private var errorMessage: String?
-    @State private var disconnectCandidate: Connector?
+    @State private var message: String?
+    @State private var manage: Entry?
 
     private let oauthProviders: Set<String> = ["google", "microsoft"]
 
-    enum OAuthStatus: String {
-        case idle, connecting, connected, needsReconnect, error
+    // MARK: Directory
+
+    enum Source { case own(String), catalogue(String) }
+
+    struct Entry: Identifiable {
+        let name: String
+        let line: String
+        let source: Source
+        var key: String {
+            switch source { case .own(let id): return id; case .catalogue(let slug): return slug }
+        }
+        var id: String { key }
     }
+
+    private struct Section: Identifiable {
+        let title: String
+        let entries: [Entry]
+        var id: String { title }
+    }
+
+    private static func own(_ id: String, _ name: String, _ line: String) -> Entry { Entry(name: name, line: line, source: .own(id)) }
+    private static func app(_ slug: String, _ name: String, _ line: String) -> Entry { Entry(name: name, line: line, source: .catalogue(slug)) }
+
+    private static let directory: [Section] = [
+        Section(title: "Mail and calendar", entries: [
+            own("google", "Gmail and Calendar", "Read and answer your mail, and keep your diary straight"),
+            own("microsoft", "Outlook and Calendar", "Read and answer your mail, and keep your diary straight")
+        ]),
+        Section(title: "Messages", entries: [
+            own("telegram", "Telegram", "Message people for you"),
+            app("whatsapp", "WhatsApp", "Read and send messages")
+        ]),
+        Section(title: "Photos and files", entries: [
+            app("googlephotos", "Google Photos", "Find and organise your photos"),
+            app("googledrive", "Google Drive", "Find and open your files"),
+            app("dropbox", "Dropbox", "Find and open your files")
+        ]),
+        Section(title: "Plans and lists", entries: [
+            app("todoist", "Todoist", "Keep your to-do list"),
+            app("googletasks", "Google Tasks", "Keep your to-do list"),
+            own("notion", "Notion", "Save notes and pages"),
+            app("splitwise", "Splitwise", "Track shared bills"),
+            app("eventbrite", "Eventbrite", "Find events and tickets"),
+            app("ticketmaster", "Ticketmaster", "Find concerts and shows")
+        ]),
+        Section(title: "Health and fitness", entries: [
+            own("strava", "Strava", "See your runs and rides"),
+            own("oura", "Oura", "See your sleep and readiness")
+        ]),
+        Section(title: "Video and social", entries: [
+            app("youtube", "YouTube", "Find videos and keep up with channels"),
+            app("instagram", "Instagram", "Posts and messages"),
+            app("facebook", "Facebook", "Pages and events"),
+            app("pinterest", "Pinterest", "Boards and ideas"),
+            app("reddit", "Reddit", "Follow communities"),
+            app("discord", "Discord", "Servers and friends")
+        ]),
+        Section(title: "Work", entries: [
+            own("slack", "Slack", "Post messages for you"),
+            app("zoom", "Zoom", "Your meetings"),
+            // Only shown once connected: it is a developer tool.
+            own("github", "GitHub", "Your code and issues")
+        ])
+    ]
+
+    // MARK: State per entry
+
+    private func connector(_ entry: Entry) -> Connector? {
+        if case .own(let id) = entry.source { return connectors.first { $0.id == id } }
+        return nil
+    }
+
+    private func isVisible(_ entry: Entry) -> Bool {
+        switch entry.source {
+        case .own(let id):
+            guard let c = connector(entry), c.implemented else { return false }
+            return id != "github" || c.enabled
+        case .catalogue:
+            return catalogueOn
+        }
+    }
+
+    private func isConnected(_ entry: Entry) -> Bool {
+        switch entry.source {
+        case .own: return connector(entry)?.enabled == true
+        case .catalogue(let slug): return catalogueConnected.contains(slug)
+        }
+    }
+
+    private var sections: [Section] {
+        Self.directory.compactMap { section in
+            let visible = section.entries.filter(isVisible)
+            return visible.isEmpty ? nil : Section(title: section.title, entries: visible)
+        }
+    }
+
+    private var connectedCount: Int { sections.flatMap(\.entries).filter(isConnected).count }
+
+    // MARK: Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.appBackground.ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Apps", onBack: revealClose == nil ? { dismiss() } : nil)
-
-                    if isLoading {
-                        VStack(spacing: 12) {
-                            OxySkeletonCard(height: 92)
-                            OxySkeletonCard(height: 148)
-                            OxySkeletonCard(height: 148)
-                        }
-                        .padding(.horizontal, AppSpacing.margin)
-                        .padding(.top, 16)
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 28) {
-                                if let errorMessage {
-                                    ErrorBanner(message: errorMessage, onRetry: { Task { await loadConnectors() } })
-                                }
-
-                                // Every remaining connector is a genuine account connection
-                                // (kind == "connection"), so there's just Connected/Available —
-                                // no handoff/hybrid items land on this screen anymore.
-                                let connectedRows = connectors.filter { $0.enabled }
-                                let availableRows = connectors.filter { $0.implemented && !$0.enabled }
-
-                                if !connectedRows.isEmpty {
-                                    section(title: "Connected", connectors: connectedRows)
-                                }
-                                if !availableRows.isEmpty {
-                                    section(title: "Add an app", connectors: availableRows)
-                                }
-                                MoreAppsSection()
-                                if !connectedRows.isEmpty {
-                                    Text("You can disconnect an app at any time.")
-                                        .font(.appBody(12))
-                                        .foregroundStyle(Color.appMuted)
-                                }
-                            }
-                            .padding(.horizontal, AppSpacing.margin)
-                            .padding(.vertical, 16)
-                        }
-                    }
+        SettingsPage(title: "Apps") {
+            if isLoading {
+                VStack(spacing: 12) {
+                    OxySkeletonCard(height: 92)
+                    OxySkeletonCard(height: 148)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .task {
-                await loadConnectors()
-            }
-            .refreshable {
-                await loadConnectors()
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active && oauthProviders.contains(where: { oauthStatus[$0] == .connecting }) {
-                    Task { await loadConnectors() }
-                }
-            }
-            .confirmationDialog(
-                disconnectCandidate.map { "Disconnect \($0.name)?" } ?? "Disconnect service?",
-                isPresented: Binding(
-                    get: { disconnectCandidate != nil },
-                    set: { if !$0 { disconnectCandidate = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                if let connector = disconnectCandidate {
-                    Button("Disconnect", role: .destructive) {
-                        updateConnector(connector, enabled: false)
-                        disconnectCandidate = nil
-                    }
-                }
-                Button("Cancel", role: .cancel) { disconnectCandidate = nil }
-            } message: {
-                Text("Adam will stop using this account until you reconnect it.")
-            }
-        }
-    }
-
-    // MARK: - Sections
-
-    private func section(title: String, connectors: [Connector]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: title)
-                .padding(.bottom, 12)
-
-            VStack(spacing: 0) {
-                ForEach(Array(connectors.enumerated()), id: \.element.id) { index, connector in
-                    connectorRow(connector)
-                    if index < connectors.count - 1 {
-                        AppDivider()
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .settingsSurface(radius: 18)
-        }
-    }
-
-    // MARK: - Row
-
-    private func connectorRow(_ connector: Connector) -> some View {
-        HStack(spacing: 14) {
-            AppIconView(candidates: [connector.icon, connector.id])
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 9))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(connector.name)
-                    .font(.rowTitle)
+            } else {
+                Text(connectedCount == 0 ? "Connect the apps you use and Adam can help with them." : connectedCount == 1 ? "Adam can use 1 of your apps." : "Adam can use \(connectedCount) of your apps.")
+                    .font(.appBody(16))
                     .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Text(capabilityCaption(connector))
-                    .font(.rowSecondary)
+                if let message {
+                    Text(message).font(.appBody(13)).foregroundStyle(Color.appMuted)
+                }
+
+                ForEach(sections) { section in
+                    SettingsGroup(title: section.title) {
+                        SettingsList {
+                            ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
+                                row(entry)
+                                if index < section.entries.count - 1 { SettingsRule(inset: 48) }
+                            }
+                        }
+                    }
+                }
+
+                Text("You can disconnect an app at any time.")
+                    .font(.appBody(12))
                     .foregroundStyle(Color.appMuted)
             }
-
-            Spacer(minLength: 8)
-
-            trailingControl(connector)
         }
-        .padding(.vertical, 14)
-        .frame(minHeight: 44)
-        .opacity(connector.implemented ? 1.0 : 0.45)
+        .task { await load() }
+        .refreshable { await load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load() } }
+        }
+        .confirmationDialog(
+            manage.map { "Disconnect \($0.name)?" } ?? "Disconnect app?",
+            isPresented: Binding(get: { manage != nil }, set: { if !$0 { manage = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let entry = manage {
+                Button("Disconnect", role: .destructive) { Task { await disconnect(entry) } }
+            }
+            Button("Cancel", role: .cancel) { manage = nil }
+        } message: {
+            Text("Adam will stop using this app until you connect it again.")
+        }
     }
 
-    private func capabilityCaption(_ connector: Connector) -> String {
-        if connector.id == "google" { return "Gmail · Calendar" }
-        if connector.id == "microsoft" { return "Outlook · Calendar" }
-        return connector.category
+    private func row(_ entry: Entry) -> some View {
+        HStack(spacing: 12) {
+            AppIconView(candidates: iconCandidates(entry))
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.name).font(.appBody(15, weight: .medium)).foregroundStyle(Color.appInk)
+                Text(entry.line).font(.appBody(13)).foregroundStyle(Color.appMuted).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            trailing(entry)
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 60)
+    }
+
+    private func iconCandidates(_ entry: Entry) -> [String] {
+        if let c = connector(entry) { return [c.icon, c.id] }
+        return [entry.name]
     }
 
     @ViewBuilder
-    private func trailingControl(_ connector: Connector) -> some View {
-        if oauthProviders.contains(connector.id) && oauthStatus[connector.id] == .connecting {
-            ProgressView()
-                .scaleEffect(0.65)
-                .tint(Color.appMuted)
-        } else if connector.enabled {
-            Button {
-                disconnectCandidate = connector
-            } label: {
+    private func trailing(_ entry: Entry) -> some View {
+        if pending == entry.key {
+            ProgressView().scaleEffect(0.65).tint(Color.appMuted)
+        } else if isConnected(entry) {
+            Button { manage = entry } label: {
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.appSuccess)
-                        .frame(width: 6, height: 6)
-                    Text("Manage")
-                        .font(.rowSecondary)
-                        .foregroundStyle(Color.appSuccess)
+                    Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
+                    Text("Connected").font(.appBody(13, weight: .medium)).foregroundStyle(Color.appSuccess)
                 }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
-            .disabled(!connector.implemented)
-            .buttonStyle(.appScale(0.97))
-        } else if connector.connectionState == "needs_reconnect" {
-            Button {
-                if oauthProviders.contains(connector.id) {
-                    connectOAuth(providerId: connector.id)
-                } else {
-                    handleConnectorAction(connector)
-                }
-            } label: {
-                Text("Reconnect")
-                    .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(Color.appAccent)
-            }
-            .disabled(!connector.implemented)
             .buttonStyle(.appScale(0.97))
         } else {
-            Button {
-                handleConnectorAction(connector)
-            } label: {
-                Text("Connect")
+            Button { Task { await connect(entry) } } label: {
+                Text(connector(entry)?.connectionState == "needs_reconnect" ? "Reconnect" : "Connect")
                     .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(Color.appInk)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                     .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.7))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
-            .disabled(!connector.implemented)
             .buttonStyle(.appScale(0.97))
         }
     }
 
-    // MARK: - Actions
+    // MARK: Loading
 
-    private func loadConnectors() async {
-        do {
-            let data = try await APIClient.shared.request(
-                path: "/connectors/\(appState.userId)"
-            )
-            let response = try JSONDecoder().decode(ConnectorsResponse.self, from: data)
-            await MainActor.run {
-                // Only genuine external-account connections belong here — a functionality
-                // (server-side API key, deep-link handoff, in-app plumbing) has no account to
-                // connect and just works when invoked from chat.
-                connectors = response.connectors.filter { $0.kind == "connection" }
-                for providerId in oauthProviders {
-                    if let provider = connectors.first(where: { $0.id == providerId }) {
-                        oauthStatus[providerId] = OAuthStatus(connector: provider)
-                    } else {
-                        oauthStatus[providerId] = .idle
-                    }
-                }
-                errorMessage = nil
-                isLoading = false
-            }
-        } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-                for providerId in oauthProviders where oauthStatus[providerId] == .connecting {
-                    oauthStatus[providerId] = .error
-                }
-                isLoading = false
-            }
-        }
+    private func load() async {
+        async let own = loadOwn()
+        async let catalogue = loadCatalogue()
+        _ = await (own, catalogue)
+        await MainActor.run { isLoading = false; pending = nil }
     }
 
-    private func oauthStartPath(for providerId: String) -> String {
-        providerId == "microsoft" ? "/auth/microsoft/start" : "/auth/google/start"
-    }
-
-    private func connectOAuth(providerId: String) {
-        oauthStatus[providerId] = .connecting
-        Task {
-            do {
-                let data = try await APIClient.shared.request(
-                    path: oauthStartPath(for: providerId),
-                    queryItems: [URLQueryItem(name: "userId", value: appState.userId)]
-                )
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let urlStr = json["url"] as? String,
-                   let url = URL(string: urlStr) {
-                    await MainActor.run {
-                        errorMessage = nil
-                        UIApplication.shared.open(url)
-                    }
-                } else {
-                    await MainActor.run {
-                        oauthStatus[providerId] = .error
-                        errorMessage = "Connect failed."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    oauthStatus[providerId] = .error
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func handleConnectorAction(_ connector: Connector) {
-        guard connector.implemented else { return }
-        if oauthProviders.contains(connector.id) && (!connector.enabled || connector.connectionState == "needs_reconnect") {
-            connectOAuth(providerId: connector.id)
+    private func loadOwn() async {
+        guard let data = try? await APIClient.shared.request(path: "/connectors/\(appState.userId)"),
+              let response = try? JSONDecoder().decode(ConnectorsResponse.self, from: data) else {
+            await MainActor.run { if connectors.isEmpty { message = "Couldn't load your apps. Pull down to try again." } }
             return
         }
-        updateConnector(connector, enabled: !connector.enabled)
+        await MainActor.run { connectors = response.connectors.filter { $0.kind == "connection" }; message = nil }
     }
 
-    private func updateConnector(_ connector: Connector, enabled: Bool) {
-        Task {
-            do {
-                let _ = try await APIClient.shared.request(
-                    path: "/connectors",
-                    method: "POST",
-                    body: [
-                        "userId": appState.userId,
-                        "connectorId": connector.id,
-                        "enabled": enabled
-                    ]
-                )
-                await MainActor.run {
-                    if let idx = connectors.firstIndex(where: { $0.id == connector.id }) {
-                        connectors[idx].enabled = enabled
-                        connectors[idx].connectionState = enabled ? "connected" : "available"
-                        connectors[idx].statusText = enabled ? "Connected" : "Available"
-                        if oauthProviders.contains(connector.id) {
-                            oauthStatus[connector.id] = enabled ? .connected : .idle
-                        }
-                        errorMessage = nil
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                }
+    private func loadCatalogue() async {
+        guard let data = try? await APIClient.shared.request(path: "/connectors/apps"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let items = (json["connections"] as? [[String: Any]]) ?? []
+        await MainActor.run {
+            catalogueOn = (json["configured"] as? Bool) == true
+            catalogueConnected = Set(items.compactMap { ($0["connected"] as? Bool) == true ? $0["toolkit"] as? String : nil })
+        }
+    }
+
+    // MARK: Actions
+
+    private func connect(_ entry: Entry) async {
+        await MainActor.run { pending = entry.key; message = nil }
+        do {
+            switch entry.source {
+            case .catalogue(let slug):
+                let data = try await APIClient.shared.request(path: "/connectors/apps/connect", method: "POST", body: ["toolkit": slug])
+                try await open(data, key: "redirectUrl")
+            case .own(let id) where oauthProviders.contains(id):
+                let path = id == "microsoft" ? "/auth/microsoft/start" : "/auth/google/start"
+                let data = try await APIClient.shared.request(path: path, queryItems: [URLQueryItem(name: "userId", value: appState.userId)])
+                try await open(data, key: "url")
+            case .own(let id):
+                _ = try await APIClient.shared.request(path: "/connectors", method: "POST", body: ["userId": appState.userId, "connectorId": id, "enabled": true])
+                await load()
             }
+        } catch {
+            await MainActor.run { pending = nil; message = "Couldn't connect \(entry.name). Try again." }
+        }
+    }
+
+    private func open(_ data: Data, key: String) async throws {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = json[key] as? String, let url = URL(string: text) else {
+            await MainActor.run { pending = nil; message = "Couldn't open the sign-in page." }
+            return
+        }
+        await MainActor.run { UIApplication.shared.open(url) }
+    }
+
+    private func disconnect(_ entry: Entry) async {
+        await MainActor.run { manage = nil; pending = entry.key }
+        do {
+            switch entry.source {
+            case .catalogue(let slug):
+                _ = try await APIClient.shared.request(path: "/connectors/apps/\(slug)", method: "DELETE")
+            case .own(let id):
+                _ = try await APIClient.shared.request(path: "/connectors", method: "POST", body: ["userId": appState.userId, "connectorId": id, "enabled": false])
+            }
+            await load()
+        } catch {
+            await MainActor.run { pending = nil; message = "Couldn't disconnect \(entry.name). Try again." }
         }
     }
 }
@@ -378,7 +357,8 @@ private struct AppIconView: View {
         if names.contains("netflix") { return ("N", .black, Color(red: 229/255, green: 9/255, blue: 20/255), 21) }
         if names.contains("slack") { return ("Slack", Color(red: 74/255, green: 21/255, blue: 75/255), .white, 11) }
         if names.contains("oura") { return ("Oura", .black, .white, 12) }
-        return (nil, Color.oxySurface3, Color.oxySub, 17)
+        let initial = candidates.first.map { String($0.prefix(1)).uppercased() }
+        return (initial, Color.oxySurface3, Color.oxySub, 17)
     }
 
     private func firstURL(from candidates: [String]) -> URL? {
@@ -439,141 +419,7 @@ struct Connector: Codable, Identifiable {
     }
 }
 
-private extension ConnectorsView.OAuthStatus {
-    init(connector: Connector) {
-        if connector.connectionState == "needs_reconnect" {
-            self = .needsReconnect
-        } else if connector.enabled {
-            self = .connected
-        } else {
-            self = .idle
-        }
-    }
-}
-
 struct ConnectorsResponse: Codable {
     let connectors: [Connector]
 }
 
-#Preview {
-    ConnectorsView()
-        .environment(AppState())
-}
-
-
-// MARK: - More apps
-
-/// Apps from the hosted catalogue: tap Connect, sign in on the page that opens, come back.
-/// Hidden until the server has the catalogue switched on.
-private struct MoreAppsSection: View {
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var available = false
-    @State private var connected: Set<String> = []
-    @State private var pending: String?
-    @State private var message: String?
-
-    private let apps: [(slug: String, name: String, caption: String)] = [
-        ("googlephotos", "Google Photos", "Your photos and albums"),
-        ("googledrive", "Google Drive", "Your files and documents"),
-        ("youtube", "YouTube", "Videos and subscriptions"),
-        ("instagram", "Instagram", "Posts and messages"),
-        ("facebook", "Facebook", "Pages and events"),
-        ("whatsapp", "WhatsApp", "Messages"),
-        ("pinterest", "Pinterest", "Boards and ideas"),
-        ("reddit", "Reddit", "Communities"),
-        ("discord", "Discord", "Servers and friends"),
-        ("todoist", "Todoist", "To-do lists"),
-        ("googletasks", "Google Tasks", "To-do lists"),
-        ("splitwise", "Splitwise", "Shared bills"),
-        ("eventbrite", "Eventbrite", "Events and tickets"),
-        ("ticketmaster", "Ticketmaster", "Concerts and shows"),
-        ("zoom", "Zoom", "Meetings"),
-        ("dropbox", "Dropbox", "Your files")
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Always present, so the load runs even while the list below is hidden.
-            Color.clear.frame(height: 0).task { await load() }
-            if available {
-                VStack(alignment: .leading, spacing: 0) {
-                    AppSectionHeader(title: "More apps")
-                        .padding(.bottom, 12)
-                    VStack(spacing: 0) {
-                        ForEach(Array(apps.enumerated()), id: \.element.slug) { index, app in
-                            row(app)
-                            if index < apps.count - 1 { AppDivider() }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .settingsSurface(radius: 18)
-                    if let message {
-                        Text(message)
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appMuted)
-                            .padding(.top, 8)
-                    }
-                }
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await load() } }
-        }
-    }
-
-    private func row(_ app: (slug: String, name: String, caption: String)) -> some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(app.name).font(.rowTitle).foregroundStyle(Color.appInk)
-                Text(app.caption).font(.rowSecondary).foregroundStyle(Color.appMuted)
-            }
-            Spacer(minLength: 8)
-            if connected.contains(app.slug) {
-                HStack(spacing: 6) {
-                    Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
-                    Text("Connected").font(.rowSecondary).foregroundStyle(Color.appSuccess)
-                }
-            } else if pending == app.slug {
-                ProgressView().scaleEffect(0.65).tint(Color.appMuted)
-            } else {
-                Button { Task { await connect(app.slug) } } label: {
-                    Text("Connect")
-                        .font(.appBody(14, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.white.opacity(0.06)))
-                }
-                .buttonStyle(.appScale(0.97))
-            }
-        }
-        .padding(.vertical, 14)
-        .frame(minHeight: 44)
-    }
-
-    private func load() async {
-        guard let data = try? await APIClient.shared.request(path: "/connectors/apps"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        let items = (json["connections"] as? [[String: Any]]) ?? []
-        await MainActor.run {
-            available = (json["configured"] as? Bool) == true
-            connected = Set(items.compactMap { ($0["connected"] as? Bool) == true ? $0["toolkit"] as? String : nil })
-            pending = nil
-        }
-    }
-
-    private func connect(_ slug: String) async {
-        await MainActor.run { pending = slug; message = nil }
-        do {
-            let data = try await APIClient.shared.request(path: "/connectors/apps/connect", method: "POST", body: ["toolkit": slug])
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let urlString = json["redirectUrl"] as? String, let url = URL(string: urlString) {
-                await MainActor.run { UIApplication.shared.open(url) }
-            } else {
-                await MainActor.run { pending = nil; message = "Couldn't open the sign-in page." }
-            }
-        } catch {
-            await MainActor.run { pending = nil; message = "Couldn't connect that app. Try again." }
-        }
-    }
-}

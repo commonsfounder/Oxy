@@ -195,6 +195,7 @@ private struct AdamYouView: View {
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Adam")
 
+#if DEBUG
                             Button { destination = .agents } label: {
                                 Text("Advanced")
                                     .font(.appBody(13))
@@ -203,6 +204,7 @@ private struct AdamYouView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+#endif
                         }
                         .frame(maxWidth: .infinity)
                     }
