@@ -118,9 +118,9 @@ struct YouPage: View {
                 TextField(
                     "",
                     text: $settings.userName,
-                    prompt: Text("Add your name").foregroundStyle(Color.appMuted)
+                    prompt: Text("Add your name").foregroundStyle(Color.appAccent)
                 )
-                .font(.appBody(26, weight: .bold))
+                .font(.appBody(24, weight: .semibold))
                 .foregroundStyle(Color.appInk)
                 .tint(Color.appAccent)
                 .multilineTextAlignment(.center)

@@ -50,43 +50,43 @@ struct ConnectorsView: View {
 
     private static let directory: [Section] = [
         Section(title: "Mail and calendar", entries: [
-            own("google", "Gmail and Calendar", "Read and answer your mail, and keep your diary straight"),
-            own("microsoft", "Outlook and Calendar", "Read and answer your mail, and keep your diary straight")
+            own("google", "Gmail and Calendar", "Mail and diary"),
+            own("microsoft", "Outlook and Calendar", "Mail and diary")
         ]),
         Section(title: "Messages", entries: [
-            own("telegram", "Telegram", "Message people for you"),
-            app("whatsapp", "WhatsApp", "Read and send messages")
+            own("telegram", "Telegram", "Message people"),
+            app("whatsapp", "WhatsApp", "Messages")
         ]),
         Section(title: "Photos and files", entries: [
-            app("googlephotos", "Google Photos", "Find and organise your photos"),
-            app("googledrive", "Google Drive", "Find and open your files"),
-            app("dropbox", "Dropbox", "Find and open your files")
+            app("googlephotos", "Google Photos", "Find your photos"),
+            app("googledrive", "Google Drive", "Find your files"),
+            app("dropbox", "Dropbox", "Find your files")
         ]),
         Section(title: "Plans and lists", entries: [
-            app("todoist", "Todoist", "Keep your to-do list"),
-            app("googletasks", "Google Tasks", "Keep your to-do list"),
-            own("notion", "Notion", "Save notes and pages"),
-            app("splitwise", "Splitwise", "Track shared bills"),
-            app("eventbrite", "Eventbrite", "Find events and tickets"),
-            app("ticketmaster", "Ticketmaster", "Find concerts and shows")
+            app("todoist", "Todoist", "Your to-do list"),
+            app("googletasks", "Google Tasks", "Your to-do list"),
+            own("notion", "Notion", "Save notes"),
+            app("splitwise", "Splitwise", "Shared bills"),
+            app("eventbrite", "Eventbrite", "Events and tickets"),
+            app("ticketmaster", "Ticketmaster", "Concerts and shows")
         ]),
         Section(title: "Health and fitness", entries: [
-            own("strava", "Strava", "See your runs and rides"),
-            own("oura", "Oura", "See your sleep and readiness")
+            own("strava", "Strava", "Runs and rides"),
+            own("oura", "Oura", "Sleep and readiness")
         ]),
         Section(title: "Video and social", entries: [
-            app("youtube", "YouTube", "Find videos and keep up with channels"),
+            app("youtube", "YouTube", "Videos and channels"),
             app("instagram", "Instagram", "Posts and messages"),
             app("facebook", "Facebook", "Pages and events"),
             app("pinterest", "Pinterest", "Boards and ideas"),
-            app("reddit", "Reddit", "Follow communities"),
+            app("reddit", "Reddit", "Communities"),
             app("discord", "Discord", "Servers and friends")
         ]),
         Section(title: "Work", entries: [
-            own("slack", "Slack", "Post messages for you"),
+            own("slack", "Slack", "Post for you"),
             app("zoom", "Zoom", "Your meetings"),
             // Only shown once connected: it is a developer tool.
-            own("github", "GitHub", "Your code and issues")
+            own("github", "GitHub", "Code and issues")
         ])
     ]
 
