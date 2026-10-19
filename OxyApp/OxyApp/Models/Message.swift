@@ -17,6 +17,8 @@ struct Message: Identifiable, Equatable {
     var sources: [MessageSource]
     /// Small JPEG/PNG preview of a photo the user sent. The full upload is not kept.
     var attachmentImage: Data?
+    /// A one-tap suggestion from Adam under this message ("Want a hand with a gift?").
+    var offer: MessageOffer?
 
     enum Role: String, Codable {
         case user
@@ -34,9 +36,11 @@ struct Message: Identifiable, Equatable {
         queuedForActiveTask: Bool = false,
         turnError: String? = nil,
         sources: [MessageSource] = [],
-        attachmentImage: Data? = nil
+        attachmentImage: Data? = nil,
+        offer: MessageOffer? = nil
     ) {
         self.attachmentImage = attachmentImage
+        self.offer = offer
         self.id = id
         self.dbId = dbId
         self.role = role
@@ -58,6 +62,7 @@ struct Message: Identifiable, Equatable {
             && lhs.actions == rhs.actions
             && lhs.sources == rhs.sources
             && lhs.attachmentImage == rhs.attachmentImage
+            && lhs.offer == rhs.offer
     }
 }
 
@@ -593,6 +598,7 @@ struct HistoryEntry: Codable, Identifiable {
     let actions: [ActionResult]?
     let sources: [MessageSource]?
     let image: String?
+    let offer: MessageOffer?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -601,12 +607,19 @@ struct HistoryEntry: Codable, Identifiable {
         case actions
         case sources
         case image
+        case offer
         case createdAt = "created_at"
     }
 
     var stableId: String {
         id ?? UUID().uuidString
     }
+}
+
+struct MessageOffer: Codable, Equatable {
+    let id: String
+    let yes: String
+    let prompt: String
 }
 
 struct HistoryResponse: Codable {

@@ -164,6 +164,7 @@ const travelSearch = require('./services/travel-search');
 const travelInventory = require('./services/travel-inventory');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
+const offers = require('./services/offers');
 const { raiseRecentActionFollowUp, recoverySnapshot } = require('./services/action-follow-up');
 const commitments = require('./services/commitments');
 const { normalizeHouseholdState, formatHouseholdState } = require('./services/household-state');
@@ -3486,6 +3487,7 @@ function serializeConversationContent(payload) {
   if (Array.isArray(payload.actions) && payload.actions.length) next.actions = payload.actions;
   if (typeof payload.audio === 'string') next.audio = payload.audio;
   if (typeof payload.kind === 'string') next.kind = payload.kind;
+  if (payload.offer && typeof payload.offer === 'object') next.offer = payload.offer;
   if (typeof payload.channel === 'string' && payload.channel.trim()) next.channel = payload.channel.trim();
 
   return Object.keys(next).length === 1 && typeof next.text === 'string'
@@ -3517,6 +3519,7 @@ function normalizeConversationRow(row) {
       actions,
       audio: typeof parsed.audio === 'string' ? parsed.audio : null,
       kind: typeof parsed.kind === 'string' ? parsed.kind : null,
+      offer: parsed.offer && typeof parsed.offer === 'object' ? parsed.offer : null,
       channel: typeof parsed.channel === 'string' ? parsed.channel : actionChannel
     };
   }
@@ -3527,6 +3530,7 @@ function normalizeConversationRow(row) {
     actions: [],
     audio: null,
     kind: null,
+    offer: null,
     channel: null
   };
 }
@@ -5921,10 +5925,40 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   });
 }
 
+// At most one offer a day: a sentence with a one-tap yes, built from real saved dates.
+async function maybeCreateOffer(userId, now = new Date()) {
+  const since = new Date(now.getTime() - 20 * 3600000).toISOString();
+  const { data: recent } = await supabase.from('notification_events').select('dedupe_key')
+    .eq('user_id', userId).eq('source_ref->>offer', 'true').gte('created_at', since).limit(1);
+  if (recent?.length) return null;
+  const [{ data: occasions }, { data: commitments }, { data: past }] = await Promise.all([
+    supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
+    supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
+    supabase.from('notification_events').select('source_ref').eq('user_id', userId).eq('source_ref->>offer', 'true').order('created_at', { ascending: false }).limit(200)
+  ]);
+  const alreadyOffered = new Set((past || []).map(row => row.source_ref?.offerId).filter(Boolean));
+  const offer = offers.chooseOffer({ occasions: occasions || [], commitments: commitments || [], now, alreadyOffered });
+  if (!offer) return null;
+  const queued = await notificationDelivery.raise(userId, {
+    category: 'other',
+    urgency: 'normal',
+    title: 'A thought from Adam',
+    body: offer.text,
+    dedupeKey: `offer:${offer.id}`,
+    sourceRef: { offer: true, offerId: offer.id }
+  });
+  if (queued?.created) {
+    await saveMessage(userId, 'assistant', { text: offer.text, kind: 'offer', offer: { id: offer.id, yes: offer.yes, prompt: offer.prompt } });
+    return offer;
+  }
+  return null;
+}
+
 function emptyProactiveSummary() {
   return {
     usersScanned: 0,
     briefings: 0,
+    offers: 0,
     failureFollowUps: 0,
     healthAlerts: 0,
     locationReminders: 0,
@@ -5939,12 +5973,14 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   summary.usersScanned = 1;
   try {
     const nativeContext = await getLatestNativeContext(userId);
-    const [briefing, followUp, contextWatchResult] = await Promise.all([
+    const [briefing, followUp, contextWatchResult, offer] = await Promise.all([
       maybeCreateIntervalBriefing(userId, now),
       maybeCreateFailedActionFollowUp(userId, now),
-      evaluateAndSurfaceContextWatches(userId, nativeContext || {}, now, logger)
+      evaluateAndSurfaceContextWatches(userId, nativeContext || {}, now, logger),
+      maybeCreateOffer(userId, now).catch(error => { logger.warn?.(`[offer] ${userId}: ${error.message}`); return null; })
     ]);
     if (briefing) summary.briefings += 1;
+    if (offer) summary.offers += 1;
     if (followUp) summary.failureFollowUps += 1;
     summary.healthAlerts += contextWatchResult?.healthRaised || 0;
     summary.locationReminders += contextWatchResult?.locationRaised || 0;

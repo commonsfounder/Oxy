@@ -17,9 +17,15 @@ struct MessageBubble: View {
     var reaction: String? = nil
 
     @State private var showReauthSheet = false
+    @State private var handledOffers: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "adam.offers.handled") ?? [])
     @State private var showMissingInformationSheet = false
 
     private var isUser: Bool { message.role == .user }
+
+    private func resolveOffer(_ offer: MessageOffer) {
+        handledOffers.insert(offer.id)
+        UserDefaults.standard.set(Array(handledOffers.suffix(200)), forKey: "adam.offers.handled")
+    }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
 
     /// Completed, renderable actions. Pending confirmations are handled by the
@@ -360,6 +366,29 @@ struct MessageBubble: View {
                     }
                 }
                 .padding(.top, 6)
+            }
+
+            if !isUser, let offer = message.offer, !handledOffers.contains(offer.id) {
+                HStack(spacing: 8) {
+                    Button(offer.yes) {
+                        resolveOffer(offer)
+                        onActionCommand?(offer.prompt)
+                    }
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appOnAction)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.appAction))
+                    .buttonStyle(.appScale)
+
+                    Button("Not now") { resolveOffer(offer) }
+                        .font(.appBody(14, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .buttonStyle(.appScale)
+                }
+                .padding(.top, 8)
             }
 
             // Sources

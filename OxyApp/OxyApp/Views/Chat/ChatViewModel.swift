@@ -874,7 +874,8 @@ final class ChatViewModel {
                 timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
                 actions: entry.actions ?? [],
                 sources: entry.sources ?? [],
-                attachmentImage: role == .user ? AttachmentTag.decodeDataURL(entry.image) : nil
+                attachmentImage: role == .user ? AttachmentTag.decodeDataURL(entry.image) : nil,
+                offer: entry.offer
             )
         }
     }

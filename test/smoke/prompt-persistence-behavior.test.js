@@ -229,3 +229,8 @@ test('"runtime"/"workflow" appear only in the pre-existing voice disclaimer (or 
   assert.equal(runtimeCount, 1, `expected exactly the voice-disclaimer's single "runtimes" — got ${runtimeCount}`);
   assert.equal(workflowCount, 1, `expected exactly the voice-disclaimer's single "workflows" — got ${workflowCount}`);
 });
+
+test('memory settles details quietly instead of being recited', () => {
+  assert.match(CORE_SYSTEM_PROMPT, /your usual\?/);
+  assert.match(CORE_SYSTEM_PROMPT, /never "on 3 Oct you ordered"/);
+});
