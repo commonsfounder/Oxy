@@ -3139,7 +3139,7 @@ async function getMemory(userId, trace = null, query = '') {
   const manualProfile = visibleRows.find(m => m.source === 'manual_profile')?.content?.trim();
 
   let facts = visibleRows
-    .filter(m => m.source !== 'manual_profile')
+    .filter(m => m.source !== 'manual_profile' && m.source !== 'photos')
     .map(m => ({ content: m.content, ts: m.created_at }));
 
   // Cream-of-crop: simple relevance boost for query (keyword + recency)
@@ -3910,7 +3910,7 @@ async function getUserContext(userId, trace = null) {
   const [connectors, memories, actionLog, delegatedTasks, knownPeople, nativeContext, openCommitments, activePlans] = trace
     ? await Promise.all([
       trace.run('supabase.user_context.connectors', () => supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true)),
-      trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)),
+      trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).neq('source', 'photos').order('created_at', { ascending: false }).limit(5)),
       trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)),
       trace.run('supabase.user_context.agent_tasks', () => supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6)),
       trace.run('supabase.user_context.participants', loadKnownPeople),
@@ -3920,7 +3920,7 @@ async function getUserContext(userId, trace = null) {
     ])
     : await Promise.all([
       supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
-      supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
+      supabase.from('memories').select('content').eq('user_id', userId).neq('source', 'photos').order('created_at', { ascending: false }).limit(5),
       supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8),
       supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6),
       loadKnownPeople(),
@@ -4682,6 +4682,27 @@ app.post('/memory', async (req, res) => {
     if (!isUsefulMemoryContent(content)) return res.status(400).json({ error: 'memory is too short or unclear.' });
     await saveMemory(userId, content.trim(), 'manual');
 
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// What the phone learned from the user's own photos: short notes only, never the pictures.
+app.post('/memory/photos', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json(await require('./services/photo-notes').saveNotes(supabase, userId, req.body?.notes));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.delete('/memory/photos', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    await require('./services/photo-notes').forgetAll(supabase, userId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

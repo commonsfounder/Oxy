@@ -687,6 +687,19 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  search_photos: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: [],
+    optional: ['query'],
+    inputExample: { query: 'council bill' },
+    paramHints: { query: 'a few words about what the user is looking for, such as a person, place or thing' },
+    guidance: 'Look through short notes Adam wrote about the user\'s own photos (letters, receipts, flyers, places, people). Use it when the user asks about something they might have photographed, or when you need personal context such as a gift idea or a date from a flyer. It only knows what the phone chose to share, so say so if nothing turns up.',
+    successSummary: 'Looked through your photos',
+    failureSummary: 'Could not look through your photos',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   forget_person_detail: {
     adapter: { kind: 'inline' },
     risk: 'low',
