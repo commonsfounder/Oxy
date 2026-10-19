@@ -35,7 +35,7 @@ struct ScreenHeaderView: View {
                 .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: onBack == nil ? 64 : nil, alignment: .topLeading)
         .padding(.horizontal, AppSpacing.margin)
         .padding(.top, 2)
         // Opaque, and extended up through the status-bar inset, so scrolled content

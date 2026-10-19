@@ -37,7 +37,7 @@ struct AutonomyDial: View {
                     .foregroundStyle(Color.appInk)
                 Text(levelLine)
                     .font(.appBody(13))
-                    .foregroundStyle(Color.appAccent)
+                    .foregroundStyle(Color.appMuted)
             }
             Slider(value: level, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
                 .tint(Color.appAccent)
@@ -59,6 +59,8 @@ struct PrivacyContent: View {
     @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
     @State private var photoAccessDenied = false
     @State private var confirmsForgetPhotos = false
+    @State private var photoStatus = UserDefaults.standard.string(forKey: PhotoLearner.statusKey) ?? "Not scanned yet."
+    @State private var isScanning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -99,6 +101,16 @@ struct PrivacyContent: View {
                     )
                     if photoLearningEnabled {
                         SettingsRule()
+                        SettingsRow(title: "Scan now", subtitle: isScanning ? "Looking through your photos…" : photoStatus, action: {
+                            guard !isScanning else { return }
+                            isScanning = true
+                            Task {
+                                await PhotoLearner.shared.run()
+                                photoStatus = UserDefaults.standard.string(forKey: PhotoLearner.statusKey) ?? "Done."
+                                isScanning = false
+                            }
+                        })
+                        SettingsRule()
                         SettingsNavRow(title: "Forget what Adam learned from photos") { confirmsForgetPhotos = true }
                     }
                 }
@@ -136,8 +148,8 @@ struct PrivacyContent: View {
     private func permission(_ title: String, answer: String, solid: Bool) -> some View {
         SettingsRow(title: title, lead: .dot(solid: solid)) {
             Text(answer)
-                .font(.appBody(14))
-                .foregroundStyle(Color.appMuted)
+                .font(.appBody(13))
+                .foregroundStyle(Color.appMuted.opacity(0.85))
         }
     }
 }

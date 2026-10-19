@@ -272,7 +272,7 @@ struct PreferencesContent: View {
                         } label: {
                             VStack(spacing: 10) {
                                 Circle()
-                                    .fill(option.swatch)
+                                    .fill(option == .automatic ? AnyShapeStyle(LinearGradient(stops: [.init(color: Color(red: 0.96, green: 0.98, blue: 0.99), location: 0.5), .init(color: Color(red: 0.06, green: 0.09, blue: 0.13), location: 0.5)], startPoint: .leading, endPoint: .trailing)) : AnyShapeStyle(option.swatch))
                                     .frame(width: 54, height: 54)
                                     .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
                                     .overlay(

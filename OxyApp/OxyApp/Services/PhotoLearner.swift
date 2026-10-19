@@ -10,11 +10,20 @@ import UIKit
 final class PhotoLearner {
     static let shared = PhotoLearner()
     static let enabledKey = "adam.photoLearning.enabled"
+    static let statusKey = "adam.photoLearning.status"
     private static let doneKey = "adam.photoLearning.done"
     private static let perRun = 80
     private static let batch = 20
 
     private var isRunning = false
+    private var sentNotes = 0
+    private var failedSends = 0
+    private var looked = 0
+
+    private static func record(_ text: String) {
+        let stamp = Date().formatted(date: .omitted, time: .shortened)
+        UserDefaults.standard.set("\(text) (\(stamp))", forKey: statusKey)
+    }
     private let geocoder = CLGeocoder()
     private var placeCache: [String: String] = [:]
 
@@ -37,9 +46,15 @@ final class PhotoLearner {
     func run() async {
         guard !isRunning else { return }
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else { return }
+        guard status == .authorized || status == .limited else {
+            Self.record("Photo access is off. Turn it on in the Settings app.")
+            return
+        }
         isRunning = true
         defer { isRunning = false }
+        sentNotes = 0
+        failedSends = 0
+        looked = 0
 
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -55,6 +70,7 @@ final class PhotoLearner {
             let asset = assets.object(at: index)
             if seen.contains(asset.localIdentifier) { continue }
             handled += 1
+            looked += 1
             seen.insert(asset.localIdentifier)
             guard let image = await loadImage(asset) else { continue }
             let text = await describe(image, asset: asset)
@@ -66,6 +82,13 @@ final class PhotoLearner {
         }
         if !pending.isEmpty { await send(pending) }
         done = seen
+        if failedSends > 0 {
+            Self.record("Couldn't send some notes. Try Scan now again.")
+        } else if looked == 0 {
+            Self.record("Nothing new to look at.")
+        } else {
+            Self.record("Looked at \(looked) photos and kept \(sentNotes) notes.")
+        }
     }
 
     func forgetEverything() async {
@@ -74,7 +97,12 @@ final class PhotoLearner {
     }
 
     private func send(_ notes: [[String: Any]]) async {
-        _ = try? await APIClient.shared.request(path: "/memory/photos", method: "POST", body: ["notes": notes])
+        do {
+            _ = try await APIClient.shared.request(path: "/memory/photos", method: "POST", body: ["notes": notes])
+            sentNotes += notes.count
+        } catch {
+            failedSends += 1
+        }
     }
 
     /// A small copy of the photo, only if it is already on the phone (nothing is downloaded from iCloud).

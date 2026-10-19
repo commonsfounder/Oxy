@@ -933,11 +933,11 @@ struct SettingsToggle: View {
             withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.appAccent : Color.appToggleOff)
+                .fill(isOn ? Color.appAccent : Color.appAdaptive(dark: .white, light: .black).opacity(0.16))
                 .frame(width: 51, height: 31)
                 .overlay(
                     Circle()
-                        .fill(Color.white)
+                        .fill(isOn ? Color.white : Color.appAdaptive(dark: .white.opacity(0.72), light: .white))
                         .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
                         .frame(width: 27, height: 27)
                         .padding(2)
@@ -987,8 +987,8 @@ struct AppDropdown: View {
             }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(Capsule().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.06)))
-            .contentShape(Capsule())
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityValue(current)
     }

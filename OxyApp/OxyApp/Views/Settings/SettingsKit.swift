@@ -135,8 +135,8 @@ struct SettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             if let title {
                 Text(title)
-                    .font(.appBody(13, weight: .medium))
-                    .foregroundStyle(Color.appMuted)
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appInk.opacity(0.62))
                     .padding(.horizontal, 4)
                     .accessibilityAddTraits(.isHeader)
             }
@@ -216,7 +216,7 @@ struct SettingsRow<Trailing: View>: View {
             trailing
         }
         .padding(.vertical, 8)
-        .frame(minHeight: subtitle == nil ? 44 : 52)
+        .frame(minHeight: 52)
         .contentShape(Rectangle())
     }
 }
