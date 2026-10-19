@@ -246,8 +246,8 @@ struct HomeAddressPage: View {
     }
 }
 
-/// Look and feel, notifications and the maps app. Everything else Adam learns.
-struct PreferencesPage: View {
+/// Look and feel, notifications and the maps app. Sits inline on the Settings screen.
+struct PreferencesContent: View {
     @Environment(AppState.self) private var appState
     @AppStorage(HouseholdSoundMonitor.preferenceKey) private var soundAwarenessEnabled = false
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
@@ -258,7 +258,7 @@ struct PreferencesPage: View {
     @State private var showsSoundClips = false
 
     var body: some View {
-        SettingsPage(title: "Preferences") {
+        VStack(alignment: .leading, spacing: 20) {
             SettingsList {
                 SettingsNavRow(title: "Your wheel", subtitle: "Choose what's in reach") { showsWheelEditor = true }
             }

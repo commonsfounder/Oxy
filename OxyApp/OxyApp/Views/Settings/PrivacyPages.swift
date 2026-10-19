@@ -52,7 +52,8 @@ struct AutonomyDial: View {
 
 // MARK: - Permissions
 
-struct PermissionsPage: View {
+/// What Adam may do on its own. Sits inline on the Settings screen.
+struct PrivacyContent: View {
     @Environment(AppState.self) private var appState
     @State private var settings = SettingsStore.load()
     @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
@@ -60,7 +61,7 @@ struct PermissionsPage: View {
     @State private var confirmsForgetPhotos = false
 
     var body: some View {
-        SettingsPage(title: "Privacy and control", isRoot: true) {
+        VStack(alignment: .leading, spacing: 20) {
             AutonomyDial()
 
             SettingsGroup(title: "What Adam may do") {

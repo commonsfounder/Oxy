@@ -149,29 +149,23 @@ private struct AdamYouView: View {
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     private enum Destination: String, Identifiable {
-        case you, apps, privacy, preferences, account, agents
+        case you, apps, account, agents
         var id: String { rawValue }
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-            Color.appBackground.ignoresSafeArea()
-            VStack(spacing: 0) {
-                ScreenHeaderView(title: "Settings")
-                Spacer(minLength: 0)
-                VStack(alignment: .leading, spacing: 20) {
+            SettingsPage(title: "Settings", isRoot: true) {
                 SettingsList {
                     youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
                     SettingsRule(inset: 34)
                     youRow(title: "Apps", subtitle: appsStatus, icon: "cube") { destination = .apps }
                     SettingsRule(inset: 34)
-                    youRow(title: "Privacy and control", subtitle: "What Adam may do on its own", icon: "shield-check") { destination = .privacy }
-                    SettingsRule(inset: 34)
-                    youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
-                    SettingsRule(inset: 34)
                     youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Your account and data", icon: "envelope") { destination = .account }
                 }
+
+                SettingsGroup(title: "Privacy and control") { PrivacyContent() }
+                SettingsGroup(title: "Preferences") { PreferencesContent() }
 
                 VStack(spacing: 6) {
                     Button {
@@ -201,11 +195,6 @@ private struct AdamYouView: View {
                     #endif
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.top, 14)
-            }
-                .padding(.horizontal, AppSpacing.margin)
-                .padding(.bottom, 20)
-            }
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showBackendURLEditor) {
@@ -270,8 +259,6 @@ private struct AdamYouView: View {
         switch item {
         case .you: YouPage()
         case .apps: ConnectorsView()
-        case .privacy: PermissionsPage()
-        case .preferences: PreferencesPage()
         case .account: ProfileView()
         case .agents: ModelRoutingView()
         }
