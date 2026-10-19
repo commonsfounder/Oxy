@@ -50,7 +50,7 @@ test('the outbound digest still admits what it could not check', () => {
     items: [{ urgency: 'today', title: 'A thing', detail: 'A thing — due today', ref: {} }],
     coverage: { gmail: { ok: false, reason: 'the mailbox was unreachable' } }
   });
-  assert.match(shaped.body, /could not check gmail/i);
+  assert.match(shaped.body, /couldn't check your gmail/i);
 });
 
 test('the digest declares what it covers so nothing arrives twice', () => {
@@ -278,7 +278,8 @@ test('a source that could not be checked is admitted, not silently dropped', () 
     now: NOW,
     coverage: { email: { ok: false, reason: 'Gmail is not connected' } }
   });
-  assert.match(digest.text, /could not check email \(Gmail is not connected\)/);
+  assert.match(digest.text, /couldn't check your email/);
+  assert.match(digest.text, /Reconnect it under Connections/);
   assert.match(digest.text, /may be incomplete/);
 });
 

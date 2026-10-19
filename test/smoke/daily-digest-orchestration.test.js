@@ -128,7 +128,7 @@ test('a source that genuinely could not be checked is reported honestly', async 
   assert.equal(result.success, true);
   assert.equal(result.coverage.email.ok, false);
   assert.ok(result.coverage.email.reason, 'a failed source must carry a real reason');
-  assert.match(result.text, /could not check email/);
+  assert.match(result.text, /couldn't check your email/);
 });
 
 test('focus:"urgent" and focus:"can_wait" split the same live digest', async () => {

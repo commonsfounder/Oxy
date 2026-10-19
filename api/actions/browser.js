@@ -419,7 +419,7 @@ async function webSearchAction({ userId, action, params, enrichedParams, context
   try {
     const answer = await webSearchBrain({
       model: FAST_MODEL,
-      prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Include key options, prices, and links where available. Only report what the search results support — if results look older than today, say so instead of guessing. Plain prose, no markdown headings or asterisks.`
+      prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`
     });
     if (!answer) return { success: false, error: `Search for "${q}" returned no results.` };
     return { success: true, text: answer, query: q };

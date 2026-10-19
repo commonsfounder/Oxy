@@ -353,12 +353,15 @@ function buildDailyDigest({
 
 // Honest about what was actually checked. A digest that says "nothing needs you" while
 // Gmail was unreachable is a lie by omission — the user would act on it.
+const SOURCE_NAMES = { google: 'your Gmail and calendar', gmail: 'your Gmail', email: 'your email', calendar: 'your calendar', microsoft: 'your Outlook and calendar' };
+const NOT_CONNECTED = /disconnect|not connected|not authori[sz]ed|expired|revoked|reconnect/i;
+
 function describeGaps(coverage = {}) {
-  const gaps = Object.entries(coverage)
-    .filter(([, value]) => value && value.ok === false && value.reason)
-    .map(([source, value]) => `${source} (${clean(value.reason, 120)})`);
+  const gaps = Object.entries(coverage).filter(([, value]) => value && value.ok === false && value.reason);
   if (!gaps.length) return '';
-  return ` I could not check ${gaps.join(', ')}, so this may be incomplete.`;
+  const names = gaps.map(([source]) => SOURCE_NAMES[source] || source);
+  const reconnect = gaps.some(([, value]) => NOT_CONNECTED.test(String(value.reason)));
+  return ` I couldn't check ${names.join(' or ')}, so this may be incomplete.${reconnect ? ' Reconnect it under Connections.' : ''}`;
 }
 
 function formatDigest(items = [], { focus = 'all', coverage = {}, hidden = 0 } = {}) {
