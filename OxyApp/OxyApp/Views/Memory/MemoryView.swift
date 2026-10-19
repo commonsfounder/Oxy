@@ -88,8 +88,9 @@ struct MemoryView: View {
                         HStack {
                             SettingsSectionHeader(title: "What Adam knows")
                             Spacer()
-                            if !items.isEmpty {
-                                Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
+                            if items.contains(where: { $0.source != "photos" }) {
+                                let own = items.filter { $0.source != "photos" }.count
+                                Text(own == 1 ? "1 memory" : "\(own) memories")
                                     .font(.appBody(13))
                                     .foregroundStyle(Color.appMuted)
                                     .contentTransition(.numericText())
@@ -155,6 +156,29 @@ struct MemoryView: View {
                         }
                     }
 
+                    if photoNoteCount > 0, search.trimmingCharacters(in: .whitespaces).isEmpty {
+                        HStack {
+                            Text("From your photos")
+                                .font(.appBody(15, weight: .medium))
+                                .foregroundStyle(Color.appInk)
+                            Spacer()
+                            Text(photoNoteCount == 1 ? "1 note" : "\(photoNoteCount) notes")
+                                .font(.appBody(13))
+                                .foregroundStyle(Color.appMuted)
+                        }
+                        .padding(.top, 26)
+                        .padding(.bottom, 4)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        Text("Adam looks these up when you ask about a photo. Turn this off in Settings, Privacy and control.")
+                            .font(.appBody(12))
+                            .foregroundStyle(Color.appMuted)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+
                     if !groupedItems.isEmpty, search.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button {
                             HapticManager.shared.impact(.light)
@@ -210,11 +234,15 @@ struct MemoryView: View {
 
     // Group memories into a few buckets so the screen reads as curated
     // index rather than one long flat list. "Notes" is the catch-all — nothing is lost.
+    private var photoNoteCount: Int { items.filter { $0.source == "photos" }.count }
+
     private var groupedItems: [(title: String, items: [MemoryItem])] {
         let query = search.trimmingCharacters(in: .whitespaces)
+        // Notes from photos have their own summary line; hundreds of them would bury what you told Adam.
+        let own = items.filter { $0.source != "photos" }
         let visible = query.isEmpty
-            ? items
-            : items.filter { $0.content.localizedCaseInsensitiveContains(query) }
+            ? own
+            : own.filter { $0.content.localizedCaseInsensitiveContains(query) }
         let order = ["About you", "How Adam works for you", "People", "Plans"]
         let grouped = Dictionary(grouping: visible, by: { $0.category })
         return order.compactMap { title in

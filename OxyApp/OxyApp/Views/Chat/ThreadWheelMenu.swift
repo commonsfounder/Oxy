@@ -364,7 +364,7 @@ private struct WheelItem: View, Animatable {
         set { angle = newValue.first; heldMix = newValue.second }
     }
 
-    private let radius: CGFloat = 180
+    private let radius: CGFloat = 214
     private let swing: Double = 70
     private var step: Double { ThreadWheelMenu.step }
     private var firstAngle: Double { ThreadWheelMenu.firstAngle }

@@ -56,6 +56,9 @@ final class APIClient: @unchecked Sendable {
         body: [String: Any]? = nil,
         queryItems: [URLQueryItem]? = nil
     ) async throws -> Data {
+        #if DEBUG
+        if let preview = PreviewData.response(path: path, method: method) { return preview }
+        #endif
         guard var components = URLComponents(string: "\(baseURL)\(path)") else {
             throw APIError.invalidURL
         }
