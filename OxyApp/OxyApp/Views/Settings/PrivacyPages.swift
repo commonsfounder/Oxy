@@ -55,10 +55,16 @@ struct AutonomyDial: View {
 struct PermissionsPage: View {
     @Environment(AppState.self) private var appState
     @State private var settings = SettingsStore.load()
+    @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
+    @State private var photoAccessDenied = false
+    @State private var confirmsForgetPhotos = false
 
     var body: some View {
-        SettingsPage(title: "Permissions") {
-            SettingsList {
+        SettingsPage(title: "Privacy and control", isRoot: true) {
+            AutonomyDial()
+
+            SettingsGroup(title: "What Adam may do") {
+              SettingsList {
                 permission("Look things up for you", answer: "On its own", solid: true)
                 SettingsRule(inset: 34)
                 permission("Make changes", answer: settings.guardMode ? "Asks first" : "Asks when it matters", solid: false)
@@ -72,6 +78,7 @@ struct PermissionsPage: View {
                     answer: settings.confirmSensitiveAppOpens ? "Asks first" : "On its own",
                     solid: !settings.confirmSensitiveAppOpens
                 )
+              }
             }
 
             SettingsGroup(title: "Extra checks") {
@@ -81,6 +88,45 @@ struct PermissionsPage: View {
                     SettingsToggleRow(title: "Ask before opening private apps", subtitle: "Like banking and health", isOn: $settings.confirmSensitiveAppOpens)
                 }
             }
+
+            SettingsGroup(title: "Photos") {
+                SettingsList {
+                    SettingsToggleRow(
+                        title: "Learn from my photos",
+                        subtitle: "Adam reads your photos on this iPhone and remembers short notes. The pictures never leave your phone",
+                        isOn: $photoLearningEnabled
+                    )
+                    if photoLearningEnabled {
+                        SettingsRule()
+                        SettingsNavRow(title: "Forget what Adam learned from photos") { confirmsForgetPhotos = true }
+                    }
+                }
+                if photoAccessDenied {
+                    Text("Allow photo access in the Settings app, then switch this on again.")
+                        .font(.appBody(12))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+        }
+        .onChange(of: photoLearningEnabled) { _, enabled in
+            guard enabled else { return }
+            Task {
+                if await PhotoLearner.shared.requestAccess() {
+                    photoAccessDenied = false
+                    await PhotoLearner.shared.run()
+                } else {
+                    photoLearningEnabled = false
+                    photoAccessDenied = true
+                }
+            }
+        }
+        .confirmationDialog("Forget what Adam learned from your photos?", isPresented: $confirmsForgetPhotos, titleVisibility: .visible) {
+            Button("Forget it all", role: .destructive) {
+                Task { await PhotoLearner.shared.forgetEverything() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The notes are deleted. Your photos are not touched.")
         }
         .onChange(of: settings.guardMode) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in SettingsStore.save(settings, userId: appState.userId) }

@@ -246,77 +246,6 @@ struct HomeAddressPage: View {
     }
 }
 
-/// What Adam is connected to, then the places to manage it.
-struct ConnectionsPage: View {
-    @Environment(AppState.self) private var appState
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var model = SettingsContextModel()
-    @State private var destination: Destination?
-
-    private enum Destination: Identifiable {
-        case apps, displays, payments, logins, permissions
-        var id: String { "\(self)" }
-    }
-
-    private var connected: [String] { model.context?.connectedApps ?? [] }
-
-    var body: some View {
-        SettingsPage(title: "Connections") {
-            VStack(alignment: .leading, spacing: 14) {
-                if connected.isEmpty {
-                    Text(model.isLoading ? " " : "Nothing connected yet")
-                        .font(.appBody(20, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                    Text("Connect mail or a calendar and Adam can start helping.")
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
-                } else {
-                    Text("Adam can use")
-                        .font(.appBody(13, weight: .medium))
-                        .foregroundStyle(Color.appMuted)
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(connected, id: \.self) { name in
-                            SettingsStatement(text: name)
-                        }
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .settingsSurface(radius: 20)
-
-            SettingsList {
-                SettingsNavRow(title: "Apps", subtitle: "Mail, calendar, messages and more", lead: .icon("cube")) { destination = .apps }
-                SettingsRule(inset: 34)
-                SettingsNavRow(title: "Displays", subtitle: "Screens Adam can show things on", lead: .icon("photo")) { destination = .displays }
-                SettingsRule(inset: 34)
-                SettingsNavRow(title: "Payment methods", lead: .icon("card")) { destination = .payments }
-                SettingsRule(inset: 34)
-                SettingsNavRow(title: "Saved logins", lead: .icon("person-check")) { destination = .logins }
-            }
-
-            SettingsList {
-                SettingsNavRow(title: "Permissions", subtitle: "What Adam does on its own", lead: .icon("shield-check")) { destination = .permissions }
-            }
-        }
-        .task { await model.load(isDemo: appState.isDemoSession) }
-        .fullScreenCover(item: $destination) { dest in
-            Group {
-                switch dest {
-                case .apps: ConnectorsView()
-                case .displays: PairedDisplaysView()
-                case .payments: PaymentsView()
-                case .logins: VaultView()
-                case .permissions: PermissionsPage()
-                }
-            }
-            .swipeToDismiss()
-            .environment(\.revealClose, nil)
-            .environment(\.colorScheme, colorScheme)
-        }
-    }
-}
-
 /// Look and feel, notifications and the maps app. Everything else Adam learns.
 struct PreferencesPage: View {
     @Environment(AppState.self) private var appState
@@ -327,14 +256,9 @@ struct PreferencesPage: View {
     @State private var settings = SettingsStore.load()
     @State private var showsWheelEditor = false
     @State private var showsSoundClips = false
-    @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
-    @State private var photoAccessDenied = false
-    @State private var confirmsForgetPhotos = false
 
     var body: some View {
         SettingsPage(title: "Preferences") {
-            AutonomyDial()
-
             SettingsList {
                 SettingsNavRow(title: "Your wheel", subtitle: "Choose what's in reach") { showsWheelEditor = true }
             }
@@ -386,25 +310,6 @@ struct PreferencesPage: View {
                 )
             }
 
-            SettingsGroup(title: "Photos") {
-                SettingsList {
-                    SettingsToggleRow(
-                        title: "Learn from my photos",
-                        subtitle: "Adam reads your photos on this iPhone and remembers short notes. The pictures never leave your phone",
-                        isOn: $photoLearningEnabled
-                    )
-                    if photoLearningEnabled {
-                        SettingsRule()
-                        SettingsNavRow(title: "Forget what Adam learned from photos") { confirmsForgetPhotos = true }
-                    }
-                }
-                if photoAccessDenied {
-                    Text("Allow photo access in the Settings app, then switch this on again.")
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
-                }
-            }
-
             SettingsGroup(title: "Notifications") {
                 SettingsList {
                     SettingsToggleRow(title: "Arriving and leaving", isOn: $settings.locationReminders)
@@ -437,26 +342,6 @@ struct PreferencesPage: View {
         .onChange(of: settings.preferredMapsApp) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.locationReminders) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.proactiveBriefings) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
-        .onChange(of: photoLearningEnabled) { _, enabled in
-            guard enabled else { return }
-            Task {
-                if await PhotoLearner.shared.requestAccess() {
-                    photoAccessDenied = false
-                    await PhotoLearner.shared.run()
-                } else {
-                    photoLearningEnabled = false
-                    photoAccessDenied = true
-                }
-            }
-        }
-        .confirmationDialog("Forget what Adam learned from your photos?", isPresented: $confirmsForgetPhotos, titleVisibility: .visible) {
-            Button("Forget it all", role: .destructive) {
-                Task { await PhotoLearner.shared.forgetEverything() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The notes are deleted. Your photos are not touched.")
-        }
         .onChange(of: soundAwarenessEnabled) { _, enabled in
             Task { await HouseholdSoundMonitor.shared.setEnabled(enabled, userId: appState.userId) }
         }

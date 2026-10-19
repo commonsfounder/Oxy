@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the wheel can open. The first four, in the saved order, sit on the arc; the rest are a spin away.
 enum ThreadMenuChoice: String, CaseIterable, Identifiable {
-    case activity, home, memory, settings, privateChat, apps, payments, logins, displays, environment
+    case activity, memory, apps, settings, home, privateChat
 
     var id: String { rawValue }
 
@@ -13,17 +13,13 @@ enum ThreadMenuChoice: String, CaseIterable, Identifiable {
         case .memory: return "Memory"
         case .settings: return "Settings"
         case .privateChat: return "Private mode"
-        case .apps: return "Connections"
-        case .payments: return "Payment methods"
-        case .logins: return "Saved logins"
-        case .displays: return "Displays"
-        case .environment: return "Workspace"
+        case .apps: return "Apps"
         }
     }
 
     /// How many items rest on the arc without spinning.
     static let reachable = 4
-    static let orderKey = "adam_wheel_order"
+    static let orderKey = "adam_wheel_order_v2"
 
     /// The saved order, with anything new appended so a fresh item never goes missing.
     static func ordered(from raw: String) -> [ThreadMenuChoice] {
@@ -51,10 +47,6 @@ private struct WheelGlyph: View {
             case .settings: AppIcon("list", size: size)
             case .privateChat: GhostIcon(active: active).frame(width: size, height: size)
             case .apps: AppIcon("bolt", size: size)
-            case .payments: AppIcon("card", size: size)
-            case .logins: AppIcon("person-check", size: size)
-            case .displays: AppIcon("photo", size: size)
-            case .environment: AppIcon("box", size: size)
             }
         }
     }

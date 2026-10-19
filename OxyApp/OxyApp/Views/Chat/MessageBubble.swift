@@ -76,6 +76,11 @@ struct MessageBubble: View {
     /// A task hit a login wall it can't get past on its own — offers a sign-in sheet that
     /// posts straight to POST /browser-task/reauth-login instead of resending chat text
     /// (which would just re-hit the same wall; see api/index.js's `reauth` case).
+    /// An app Adam needed but could not use: offers to connect it right here.
+    private var connectOfferAction: ActionResult? {
+        completedActions.first { $0.isFailure && $0.recoveryAction?.type == "open_connector_settings" && $0.connectorId != nil }
+    }
+
     private var reauthAction: ActionResult? {
         completedActions.first { $0.isFailure && $0.recoveryAction?.type == "reauth_login" }
     }
@@ -275,6 +280,10 @@ struct MessageBubble: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(recovery.recoveryAction?.label ?? "Keep going")
+                    }
+
+                    if let offer = connectOfferAction, let connectorId = offer.connectorId {
+                        ConnectOfferCard(connectorId: connectorId, reconnect: offer.healthStatus == "needs_reconnect")
                     }
 
                     if let reauth = reauthAction, let site = reauth.recoveryAction?.site {
@@ -1395,5 +1404,78 @@ private struct MemoryNote: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+
+/// "Connect Gmail and Calendar": appears under a reply that could not finish because an app was not connected.
+private struct ConnectOfferCard: View {
+    let connectorId: String
+    var reconnect: Bool
+    @Environment(AppState.self) private var appState
+    @State private var working = false
+    @State private var note: String?
+
+    private var name: String {
+        switch connectorId {
+        case "google": return "Gmail and Calendar"
+        case "microsoft": return "Outlook and Calendar"
+        case "telegram": return "Telegram"
+        case "notion": return "Notion"
+        case "slack": return "Slack"
+        case "strava": return "Strava"
+        case "oura": return "Oura"
+        case "github": return "GitHub"
+        default: return connectorId.capitalized
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task { await connect() }
+            } label: {
+                HStack(spacing: 8) {
+                    if working { ProgressView().scaleEffect(0.7) }
+                    Text(reconnect ? "Reconnect \(name)" : "Connect \(name)")
+                        .font(.appBody(14, weight: .semibold))
+                }
+                .foregroundStyle(Color.appInk)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.appSurface.opacity(0.84), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.7))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.appScale(0.97))
+            .disabled(working)
+            if let note {
+                Text(note).font(.appBody(12)).foregroundStyle(Color.appMuted)
+            }
+        }
+    }
+
+    private func connect() async {
+        working = true
+        note = nil
+        defer { working = false }
+        do {
+            if connectorId == "google" || connectorId == "microsoft" {
+                let data = try await APIClient.shared.request(path: "/auth/\(connectorId)/start", queryItems: [URLQueryItem(name: "userId", value: appState.userId)])
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let text = json["url"] as? String, let url = URL(string: text) {
+                    await UIApplication.shared.open(url)
+                    note = "Finish signing in, then ask again."
+                } else {
+                    note = "Couldn't open the sign-in page."
+                }
+            } else {
+                _ = try await APIClient.shared.request(path: "/connectors", method: "POST", body: ["userId": appState.userId, "connectorId": connectorId, "enabled": true])
+                note = "Connected. Ask again."
+            }
+        } catch {
+            note = "Couldn't connect. Try again from Apps."
+        }
     }
 }

@@ -15,6 +15,13 @@ struct ConnectorsView: View {
     @State private var isLoading = true
     @State private var message: String?
     @State private var manage: Entry?
+    @State private var place: Place?
+    @Environment(\.colorScheme) private var colorScheme
+
+    private enum Place: Identifiable {
+        case displays, payments, logins
+        var id: String { "\(self)" }
+    }
 
     private let oauthProviders: Set<String> = ["google", "microsoft"]
 
@@ -119,7 +126,7 @@ struct ConnectorsView: View {
     // MARK: Body
 
     var body: some View {
-        SettingsPage(title: "Apps") {
+        SettingsPage(title: "Apps", isRoot: true) {
             if isLoading {
                 VStack(spacing: 12) {
                     OxySkeletonCard(height: 92)
@@ -146,10 +153,32 @@ struct ConnectorsView: View {
                     }
                 }
 
+                SettingsGroup(title: "Devices and payments") {
+                    SettingsList {
+                        SettingsNavRow(title: "Displays", subtitle: "Screens Adam can show things on") { place = .displays }
+                        SettingsRule()
+                        SettingsNavRow(title: "Payment methods", subtitle: "The card Adam checks out with") { place = .payments }
+                        SettingsRule()
+                        SettingsNavRow(title: "Saved logins", subtitle: "Sign-ins Adam can use for you") { place = .logins }
+                    }
+                }
+
                 Text("You can disconnect an app at any time.")
                     .font(.appBody(12))
                     .foregroundStyle(Color.appMuted)
             }
+        }
+        .fullScreenCover(item: $place) { destination in
+            Group {
+                switch destination {
+                case .displays: PairedDisplaysView()
+                case .payments: PaymentsView()
+                case .logins: VaultView()
+                }
+            }
+            .swipeToDismiss()
+            .environment(\.revealClose, nil)
+            .environment(\.colorScheme, colorScheme)
         }
         .task { await load() }
         .refreshable { await load() }

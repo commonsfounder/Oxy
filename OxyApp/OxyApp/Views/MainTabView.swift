@@ -49,10 +49,6 @@ struct MainTabView: View {
                     case .home: YourHomeView()
                     case .memory: MemoryView()
                     case .apps: ConnectorsView()
-                    case .payments: PaymentsView()
-                    case .logins: VaultView()
-                    case .displays: PairedDisplaysView()
-                    case .environment: AgentEnvironmentView()
                     case .settings, .privateChat: AdamYouView()
                     }
                 }
@@ -153,7 +149,7 @@ private struct AdamYouView: View {
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     private enum Destination: String, Identifiable {
-        case you, connections, preferences, account, agents
+        case you, apps, privacy, preferences, account, agents
         var id: String { rawValue }
     }
 
@@ -170,7 +166,9 @@ private struct AdamYouView: View {
                         SettingsList {
                             youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
                             SettingsRule(inset: 34)
-                            youRow(title: "Connections", subtitle: connectionsStatus, icon: "cube") { destination = .connections }
+                            youRow(title: "Apps", subtitle: connectionsStatus, icon: "cube") { destination = .apps }
+                            SettingsRule(inset: 34)
+                            youRow(title: "Privacy and control", subtitle: "What Adam may do on its own", icon: "shield-check") { destination = .privacy }
                             SettingsRule(inset: 34)
                             youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
                             SettingsRule(inset: 34)
@@ -252,7 +250,7 @@ private struct AdamYouView: View {
     private var connectionsStatus: String {
         let apps = contextModel.context?.connectedApps ?? []
         switch apps.count {
-        case 0: return "Apps, displays and payments"
+        case 0: return "Mail, photos, lists and more"
         case 1...3: return apps.joined(separator: ", ")
         default: return "\(apps.count) connected"
         }
@@ -262,7 +260,8 @@ private struct AdamYouView: View {
     private func destinationView(_ item: Destination) -> some View {
         switch item {
         case .you: YouPage()
-        case .connections: ConnectionsPage()
+        case .apps: ConnectorsView()
+        case .privacy: PermissionsPage()
         case .preferences: PreferencesPage()
         case .account: ProfileView()
         case .agents: ModelRoutingView()
