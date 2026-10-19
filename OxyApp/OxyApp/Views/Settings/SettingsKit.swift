@@ -352,7 +352,7 @@ struct OrbitPortrait: View {
     private func label(for satellite: Satellite, angle: CGFloat) -> some View {
         let cosine = cos(angle)
         let side: Alignment = abs(cosine) < 0.25 ? .center : (cosine > 0 ? .leading : .trailing)
-        return Text(satellite.known ? "\(satellite.label)  \(satellite.count)" : satellite.label)
+        return Text(satellite.label)
             .font(.appBody(12, weight: satellite.known ? .medium : .regular))
             .foregroundStyle(satellite.known ? Color.appInk : Color.appMuted)
             .lineLimit(1)
