@@ -5,7 +5,7 @@
 
 const SOURCE = 'photos';
 const MAX_BATCH = 40;
-const MAX_NOTE = 240;
+const MAX_NOTE = 420;
 const MAX_STORED = 300;
 
 // Long digit runs (cards, account and phone numbers) are blanked before anything is stored.

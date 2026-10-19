@@ -12,7 +12,7 @@ final class PhotoLearner {
     static let enabledKey = "adam.photoLearning.enabled"
     static let statusKey = "adam.photoLearning.status"
     private static let doneKey = "adam.photoLearning.done"
-    private static let perRun = 80
+    private static let perRun = 250
     private static let batch = 20
 
     private var isRunning = false
@@ -59,7 +59,7 @@ final class PhotoLearner {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        options.fetchLimit = 600
+        options.fetchLimit = 3000
         let assets = PHAsset.fetchAssets(with: options)
 
         var seen = done
@@ -142,7 +142,7 @@ final class PhotoLearner {
         var parts: [String] = []
         if !labels.isEmpty { parts.append(labels.joined(separator: ", ")) }
         let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count >= 12 { parts.append("text reads \"\(String(trimmed.prefix(160)))\"") }
+        if trimmed.count >= 12 { parts.append("text reads \"\(String(trimmed.prefix(320)))\"") }
         if let place = await place(for: asset) { parts.append("near \(place)") }
         // A photo with no readable text and no clear subject adds nothing worth remembering.
         guard !labels.isEmpty || trimmed.count >= 12 else { return "" }
