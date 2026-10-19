@@ -4702,6 +4702,26 @@ app.post('/memory/photos', requireSessionAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+const photoVisionLimiter = createRateLimiter(90, 60 * 1000, userOrIpRateKey);
+// One small copy of a photo comes in, is described, and is dropped; only the note is kept.
+app.post('/memory/photos/describe', photoVisionLimiter, requireSessionAuth, upload.single('image'), async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!req.file || !/^image\/(jpeg|png|heic)$/i.test(req.file.mimetype || '')) return res.status(400).json({ error: 'A photo is required.' });
+  try {
+    const result = await require('./services/photo-vision').describePhoto({
+      generate: (request) => generateBrain({ model: FAST_MODEL, ...request }),
+      image: req.file.buffer,
+      mimeType: req.file.mimetype,
+      context: { date: req.body?.date, place: req.body?.place, text: req.body?.text }
+    });
+    if (result.skipped) return res.json({ saved: 0, skipped: result.reason });
+    const saved = await require('./services/photo-notes').saveNotes(supabase, userId, [{ text: result.note, date: result.date }]);
+    res.json({ saved: saved.saved });
+  } catch (err) {
+    res.status(502).json({ error: 'Could not look at that photo.' });
+  }
+});
 app.delete('/memory/photos', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });

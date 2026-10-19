@@ -51,3 +51,13 @@ test('search finds the matching note and says so when nothing matches', async ()
   assert.equal(miss.items.length, 0);
   assert.match(miss.text, /haven't seen/);
 });
+
+test('a photo is described once, sensitive ones are skipped, and nothing but the note comes back', async () => {
+  const { describePhoto, buildPrompt } = require('../../api/services/photo-vision');
+  const ok = await describePhoto({ generate: async () => ({ text: 'A red two-piece set on a hanger, about 3 people in the room.' }), image: Buffer.from('x'), context: { date: '2026-10-15' } });
+  assert.match(ok.note, /red two-piece set/);
+  const skipped = await describePhoto({ generate: async () => ({ text: 'SKIP' }), image: Buffer.from('x') });
+  assert.equal(skipped.skipped, true);
+  assert.equal((await describePhoto({ generate: async () => ({ text: 'x' }), image: Buffer.alloc(800 * 1024) })).reason, 'too_large');
+  assert.match(buildPrompt({ text: 'VS set' }), /VS set/);
+});

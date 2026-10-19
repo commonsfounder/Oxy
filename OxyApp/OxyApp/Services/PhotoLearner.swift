@@ -11,6 +11,8 @@ final class PhotoLearner {
     static let shared = PhotoLearner()
     static let enabledKey = "adam.photoLearning.enabled"
     static let statusKey = "adam.photoLearning.status"
+    /// Off by default: a small copy of each photo goes to Adam to be described, then is thrown away.
+    static let seesPicturesKey = "adam.photoLearning.seesPictures"
     private static let doneKey = "adam.photoLearning.done"
     private static let perRun = 250
     private static let batch = 20
@@ -74,6 +76,8 @@ final class PhotoLearner {
             seen.insert(asset.localIdentifier)
             guard let image = await loadImage(asset) else { continue }
             let text = await describe(image, asset: asset)
+            if UserDefaults.standard.bool(forKey: Self.seesPicturesKey), let jpeg = Self.smallJPEG(image),
+               await describeInCloud(jpeg, asset: asset, hint: text) { continue }
             guard !text.isEmpty else { continue }
             var note: [String: Any] = ["text": text]
             if let date = asset.creationDate { note["date"] = ISO8601DateFormatter().string(from: date) }
@@ -88,6 +92,37 @@ final class PhotoLearner {
             Self.record("Nothing new to look at.")
         } else {
             Self.record("Looked at \(looked) photos and kept \(sentNotes) notes.")
+        }
+    }
+
+    /// Asks Adam to describe one photo. True means the server handled it (kept a note or skipped a private photo).
+    private func describeInCloud(_ jpeg: Data, asset: PHAsset, hint: String) async -> Bool {
+        var fields: [String: String] = [:]
+        if !hint.isEmpty { fields["text"] = String(hint.prefix(300)) }
+        if let date = asset.creationDate { fields["date"] = ISO8601DateFormatter().string(from: date) }
+        if let place = await place(for: asset) { fields["place"] = place }
+        do {
+            let data = try await APIClient.shared.multipartRequest(
+                path: "/memory/photos/describe", fields: fields, fileField: "image",
+                fileName: "photo.jpg", mimeType: "image/jpeg", fileData: jpeg
+            )
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let saved = json["saved"] as? Int { sentNotes += saved }
+            return true
+        } catch {
+            failedSends += 1
+            return false
+        }
+    }
+
+    /// Longest side 512 points, light compression: enough to see what is in it, small enough to be cheap.
+    private static func smallJPEG(_ image: CGImage) -> Data? {
+        let longest = CGFloat(max(image.width, image.height))
+        let scale = min(1, 512 / longest)
+        let size = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: 0.6) { _ in
+            UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: size))
         }
     }
 

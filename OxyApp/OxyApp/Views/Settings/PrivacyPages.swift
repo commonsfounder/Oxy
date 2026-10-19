@@ -59,6 +59,7 @@ struct PrivacyContent: View {
     @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
     @State private var photoAccessDenied = false
     @State private var confirmsForgetPhotos = false
+    @AppStorage(PhotoLearner.seesPicturesKey) private var seesPictures = false
     @State private var photoStatus = UserDefaults.standard.string(forKey: PhotoLearner.statusKey) ?? "Not scanned yet."
     @State private var isScanning = false
 
@@ -100,6 +101,12 @@ struct PrivacyContent: View {
                         isOn: $photoLearningEnabled
                     )
                     if photoLearningEnabled {
+                        SettingsRule()
+                        SettingsToggleRow(
+                            title: "Let Adam see the pictures",
+                            subtitle: "Sends a small copy of each photo to Adam to describe, then throws it away. Without this Adam only reads text and main subjects on your phone",
+                            isOn: $seesPictures
+                        )
                         SettingsRule()
                         SettingsRow(title: "Scan now", subtitle: isScanning ? "Looking through your photos…" : photoStatus, action: {
                             guard !isScanning else { return }
