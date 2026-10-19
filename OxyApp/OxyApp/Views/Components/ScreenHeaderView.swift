@@ -13,13 +13,13 @@ struct ScreenHeaderView: View {
     private let circle: CGFloat = 38
 
     var body: some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             if let onBack {
-                // Raw chevron — no frosted glass, no circular chrome (Adam spec).
+                // Raw chevron on its own line, so the title below lines up with the content.
                 Button(action: onBack) {
                     AppIcon("chevron-left", size: 17)
                         .foregroundStyle(Color.appInk)
-                        .frame(width: circle, height: circle)
+                        .frame(width: circle, height: circle, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.appScale)
@@ -31,12 +31,13 @@ struct ScreenHeaderView: View {
                 .foregroundStyle(Color.appInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
+                .padding(.top, onBack == nil ? 10 : 2)
+                .padding(.bottom, 12)
                 .accessibilityAddTraits(.isHeader)
-
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppSpacing.margin)
-        .padding(.vertical, 8)
+        .padding(.top, 4)
         // Opaque, and extended up through the status-bar inset, so scrolled content
         // can never ghost above or behind the header at the very top of the screen.
         .background(Color.appBackground.ignoresSafeArea(edges: .top))

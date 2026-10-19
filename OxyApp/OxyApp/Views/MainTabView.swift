@@ -139,6 +139,7 @@ private struct AdamYouView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: Destination?
     @State private var contextModel = SettingsContextModel()
+    @State private var appsConnected: Int?
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     #if DEBUG
@@ -154,62 +155,48 @@ private struct AdamYouView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.appBackground.ignoresSafeArea()
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 26) {
-                        Text("Settings")
-                            .font(.heroTitle)
-                            .foregroundStyle(Color.appInk)
-
-                        SettingsList {
-                            youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
-                            SettingsRule(inset: 34)
-                            youRow(title: "Apps", subtitle: connectionsStatus, icon: "cube") { destination = .apps }
-                            SettingsRule(inset: 34)
-                            youRow(title: "Privacy and control", subtitle: "What Adam may do on its own", icon: "shield-check") { destination = .privacy }
-                            SettingsRule(inset: 34)
-                            youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
-                            SettingsRule(inset: 34)
-                            youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Signed in as \(appState.userId)", icon: "envelope") { destination = .account }
-                        }
-
-                        Spacer(minLength: 40)
-
-                        VStack(spacing: 14) {
-                            Button {
-                                versionTapCount += 1
-                                if versionTapCount >= 5 {
-                                    versionTapCount = 0
-                                    showBackendURLEditor = true
-                                }
-                            } label: {
-                                AdamMark().frame(width: 36, height: 36)
-                                .frame(minWidth: 44, minHeight: 44)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Adam")
-
-#if DEBUG
-                            Button { destination = .agents } label: {
-                                Text("Advanced")
-                                    .font(.appBody(13))
-                                    .foregroundStyle(Color.appMuted)
-                                    .frame(minHeight: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-#endif
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .padding(.horizontal, AppSpacing.margin)
-                    .padding(.top, 18)
-                    .padding(.bottom, 28)
-                    .containerRelativeFrame(.vertical, alignment: .top)
+            SettingsPage(title: "Settings", isRoot: true) {
+                SettingsList {
+                    youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
+                    SettingsRule(inset: 34)
+                    youRow(title: "Apps", subtitle: appsStatus, icon: "cube") { destination = .apps }
+                    SettingsRule(inset: 34)
+                    youRow(title: "Privacy and control", subtitle: "What Adam may do on its own", icon: "shield-check") { destination = .privacy }
+                    SettingsRule(inset: 34)
+                    youRow(title: "Preferences", subtitle: ThreadBackground.current.title, icon: "sun") { destination = .preferences }
+                    SettingsRule(inset: 34)
+                    youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Your account and data", icon: "envelope") { destination = .account }
                 }
+
+                VStack(spacing: 6) {
+                    Button {
+                        versionTapCount += 1
+                        if versionTapCount >= 5 {
+                            versionTapCount = 0
+                            showBackendURLEditor = true
+                        }
+                    } label: {
+                        AdamMark().frame(width: 32, height: 32)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Adam")
+
+                    #if DEBUG
+                    Button { destination = .agents } label: {
+                        Text("Advanced")
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showBackendURLEditor) {
@@ -217,7 +204,7 @@ private struct AdamYouView: View {
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
-            .task { await contextModel.load(isDemo: appState.isDemoSession) }
+            .task { await contextModel.load(isDemo: appState.isDemoSession); await loadAppsCount() }
         }
         .fullScreenCover(item: $destination) { item in
             destinationView(item).swipeToDismiss().environment(\.revealClose, nil)
@@ -246,13 +233,27 @@ private struct AdamYouView: View {
         return name.isEmpty ? "Your name, home and memory" : name
     }
 
-    private var connectionsStatus: String {
-        let apps = contextModel.context?.connectedApps ?? []
-        switch apps.count {
-        case 0: return "Mail, photos, lists and more"
-        case 1...3: return apps.joined(separator: ", ")
-        default: return "\(apps.count) connected"
+    private var appsStatus: String {
+        switch appsConnected {
+        case nil: return "Mail, photos, lists and more"
+        case 0?: return "Nothing connected yet"
+        case 1?: return "1 connected"
+        case let n?: return "\(n) connected"
         }
+    }
+
+    private func loadAppsCount() async {
+        var total = 0
+        if let data = try? await APIClient.shared.request(path: "/connectors/\(appState.userId)"),
+           let response = try? JSONDecoder().decode(ConnectorsResponse.self, from: data) {
+            total += response.connectors.filter { $0.kind == "connection" && $0.implemented && $0.enabled }.count
+        } else { return }
+        if let data = try? await APIClient.shared.request(path: "/connectors/apps"),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let items = json["connections"] as? [[String: Any]] {
+            total += items.filter { ($0["connected"] as? Bool) == true }.count
+        }
+        appsConnected = total
     }
 
     @ViewBuilder

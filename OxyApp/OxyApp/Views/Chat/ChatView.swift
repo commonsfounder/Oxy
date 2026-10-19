@@ -48,6 +48,7 @@ struct ChatView: View {
     @State private var didSendAutoDemoMessage = false
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var isScrollPinnedToBottom = true
+    @State private var didSettleAtBottom = false
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
@@ -342,7 +343,7 @@ struct ChatView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                if viewModel.hasOlderHistory, !viewModel.messages.isEmpty {
+                                if viewModel.hasOlderHistory, !viewModel.messages.isEmpty, didSettleAtBottom {
                                     Color.clear
                                         .frame(height: 1)
                                         .onAppear { loadOlderMessages(proxy) }
@@ -370,6 +371,7 @@ struct ChatView: View {
                             .padding(.vertical, 12)
                             .animation(.appSpring, value: viewModel.messages.count)
                         }
+                        .defaultScrollAnchor(.bottom)
                         .coordinateSpace(name: "chatScroll")
                         .background(
                             GeometryReader { geo in
@@ -398,38 +400,8 @@ struct ChatView: View {
                             }
                         }
                         .hidesTabBarOnScroll()
-                        .onChange(of: viewModel.messages.count) {
-                            ReactionStore.shared.migrate(with: viewModel.messages)
-                            guard viewModel.scrollTargetMessageID == nil else { return }
-                            guard isScrollPinnedToBottom else { return }
-                            withAnimation(.appSpring) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
-                        }
-                        .onChange(of: viewModel.messages.last?.content) {
-                            guard viewModel.scrollTargetMessageID == nil else { return }
-                            guard isScrollPinnedToBottom else { return }
-                            withAnimation(.appSpring) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
-                        }
-                        .onChange(of: viewModel.scrollTargetMessageID) { _, targetID in
-                            guard let targetID else { return }
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(150))
-                                withAnimation(.appStandard) {
-                                    proxy.scrollTo(targetID, anchor: .center)
-                                }
-                                try? await Task.sleep(for: .milliseconds(700))
-                                viewModel.scrollTargetMessageID = nil
-                            }
-                        }
-                        .onChange(of: viewModel.messages.suffix(3).reduce(0) { $0 + $1.actions.count }) {
-                            presentPendingReviewIfNeeded()
-                            presentMessageComposerIfNeeded()
-                        }
-                    }
-
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            VStack(spacing: 0) {
                     if let replyingTo {
                         ReplyPreviewBar(message: replyingTo) { withAnimation(.appSpring) { self.replyingTo = nil } }
                     }
@@ -477,6 +449,52 @@ struct ChatView: View {
                             selectedPhotoItem = nil
                         }
                     )
+                            }
+                            .background(alignment: .bottom) {
+                                ComposerBackdrop().padding(.top, -36)
+                            }
+                        }
+                        .onChange(of: viewModel.messages.count) {
+                            ReactionStore.shared.migrate(with: viewModel.messages)
+                            if !didSettleAtBottom, !viewModel.messages.isEmpty, viewModel.scrollTargetMessageID == nil {
+                                // First load: jump to the newest message, with no animation, and again once rows have measured.
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(250))
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                    didSettleAtBottom = true
+                                }
+                                return
+                            }
+                            guard viewModel.scrollTargetMessageID == nil else { return }
+                            guard isScrollPinnedToBottom else { return }
+                            withAnimation(.appSpring) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: viewModel.messages.last?.content) {
+                            guard viewModel.scrollTargetMessageID == nil else { return }
+                            guard isScrollPinnedToBottom else { return }
+                            withAnimation(.appSpring) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: viewModel.scrollTargetMessageID) { _, targetID in
+                            guard let targetID else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(150))
+                                withAnimation(.appStandard) {
+                                    proxy.scrollTo(targetID, anchor: .center)
+                                }
+                                try? await Task.sleep(for: .milliseconds(700))
+                                viewModel.scrollTargetMessageID = nil
+                            }
+                        }
+                        .onChange(of: viewModel.messages.suffix(3).reduce(0) { $0 + $1.actions.count }) {
+                            presentPendingReviewIfNeeded()
+                            presentMessageComposerIfNeeded()
+                        }
+                    }
                 }
 
                 attachmentSheetOverlay
@@ -726,6 +744,27 @@ struct ChatView: View {
                         dismissAttachMenu()
                         showFileImporter = true
                     }
+                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        dismissAttachMenu()
+                        handleMenuChoice(.privateChat)
+                    } label: {
+                        HStack(spacing: 14) {
+                            GhostIcon(active: isIncognito)
+                                .frame(width: 20, height: 20)
+                                .foregroundStyle(Color.appInk)
+                                .frame(width: 24)
+                            Text(isIncognito ? "Turn off private mode" : "Private mode")
+                                .font(.appBody(16, weight: .medium))
+                                .foregroundStyle(Color.appInk)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 56)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.appScale(0.97))
                 }
                 .frame(width: 232)
                 .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appSurface2))
@@ -991,6 +1030,20 @@ struct ChatView: View {
     ) -> Bool {
         // Times live in the dividers where the conversation pauses, not under messages.
         false
+    }
+}
+
+/// Messages blur as they pass under the composer. Blur only, so they stay readable shapes rather than vanishing.
+private struct ComposerBackdrop: View {
+    var body: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .mask(LinearGradient(stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.45)
+            ], startPoint: .top, endPoint: .bottom))
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
     }
 }
 
@@ -1459,72 +1512,91 @@ private struct ChatInputBar: View {
                 .padding(.top, 10)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
+            composer
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
+        }
+        .onAppear { pulse = true }
+    }
+
+    /// One capsule holds everything: attach on the left, text in the middle, voice or send on the right.
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            if !isVoiceActive {
                 Button(action: onAttach) {
                     AppIcon(sf: "plus", size: 18)
-                        .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appInk.opacity(0.8))
-                        .frame(width: 38, height: 38)
-                        .appGlass(Circle(), interactive: true)
+                        .foregroundStyle(Color.appInk.opacity(0.8))
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
                 }
                 .accessibilityLabel("Add a photo, video or file")
                 .buttonStyle(.appScale)
-                .disabled(isSending || isVoiceActive)
-
-                Group {
-                    if isVoiceActive {
-                        voiceField
-                    } else {
-                        textField
-                    }
-                }
-                .frame(minHeight: 38)
-
-                Button(action: showsStop ? onStop : (canSend ? onSend : onVoice)) {
-                    ZStack {
-                        if showsStop {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Color.appOnAction)
-                                .frame(width: 12, height: 12)
-                        } else if isPreparingVoice && !canSend {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(Color.appMuted)
-                        } else {
-                            AppIcon(sf: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"), size: 15)
-                        }
-                    }
-                    .foregroundStyle(buttonForeground)
-                    .frame(width: 38, height: 38)
-                    .background {
-                        if isRecording {
-                            Circle()
-                                .strokeBorder(Color.appAction.opacity(pulse ? 0 : 0.4), lineWidth: 2)
-                                .scaleEffect(pulse ? 1.6 : 1)
-                                .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: pulse)
-                        }
-                        if canSend || showsStop || isRecording {
-                            Circle().fill(buttonFill)
-                        } else {
-                            Color.clear.appGlass(Circle(), interactive: true)
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
-                }
-                .disabled(!canAct && !showsStop)
-                .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : "Talk to Adam"))
-                .buttonStyle(ScaleButtonStyle())
-                .animation(.appFast, value: canAct)
-                .animation(.appFast, value: canSend)
-                .animation(.appFast, value: isRecording)
+                .disabled(isSending)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
+
+            if isVoiceActive {
+                voiceField
+            } else {
+                textField
+            }
+
+            actionButton
         }
-        .onAppear { pulse = true }
+        .padding(.horizontal, 2)
+        .background(Color.appSurface2.opacity(0.6))
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl + 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.xl + 4, style: .continuous)
+                .strokeBorder(
+                    incognito
+                        ? Color.appAccent.opacity(0.28)
+                        : (isFocused.wrappedValue ? Color.appAccent.opacity(0.12) : Color.appHairline),
+                    lineWidth: (incognito || isFocused.wrappedValue) ? 0.75 : 0.5
+                )
+                .animation(.appFast, value: isFocused.wrappedValue)
+                .animation(.appFast, value: incognito)
+        )
+    }
+
+    private var actionButton: some View {
+        Button(action: showsStop ? onStop : (canSend ? onSend : onVoice)) {
+            ZStack {
+                if showsStop {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.appOnAction)
+                        .frame(width: 12, height: 12)
+                } else if isPreparingVoice && !canSend {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.appMuted)
+                } else {
+                    AppIcon(sf: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"), size: 15)
+                }
+            }
+            .foregroundStyle(buttonForeground)
+            .frame(width: 34, height: 34)
+            .background {
+                if isRecording {
+                    Circle()
+                        .strokeBorder(Color.appAction.opacity(pulse ? 0 : 0.4), lineWidth: 2)
+                        .scaleEffect(pulse ? 1.6 : 1)
+                        .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: pulse)
+                }
+                if canSend || showsStop || isRecording {
+                    Circle().fill(buttonFill)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+        }
+        .disabled(!canAct && !showsStop)
+        .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : "Talk to Adam"))
+        .buttonStyle(ScaleButtonStyle())
+        .animation(.appFast, value: canAct)
+        .animation(.appFast, value: canSend)
+        .animation(.appFast, value: isRecording)
     }
 
     private var textField: some View {
@@ -1537,23 +1609,8 @@ private struct ChatInputBar: View {
             .disabled(isSending)
             .opacity(isSending ? 0.72 : 1)
             .onSubmit { if canSend { onSend() } }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(Color.appSurface2.opacity(0.72))
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                    .strokeBorder(
-                        incognito
-                            ? Color.appAccent.opacity(0.28)
-                            : (isFocused.wrappedValue
-                                ? Color.appAccent.opacity(0.12)
-                                : Color.appHairline),
-                        lineWidth: (incognito || isFocused.wrappedValue) ? 0.75 : 0.5
-                    )
-                    .animation(.appFast, value: isFocused.wrappedValue)
-                    .animation(.appFast, value: incognito)
-            )
+            .padding(.horizontal, 4)
+            .padding(.vertical, 12)
             .accessibilityHint(incognito ? "Private chat. This turn is not saved." : "")
     }
 
@@ -1592,14 +1649,7 @@ private struct ChatInputBar: View {
             .animation(.appStandard, value: heard)
             Spacer(minLength: 0)
         }
-        .padding(.trailing, 10)
         .frame(minHeight: 46)
-        .background(Color.appReceivedBubble.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                .strokeBorder(Color.appCardOutline, lineWidth: 1)
-        )
     }
 
     /// While Adam is writing a reply and nothing is typed, the button becomes Stop.
