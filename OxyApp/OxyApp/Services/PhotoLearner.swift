@@ -11,8 +11,6 @@ final class PhotoLearner {
     static let shared = PhotoLearner()
     static let enabledKey = "adam.photoLearning.enabled"
     static let statusKey = "adam.photoLearning.status"
-    /// Off by default: a small copy of each photo goes to Adam to be described, then is thrown away.
-    static let seesPicturesKey = "adam.photoLearning.seesPictures"
     private static let doneKey = "adam.photoLearning.done"
     private static let perRun = 250
     private static let batch = 20
@@ -76,7 +74,7 @@ final class PhotoLearner {
             seen.insert(asset.localIdentifier)
             guard let image = await loadImage(asset) else { continue }
             let text = await describe(image, asset: asset)
-            if UserDefaults.standard.bool(forKey: Self.seesPicturesKey), let jpeg = Self.smallJPEG(image),
+            if let jpeg = Self.smallJPEG(image),
                await describeInCloud(jpeg, asset: asset, hint: text) { continue }
             guard !text.isEmpty else { continue }
             var note: [String: Any] = ["text": text]
