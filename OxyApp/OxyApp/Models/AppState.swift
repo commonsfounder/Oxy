@@ -51,6 +51,7 @@ final class AppState {
             Task { @MainActor in
                 NativeIntegrationManager.shared.bootstrap(userId: savedUserId)
                 await HouseholdSoundMonitor.shared.configure(userId: savedUserId)
+                await PhotoLearner.shared.runIfEnabled()
             }
         }
     }
@@ -80,6 +81,7 @@ final class AppState {
             Task { @MainActor in
                 NativeIntegrationManager.shared.bootstrap(userId: userId)
                 await HouseholdSoundMonitor.shared.configure(userId: userId)
+                await PhotoLearner.shared.runIfEnabled()
             }
         }
     }

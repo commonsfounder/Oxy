@@ -327,6 +327,9 @@ struct PreferencesPage: View {
     @State private var settings = SettingsStore.load()
     @State private var showsWheelEditor = false
     @State private var showsSoundClips = false
+    @AppStorage(PhotoLearner.enabledKey) private var photoLearningEnabled = false
+    @State private var photoAccessDenied = false
+    @State private var confirmsForgetPhotos = false
 
     var body: some View {
         SettingsPage(title: "Preferences") {
@@ -383,6 +386,25 @@ struct PreferencesPage: View {
                 )
             }
 
+            SettingsGroup(title: "Photos") {
+                SettingsList {
+                    SettingsToggleRow(
+                        title: "Learn from my photos",
+                        subtitle: "Adam reads your photos on this iPhone and remembers short notes. The pictures never leave your phone",
+                        isOn: $photoLearningEnabled
+                    )
+                    if photoLearningEnabled {
+                        SettingsRule()
+                        SettingsNavRow(title: "Forget what Adam learned from photos") { confirmsForgetPhotos = true }
+                    }
+                }
+                if photoAccessDenied {
+                    Text("Allow photo access in the Settings app, then switch this on again.")
+                        .font(.appBody(12))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+
             SettingsGroup(title: "Notifications") {
                 SettingsList {
                     SettingsToggleRow(title: "Arriving and leaving", isOn: $settings.locationReminders)
@@ -415,6 +437,26 @@ struct PreferencesPage: View {
         .onChange(of: settings.preferredMapsApp) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.locationReminders) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
         .onChange(of: settings.proactiveBriefings) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
+        .onChange(of: photoLearningEnabled) { _, enabled in
+            guard enabled else { return }
+            Task {
+                if await PhotoLearner.shared.requestAccess() {
+                    photoAccessDenied = false
+                    await PhotoLearner.shared.run()
+                } else {
+                    photoLearningEnabled = false
+                    photoAccessDenied = true
+                }
+            }
+        }
+        .confirmationDialog("Forget what Adam learned from your photos?", isPresented: $confirmsForgetPhotos, titleVisibility: .visible) {
+            Button("Forget it all", role: .destructive) {
+                Task { await PhotoLearner.shared.forgetEverything() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The notes are deleted. Your photos are not touched.")
+        }
         .onChange(of: soundAwarenessEnabled) { _, enabled in
             Task { await HouseholdSoundMonitor.shared.setEnabled(enabled, userId: appState.userId) }
         }

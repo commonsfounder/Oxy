@@ -55,7 +55,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Adam uses the microphone for voice input and, when enabled, recognizes important household sounds on this device.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Adam lets you attach photos and images for multimodal chat when you choose them.</string>
+	<string>Adam lets you attach photos in chat. If you turn on Learn from my photos, Adam reads them on this iPhone and remembers short notes, not the pictures.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Adam uses reminders to help create native Apple Reminders when you ask.</string>
 	<key>NSSupportsLiveActivities</key>
