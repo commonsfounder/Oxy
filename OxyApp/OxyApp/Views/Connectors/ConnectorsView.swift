@@ -473,14 +473,22 @@ private struct MoreAppsSection: View {
     @State private var message: String?
 
     private let apps: [(slug: String, name: String, caption: String)] = [
-        ("linear", "Linear", "Issues and projects"),
-        ("asana", "Asana", "Tasks and projects"),
-        ("trello", "Trello", "Boards and cards"),
-        ("hubspot", "HubSpot", "Contacts and deals"),
-        ("jira", "Jira", "Tickets"),
-        ("airtable", "Airtable", "Tables"),
+        ("googlephotos", "Google Photos", "Your photos and albums"),
+        ("googledrive", "Google Drive", "Your files and documents"),
+        ("youtube", "YouTube", "Videos and subscriptions"),
+        ("instagram", "Instagram", "Posts and messages"),
+        ("facebook", "Facebook", "Pages and events"),
+        ("whatsapp", "WhatsApp", "Messages"),
+        ("pinterest", "Pinterest", "Boards and ideas"),
+        ("reddit", "Reddit", "Communities"),
+        ("discord", "Discord", "Servers and friends"),
         ("todoist", "Todoist", "To-do lists"),
-        ("dropbox", "Dropbox", "Files")
+        ("googletasks", "Google Tasks", "To-do lists"),
+        ("splitwise", "Splitwise", "Shared bills"),
+        ("eventbrite", "Eventbrite", "Events and tickets"),
+        ("ticketmaster", "Ticketmaster", "Concerts and shows"),
+        ("zoom", "Zoom", "Meetings"),
+        ("dropbox", "Dropbox", "Your files")
     ]
 
     var body: some View {
