@@ -61,3 +61,11 @@ test('a photo is described once, sensitive ones are skipped, and nothing but the
   assert.equal((await describePhoto({ generate: async () => ({ text: 'x' }), image: Buffer.alloc(800 * 1024) })).reason, 'too_large');
   assert.match(buildPrompt({ text: 'VS set' }), /VS set/);
 });
+
+test('a setting change is checked and handed to the phone', async () => {
+  const { handlers } = require('../../api/actions/settings');
+  const ok = await handlers.change_setting({ params: { setting: 'appearance', value: 'Night' } });
+  assert.deepEqual(ok.clientEffect, { setting: 'appearance', value: 'night' });
+  assert.equal((await handlers.change_setting({ params: { setting: 'spend_limit', value: 'off' } })).success, false);
+  assert.equal((await handlers.change_setting({ params: { setting: 'appearance', value: 'pink' } })).success, false);
+});

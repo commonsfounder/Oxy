@@ -225,6 +225,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let confirmation: String?
     let pending: Bool
     let connectorId: String?
+    /// A change the phone should make to its own settings (set by the change_setting action).
+    let clientEffect: ClientEffect?
     let healthStatus: String?
     let headline: String?
     let itinerary: [TravelLeg]?
@@ -260,7 +262,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
+        case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus, clientEffect
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
         case subject, taskId, selection, scene, places
         case travelOptions = "options"
@@ -282,6 +284,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         confirmation: String? = nil,
         pending: Bool = false,
         connectorId: String? = nil,
+        clientEffect: ClientEffect? = nil,
         healthStatus: String? = nil,
         headline: String? = nil,
         itinerary: [TravelLeg]? = nil,
@@ -310,6 +313,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.confirmation = confirmation
         self.pending = pending
         self.connectorId = connectorId
+        self.clientEffect = clientEffect
         self.healthStatus = healthStatus
         self.headline = headline
         self.itinerary = itinerary
@@ -360,6 +364,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             confirmation = try result.decodeIfPresent(String.self, forKey: .confirmation)
             pending = try result.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try result.decodeIfPresent(String.self, forKey: .connectorId)
+            clientEffect = try result.decodeIfPresent(ClientEffect.self, forKey: .clientEffect)
             healthStatus = try result.decodeIfPresent(String.self, forKey: .healthStatus)
             headline = try result.decodeIfPresent(String.self, forKey: .headline)
             itinerary = try result.decodeIfPresent([TravelLeg].self, forKey: .itinerary)
@@ -387,6 +392,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             confirmation = try container.decodeIfPresent(String.self, forKey: .confirmation)
             pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try container.decodeIfPresent(String.self, forKey: .connectorId)
+            clientEffect = try container.decodeIfPresent(ClientEffect.self, forKey: .clientEffect)
             healthStatus = try container.decodeIfPresent(String.self, forKey: .healthStatus)
             headline = try container.decodeIfPresent(String.self, forKey: .headline)
             itinerary = try container.decodeIfPresent([TravelLeg].self, forKey: .itinerary)
@@ -419,6 +425,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(confirmation, forKey: .confirmation)
         try container.encode(pending, forKey: .pending)
         try container.encodeIfPresent(connectorId, forKey: .connectorId)
+        try container.encodeIfPresent(clientEffect, forKey: .clientEffect)
         try container.encodeIfPresent(healthStatus, forKey: .healthStatus)
         try container.encodeIfPresent(headline, forKey: .headline)
         try container.encodeIfPresent(itinerary, forKey: .itinerary)
@@ -496,6 +503,11 @@ struct ResultSubject: Codable, Equatable {
         )
         return legacy.isEmpty ? nil : legacy
     }
+}
+
+struct ClientEffect: Codable, Equatable {
+    let setting: String
+    let value: String
 }
 
 struct BrowserRecoveryAction: Codable, Equatable {

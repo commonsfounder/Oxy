@@ -331,6 +331,11 @@ const ACTION_WORDING = Object.freeze({
     feed: (i) => withWho(i, 'Sent', 'a Telegram message'),
     approval: 'Message ready to send'
   },
+  change_setting: {
+    name: 'Setting',
+    progress: () => 'Changing that setting',
+    summary: () => ({ summary: 'Changed a setting', kind: 'did' })
+  },
   search_photos: {
     name: 'Photos',
     progress: (i) => pick(detail(i.query) && `Looking through your photos for ${detail(i.query)}`, 'Looking through your photos'),

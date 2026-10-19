@@ -687,6 +687,21 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  change_setting: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['setting', 'value'],
+    inputExample: { setting: 'appearance', value: 'night' },
+    paramHints: {
+      setting: 'appearance (automatic|warm|sea|night), maps_app (apple|google), how_proactive (reactive|reserved|balanced|proactive|autonomous), ask_before_acting (on|off), ask_before_private_apps (on|off), alert_arriving_leaving (on|off), daily_check_in (on|off), listen_for_sounds (on|off), learn_from_photos (on|off|scan_now)',
+      value: 'one of the values listed for that setting'
+    },
+    guidance: 'Change how the app looks or behaves when the user asks in their own words: "make it dark", "stop the daily check-ins", "be less pushy", "ask me before you do anything", "start learning from my photos". It never changes payment limits or what always needs approval. Say what changed in one short sentence.',
+    successSummary: 'Setting changed',
+    failureSummary: 'Could not change that setting',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   search_photos: {
     adapter: { kind: 'inline' },
     risk: 'low',

@@ -140,6 +140,7 @@ private struct AdamYouView: View {
     @State private var destination: Destination?
     @State private var contextModel = SettingsContextModel()
     @State private var appsConnected: Int?
+    @State private var showsSoundClips = false
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     #if DEBUG
@@ -164,8 +165,17 @@ private struct AdamYouView: View {
                     youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Your account and data", icon: "envelope") { destination = .account }
                 }
 
-                SettingsGroup(title: "Privacy and control") { PrivacyContent() }
-                SettingsGroup(title: "Preferences") { PreferencesContent() }
+                if UserDefaults.standard.bool(forKey: HouseholdSoundMonitor.preferenceKey) {
+                    SettingsList {
+                        youRow(title: "Sounds heard", subtitle: "Check what set off an alert", icon: "waveform") { showsSoundClips = true }
+                    }
+                }
+
+                Text("Want something different? Just ask Adam, like \"switch to night\" or \"stop the daily check-ins\".")
+                    .font(.appBody(14))
+                    .foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
 
                 VStack(spacing: 6) {
                     Button {
@@ -197,6 +207,7 @@ private struct AdamYouView: View {
                 .frame(maxWidth: .infinity)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .fullScreenCover(isPresented: $showsSoundClips) { SoundClipsPage().swipeToDismiss() }
             .sheet(isPresented: $showBackendURLEditor) {
                 BackendURLEditorSheet(currentURL: $customBackendURL) { showBackendURLEditor = false }
                     .presentationDetents([.medium])

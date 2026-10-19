@@ -61,7 +61,6 @@
 		A10000010000000000000019 /* SettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019 /* SettingsModel.swift */; };
 		A10000010000000000009F02 /* SettingsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F02 /* SettingsPages.swift */; };
 		D90000010000000000000007 /* SoundClipsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000008 /* SoundClipsPage.swift */; };
-		A10000010000000000009F03 /* PrivacyPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F03 /* PrivacyPages.swift */; };
 		A10000010000000000009F01 /* SettingsKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000009F01 /* SettingsKit.swift */; };
 		A10000010000000000000048 /* PaymentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000048 /* PaymentsView.swift */; };
 		A10000010000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000020 /* Assets.xcassets */; };
@@ -73,6 +72,7 @@
 		D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000002 /* HouseholdSoundMonitor.swift */; };
 		D90000010000000000000009 /* HouseholdSounds.mlmodel in Sources */ = {isa = PBXBuildFile; fileRef = D9000001000000000000000A /* HouseholdSounds.mlmodel */; };
 		D90000010000000000000005 /* SoundClipStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000006 /* SoundClipStore.swift */; };
+		D90000010000000000000C05 /* ClientEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000C06 /* ClientEffects.swift */; };
 		D90000010000000000000B05 /* PreviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000B06 /* PreviewData.swift */; };
 		D90000010000000000000A05 /* PhotoLearner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000A06 /* PhotoLearner.swift */; };
 		D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90000010000000000000004 /* AlarmPatternDetector.swift */; };
@@ -156,7 +156,6 @@
 		A20000010000000000000019 /* SettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModel.swift; sourceTree = "<group>"; };
 		A20000010000000000009F02 /* SettingsPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPages.swift; sourceTree = "<group>"; };
 		D90000010000000000000008 /* SoundClipsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundClipsPage.swift; sourceTree = "<group>"; };
-		A20000010000000000009F03 /* PrivacyPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPages.swift; sourceTree = "<group>"; };
 		A20000010000000000009F01 /* SettingsKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsKit.swift; sourceTree = "<group>"; };
 		A20000010000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000010000000000000F01 /* Fraunces.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Fraunces.ttf; sourceTree = "<group>"; };
@@ -168,6 +167,7 @@
 		D90000010000000000000002 /* HouseholdSoundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseholdSoundMonitor.swift; sourceTree = "<group>"; };
 		D9000001000000000000000A /* HouseholdSounds.mlmodel */ = {isa = PBXFileReference; lastKnownFileType = file.mlmodel; path = HouseholdSounds.mlmodel; sourceTree = "<group>"; };
 		D90000010000000000000006 /* SoundClipStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundClipStore.swift; sourceTree = "<group>"; };
+		D90000010000000000000C06 /* ClientEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientEffects.swift; sourceTree = "<group>"; };
 		D90000010000000000000B06 /* PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewData.swift; sourceTree = "<group>"; };
 		D90000010000000000000A06 /* PhotoLearner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLearner.swift; sourceTree = "<group>"; };
 		D90000010000000000000004 /* AlarmPatternDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmPatternDetector.swift; sourceTree = "<group>"; };
@@ -277,6 +277,7 @@
 				A20000010000000000000024 /* NativeIntegrationManager.swift */,
 				D90000010000000000000002 /* HouseholdSoundMonitor.swift */,
 				D90000010000000000000006 /* SoundClipStore.swift */,
+				D90000010000000000000C06 /* ClientEffects.swift */,
 				D90000010000000000000B06 /* PreviewData.swift */,
 				D90000010000000000000A06 /* PhotoLearner.swift */,
 				D90000010000000000000004 /* AlarmPatternDetector.swift */,
@@ -421,7 +422,6 @@
 				A20000010000000000000019 /* SettingsModel.swift */,
 				A20000010000000000009F02 /* SettingsPages.swift */,
 				D90000010000000000000008 /* SoundClipsPage.swift */,
-				A20000010000000000009F03 /* PrivacyPages.swift */,
 				A20000010000000000009F01 /* SettingsKit.swift */,
 			);
 			path = Settings;
@@ -659,7 +659,6 @@
 				A10000010000000000000019 /* SettingsModel.swift in Sources */,
 				A10000010000000000009F02 /* SettingsPages.swift in Sources */,
 				D90000010000000000000007 /* SoundClipsPage.swift in Sources */,
-				A10000010000000000009F03 /* PrivacyPages.swift in Sources */,
 				A10000010000000000009F01 /* SettingsKit.swift in Sources */,
 				A10000010000000000000021 /* LocationManager.swift in Sources */,
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
@@ -667,6 +666,7 @@
 				D90000010000000000000001 /* HouseholdSoundMonitor.swift in Sources */,
 				D90000010000000000000009 /* HouseholdSounds.mlmodel in Sources */,
 				D90000010000000000000005 /* SoundClipStore.swift in Sources */,
+				D90000010000000000000C05 /* ClientEffects.swift in Sources */,
 				D90000010000000000000B05 /* PreviewData.swift in Sources */,
 				D90000010000000000000A05 /* PhotoLearner.swift in Sources */,
 				D90000010000000000000003 /* AlarmPatternDetector.swift in Sources */,

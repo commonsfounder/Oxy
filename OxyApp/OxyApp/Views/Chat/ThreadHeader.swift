@@ -34,12 +34,12 @@ struct ThreadHeader: View {
             .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 24)
+        .padding(.bottom, 18)
         .background {
             LinearGradient(
                 stops: [
                     .init(color: Color.appBackground, location: 0),
-                    .init(color: Color.appBackground, location: 0.8),
+                    .init(color: Color.appBackground.opacity(0.92), location: 0.55),
                     .init(color: Color.appBackground.opacity(0), location: 1)
                 ],
                 startPoint: .top, endPoint: .bottom

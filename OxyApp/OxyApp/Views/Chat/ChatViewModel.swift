@@ -426,6 +426,7 @@ final class ChatViewModel {
                     await MainActor.run {
                         guard updateAssistantMessage(id: assistantID, { $0.actions.merging(results) }) else { return }
                         openDeepLinks(results)
+                        ClientEffects.applyAll(results, userId: userId)
                         if results.contains(where: { $0.isCompleted }) {
                             HapticManager.shared.success()
                         } else if results.contains(where: { $0.isFailure }) {
@@ -707,6 +708,7 @@ final class ChatViewModel {
                     } else {
                         _ = updateAssistantMessage(id: assistantID, { $0.actions.merging(results) })
                         openDeepLinks(results)
+                        ClientEffects.applyAll(results, userId: userId)
                     }
                 case .status(let status, let label):
                     startSendWatchdog(assistantID: assistantID)

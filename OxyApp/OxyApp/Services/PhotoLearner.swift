@@ -45,7 +45,8 @@ final class PhotoLearner {
 
     func run() async {
         guard !isRunning else { return }
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined { _ = await requestAccess(); status = PHPhotoLibrary.authorizationStatus(for: .readWrite) }
         guard status == .authorized || status == .limited else {
             Self.record("Photo access is off. Turn it on in the Settings app.")
             return
