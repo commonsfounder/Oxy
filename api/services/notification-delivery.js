@@ -330,7 +330,76 @@ function createDeliveryRuntime({
     };
   }
 
-  return { raise, deliverPending, deliverOne };
+  // The user's own connected channels, checked per call. Shared by delivery and escalation.
+  async function channelsFor(userId) {
+    const prefs = await getPreferenceMap(userId).catch(() => ({}));
+    const mailbox = await getMailbox(userId).catch(() => null);
+    const mailboxCanSend = Boolean(mailbox?.canSend && mailbox?.address);
+    const emailTo = resolveEmailDestination({
+      prefEmailTo: prefs[notifications.PREF.emailTo],
+      verifiedEmail: await getUserEmail(userId).catch(() => ''),
+      mailboxAddress: mailbox?.address
+    });
+    const emailProvider = resolveEmailProvider({ env, mailboxCanSend });
+    const hasPushDevices = (await countPushDevices(userId).catch(() => 0)) > 0;
+    const telegram = await getTelegram(userId).catch(() => null);
+    const available = availableChannels({ env, hasPushDevices, emailTo, mailboxCanSend, telegramCanSend: Boolean(telegram?.canSend) });
+    return { available, emailTo, emailProvider };
+  }
+
+  // Urgent alerts flagged `escalate` that nobody has acknowledged are sent once more on every
+  // channel the user has connected (not only the one they prefer). Any chat message from the
+  // user after the alert counts as seeing it. Runs from a timer; never re-escalates a row.
+  async function escalateUnseen({ afterMs = 2 * 60 * 1000, windowMs = 30 * 60 * 1000 } = {}) {
+    const current = now().getTime();
+    const { data: rows, error } = await supabase.from('notification_events')
+      .select('*')
+      .eq('urgency', 'urgent').eq('status', 'delivered')
+      .eq('source_ref->>escalate', 'true')
+      .is('escalated_at', null).is('acknowledged_at', null)
+      .lte('delivered_at', new Date(current - afterMs).toISOString())
+      .gte('delivered_at', new Date(current - windowMs).toISOString())
+      .limit(50);
+    if (error) return { ok: false, error: error.message };
+
+    const results = [];
+    for (const event of rows || []) {
+      const stamp = now().toISOString();
+      const { data: seen } = await supabase.from('conversations')
+        .select('id').eq('user_id', event.user_id).eq('role', 'user')
+        .gt('created_at', event.delivered_at).limit(1);
+      if (seen?.length) {
+        await supabase.from('notification_events').update({ acknowledged_at: stamp }).eq('id', event.id).is('acknowledged_at', null);
+        results.push({ id: event.id, status: 'seen' });
+        continue;
+      }
+      const { data: claimed } = await supabase.from('notification_events')
+        .update({ escalated_at: stamp }).eq('id', event.id).is('escalated_at', null).select('id').maybeSingle();
+      if (!claimed) continue;
+
+      const { available, emailTo, emailProvider } = await channelsFor(event.user_id);
+      const title = `Still unseen: ${event.title}`;
+      const sent = [];
+      for (const channel of available) {
+        if (channel === 'in_app' || channel === event.channel) continue;
+        let result;
+        try {
+          if (channel === 'push') result = await sendPush(event.user_id, { title, body: event.body, category: event.category });
+          else if (channel === 'email') {
+            const shaped = notifications.formatNotificationEmail({ ...event, title });
+            result = await sendEmail({ userId: event.user_id, to: emailTo, subject: shaped.subject, text: shaped.text, provider: emailProvider });
+          } else if (channel === 'telegram') {
+            result = await sendTelegram(event.user_id, { text: notifications.formatNotificationTelegram({ ...event, title }).text });
+          }
+        } catch (e) { result = { ok: false, error: e.message }; }
+        if (result?.ok && result?.dev !== true) sent.push(channel);
+      }
+      results.push({ id: event.id, status: 'escalated', sent });
+    }
+    return { ok: true, results };
+  }
+
+  return { raise, deliverPending, deliverOne, escalateUnseen };
 }
 
 module.exports = {

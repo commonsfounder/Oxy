@@ -3009,7 +3009,8 @@ async function evaluateAndSurfaceHouseholdEvents(userId, observations, now = new
           ...receipt.sourceRef,
           source: event.source,
           ...(event.personName ? { personName: event.personName } : {}),
-          ...(event.room ? { room: event.room } : {})
+          ...(event.room ? { room: event.room } : {}),
+          ...(event.urgent ? { escalate: true } : {})
         }
       });
       if (queued?.ok) raised += 1;
@@ -9930,6 +9931,7 @@ const actionDeps = {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+module.exports.escalateUnseenAlerts = () => notificationDelivery.escalateUnseen();
 module.exports.runRetentionSweep = runRetentionSweep;
 module.exports.parseActions = parseActions;
 module.exports.mentionsActionCommitment = mentionsActionCommitment;
