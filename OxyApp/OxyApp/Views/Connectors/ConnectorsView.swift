@@ -216,8 +216,9 @@ struct ConnectorsView: View {
     }
 
     private func iconCandidates(_ entry: Entry) -> [String] {
-        if let c = connector(entry) { return [c.icon, c.id] }
-        return [entry.name]
+        let logo = "app-\(entry.key)"
+        if let c = connector(entry) { return [c.icon, c.id, logo] }
+        return [logo, entry.name]
     }
 
     @ViewBuilder
