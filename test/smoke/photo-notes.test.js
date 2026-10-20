@@ -81,3 +81,13 @@ test('asking for a sign-in hands the phone a sign-in card, and forgetting remove
   assert.deepEqual(calls, [['user_id', 'u1'], ['site', 'amazon.co.uk']]);
   assert.match(out.text, /forgotten/);
 });
+
+test('a photo reply with a proposed action is read, and plain text still works', () => {
+  const { parseReply } = require('../../api/services/photo-vision');
+  const json = parseReply('```json\n{"note":"A flyer for a Sunday market at the Bullring, 26 Oct, 11am.","offer":{"ask":"Want me to add Sunday market to your calendar?","prompt":"Add the Sunday market on 26 Oct at 11am to my calendar."}}\n```');
+  assert.match(json.note, /Sunday market/);
+  assert.match(json.offer.ask, /calendar/);
+  const plain = parseReply('A red two-piece set on a hanger.');
+  assert.equal(plain.offer, null);
+  assert.equal(parseReply('{"note":"A dog on a beach","offer":null}').offer, null);
+});

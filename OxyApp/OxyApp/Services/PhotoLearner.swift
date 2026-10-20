@@ -38,18 +38,23 @@ final class PhotoLearner {
         return status == .authorized || status == .limited
     }
 
+    /// Looks at new photos each time the app opens, and keeps going through an older library until it is all done.
     func runIfEnabled() async {
         guard UserDefaults.standard.bool(forKey: Self.enabledKey) else { return }
-        await run()
+        let deadline = Date().addingTimeInterval(15 * 60)
+        while await run(), Date() < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+        }
     }
 
-    func run() async {
-        guard !isRunning else { return }
+    @discardableResult
+    func run() async -> Bool {
+        guard !isRunning else { return false }
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status == .notDetermined { _ = await requestAccess(); status = PHPhotoLibrary.authorizationStatus(for: .readWrite) }
         guard status == .authorized || status == .limited else {
             Self.record("Photo access is off. Turn it on in the Settings app.")
-            return
+            return false
         }
         isRunning = true
         defer { isRunning = false }
@@ -60,7 +65,7 @@ final class PhotoLearner {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        options.fetchLimit = 3000
+        options.fetchLimit = 20000
         let assets = PHAsset.fetchAssets(with: options)
 
         var seen = done
@@ -92,6 +97,7 @@ final class PhotoLearner {
         } else {
             Self.record("Looked at \(looked) photos and kept \(sentNotes) notes.")
         }
+        return handled >= Self.perRun
     }
 
     /// Asks Adam to describe one photo. True means the server handled it (kept a note or skipped a private photo).

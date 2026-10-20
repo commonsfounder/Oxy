@@ -4717,6 +4717,12 @@ app.post('/memory/photos/describe', photoVisionLimiter, requireSessionAuth, uplo
     });
     if (result.skipped) return res.json({ saved: 0, skipped: result.reason });
     const saved = await require('./services/photo-notes').saveNotes(supabase, userId, [{ text: result.note, date: result.date }]);
+    // Only a fresh photo is worth a nudge; a screenshot from last month is just remembered.
+    const taken = Date.parse(result.date || '');
+    if (result.offer && saved.saved && Number.isFinite(taken) && Date.now() - taken < 3 * 86400000) {
+      const id = `photo:${require('crypto').createHash('sha1').update(result.offer.prompt).digest('hex').slice(0, 12)}`;
+      await raiseOffer(userId, { id, text: result.offer.ask, yes: 'Yes please', prompt: result.offer.prompt }).catch(() => {});
+    }
     res.json({ saved: saved.saved });
   } catch (err) {
     res.status(502).json({ error: 'Could not look at that photo.' });
@@ -5945,20 +5951,17 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   });
 }
 
-// At most one offer a day: a sentence with a one-tap yes, built from real saved dates.
-async function maybeCreateOffer(userId, now = new Date()) {
+// One offer at most every 20 hours, shared by every source: saved dates, due commitments, photos.
+async function offerCapReached(userId, now) {
   const since = new Date(now.getTime() - 20 * 3600000).toISOString();
   const { data: recent } = await supabase.from('notification_events').select('dedupe_key')
     .eq('user_id', userId).eq('source_ref->>offer', 'true').gte('created_at', since).limit(1);
-  if (recent?.length) return null;
-  const [{ data: occasions }, { data: commitments }, { data: past }] = await Promise.all([
-    supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
-    supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
-    supabase.from('notification_events').select('source_ref').eq('user_id', userId).eq('source_ref->>offer', 'true').order('created_at', { ascending: false }).limit(200)
-  ]);
-  const alreadyOffered = new Set((past || []).map(row => row.source_ref?.offerId).filter(Boolean));
-  const offer = offers.chooseOffer({ occasions: occasions || [], commitments: commitments || [], now, alreadyOffered });
-  if (!offer) return null;
+  return Boolean(recent?.length);
+}
+
+// Puts one offer in the chat (and the notification route) unless this exact one was made before.
+async function raiseOffer(userId, offer, now = new Date()) {
+  if (await offerCapReached(userId, now)) return null;
   const queued = await notificationDelivery.raise(userId, {
     category: 'other',
     urgency: 'normal',
@@ -5967,11 +5970,22 @@ async function maybeCreateOffer(userId, now = new Date()) {
     dedupeKey: `offer:${offer.id}`,
     sourceRef: { offer: true, offerId: offer.id }
   });
-  if (queued?.created) {
-    await saveMessage(userId, 'assistant', { text: offer.text, kind: 'offer', offer: { id: offer.id, yes: offer.yes, prompt: offer.prompt } });
-    return offer;
-  }
-  return null;
+  if (!queued?.created) return null;
+  await saveMessage(userId, 'assistant', { text: offer.text, kind: 'offer', offer: { id: offer.id, yes: offer.yes, prompt: offer.prompt } });
+  return offer;
+}
+
+// A sentence with a one-tap yes, built from real saved dates.
+async function maybeCreateOffer(userId, now = new Date()) {
+  if (await offerCapReached(userId, now)) return null;
+  const [{ data: occasions }, { data: commitments }, { data: past }] = await Promise.all([
+    supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
+    supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
+    supabase.from('notification_events').select('source_ref').eq('user_id', userId).eq('source_ref->>offer', 'true').order('created_at', { ascending: false }).limit(200)
+  ]);
+  const alreadyOffered = new Set((past || []).map(row => row.source_ref?.offerId).filter(Boolean));
+  const offer = offers.chooseOffer({ occasions: occasions || [], commitments: commitments || [], now, alreadyOffered });
+  return offer ? raiseOffer(userId, offer, now) : null;
 }
 
 function emptyProactiveSummary() {

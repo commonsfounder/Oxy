@@ -5,6 +5,7 @@ import UIKit
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
+    @Environment(\.scenePhase) private var scenePhase
     init() {
         UISlider.appearance().maximumTrackTintColor = UIColor { trait in
             trait.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.16) : UIColor(white: 0, alpha: 0.14)
@@ -16,6 +17,11 @@ struct OxyApp: App {
             RootView()
                 .environment(appState)
                 .tint(Color.appAccent)
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active, appState.isAuthenticated, !appState.isDemoSession {
+                        Task { await PhotoLearner.shared.runIfEnabled() }
+                    }
+                }
         }
     }
 }
