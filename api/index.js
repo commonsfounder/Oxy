@@ -165,6 +165,7 @@ const travelInventory = require('./services/travel-inventory');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
 const offers = require('./services/offers');
+const apns = require('./services/apns');
 const { raiseRecentActionFollowUp, recoverySnapshot } = require('./services/action-follow-up');
 const commitments = require('./services/commitments');
 const { normalizeHouseholdState, formatHouseholdState } = require('./services/household-state');
@@ -1045,35 +1046,24 @@ async function sendPushToUser(userId, briefing) {
   await Promise.all(devices
     .filter(device => device.platform === 'ios' && device.push_token)
     .map(async device => {
-      try {
-        await axios.post(
-          `${host}/3/device/${device.push_token}`,
-          {
-            aps: {
-              alert: {
-                title: briefing.title || 'Assistant',
-                body: briefing.body || briefing.text || ''
-              },
-              sound: 'default',
-              'mutable-content': 1
-            },
-            briefingId: briefing.id,
-            kind: briefing.kind
+      const result = await apns.sendApns({
+        host,
+        authToken: token,
+        topic: bundleId,
+        deviceToken: device.push_token,
+        payload: {
+          aps: {
+            alert: { title: briefing.title || 'Assistant', body: briefing.body || briefing.text || '' },
+            sound: 'default',
+            'mutable-content': 1
           },
-          {
-            headers: {
-              authorization: `bearer ${token}`,
-              'apns-topic': bundleId,
-              'apns-push-type': 'alert',
-              'content-type': 'application/json'
-            },
-            timeout: 10000
-          }
-        );
-        sent += 1;
-      } catch (err) {
-        console.warn('[push] APNs send failed:', err?.response?.data || err.message);
-      }
+          briefingId: briefing.id,
+          kind: briefing.kind
+        }
+      });
+      if (result.ok) { sent += 1; return; }
+      console.warn('[push] APNs send failed:', result.status, result.reason);
+      if (apns.isDeadToken(result)) await supabase.from('devices').delete().eq('push_token', device.push_token).then(() => {}, () => {});
     }));
   return { sent };
 }
