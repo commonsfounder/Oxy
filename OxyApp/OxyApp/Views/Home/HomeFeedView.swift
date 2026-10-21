@@ -18,13 +18,22 @@ struct HomeFeedView: View {
     @State private var loaded = false
     @State private var handled: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "adam.home.handled") ?? [])
     @State private var showsPlaces = false
+    @State private var reading: (read: Int, total: Int)?
 
     private var visible: [HomeCard] { cards.filter { !handled.contains($0.id) } }
 
     var body: some View {
         SettingsPage(title: "Home", isRoot: true) {
+            if let reading {
+                HStack(spacing: 10) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Reading your photos for things that need doing: \(reading.read) of \(reading.total)")
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
             if visible.isEmpty {
-                Text(loaded ? "Nothing needs you right now." : " ")
+                Text(loaded ? (reading == nil ? "Nothing needs you right now." : "Nothing yet. This fills in as I read.") : " ")
                     .font(.appBody(17))
                     .foregroundStyle(Color.appMuted)
                     .padding(.top, 8)
@@ -50,7 +59,15 @@ struct HomeFeedView: View {
             }
             .buttonStyle(.appScale(0.99))
         }
-        .task { await load() }
+        .task {
+            await load()
+            // While photos are being read, keep the cards and the count fresh.
+            while !Task.isCancelled {
+                refreshProgress()
+                try? await Task.sleep(for: .seconds(8))
+                if reading != nil { await load() }
+            }
+        }
         .refreshable { await load() }
         .fullScreenCover(isPresented: $showsPlaces) {
             YourHomeView().swipeToDismiss().environment(\.revealClose, nil)
@@ -100,6 +117,15 @@ struct HomeFeedView: View {
         .accessibilityElement(children: .combine)
         .accessibilityHint("Asks Adam to do this")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func refreshProgress() {
+        if let value = UserDefaults.standard.dictionary(forKey: PhotoLearner.progressKey),
+           let read = value["read"] as? Int, let total = value["total"] as? Int, total > 0 {
+            reading = (read, total)
+        } else {
+            reading = nil
+        }
     }
 
     private func dismiss(_ card: HomeCard) { withAnimation(.appStandard) { mark(card) } }

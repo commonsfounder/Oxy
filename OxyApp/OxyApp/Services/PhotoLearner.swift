@@ -69,42 +69,81 @@ final class PhotoLearner {
         failedSends = 0
         looked = 0
 
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        options.fetchLimit = 20000
-        let assets = PHAsset.fetchAssets(with: options)
-
+        // Screenshots first (they are where flyers, bills and products live), then everything else, newest first.
+        let todo = unreadAssets(limit: Self.perRun)
+        let total = PHAsset.fetchAssets(with: .image, options: nil).count
         var seen = done
         var pending: [[String: Any]] = []
-        var handled = 0
-        for index in 0..<assets.count {
-            if handled >= Self.perRun || Task.isCancelled { break }
-            let asset = assets.object(at: index)
-            if seen.contains(asset.localIdentifier) { continue }
-            handled += 1
-            looked += 1
-            seen.insert(asset.localIdentifier)
-            guard let image = await loadImage(asset) else { continue }
-            let text = await describe(image, asset: asset)
-            if let jpeg = Self.smallJPEG(image),
-               await describeInCloud(jpeg, asset: asset, hint: text) { continue }
-            guard !text.isEmpty else { continue }
-            var note: [String: Any] = ["text": text]
-            if let date = asset.creationDate { note["date"] = ISO8601DateFormatter().string(from: date) }
-            pending.append(note)
+        var processed = 0
+        let width = 4
+        var index = 0
+        while index < todo.count, !Task.isCancelled {
+            let chunk = Array(todo[index..<min(index + width, todo.count)])
+            index += width
+            let notes = await withTaskGroup(of: [String: Any]?.self) { group in
+                for asset in chunk { group.addTask { @MainActor in await self.process(asset) } }
+                var out: [[String: Any]] = []
+                for await note in group { if let note { out.append(note) } }
+                return out
+            }
+            pending.append(contentsOf: notes)
+            for asset in chunk { seen.insert(asset.localIdentifier) }
+            processed += chunk.count
+            looked += chunk.count
+            done = seen
+            Self.progress(read: seen.count, total: total)
             if pending.count >= Self.batch { await send(pending); pending = [] }
         }
         if !pending.isEmpty { await send(pending) }
         done = seen
         if failedSends > 0 {
-            Self.record("Couldn't send some notes. Try Scan now again.")
+            Self.record("Couldn't read some photos. They'll be tried again.")
         } else if looked == 0 {
             Self.record("Nothing new to look at.")
         } else {
             Self.record("Looked at \(looked) photos and kept \(sentNotes) notes.")
         }
-        return handled >= Self.perRun
+        UserDefaults.standard.removeObject(forKey: Self.progressKey)
+        return processed >= Self.perRun
+    }
+
+    /// The next photos to read: screenshots first, then the rest, skipping any already read.
+    private func unreadAssets(limit: Int) -> [PHAsset] {
+        let seen = done
+        func fetch(screenshots: Bool) -> [PHAsset] {
+            let options = PHFetchOptions()
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            let screenshot = PHAssetMediaSubtype.photoScreenshot.rawValue
+            options.predicate = NSPredicate(format: "mediaType == %d AND (mediaSubtypes & %d) \(screenshots ? "!=" : "==") 0", PHAssetMediaType.image.rawValue, screenshot)
+            options.fetchLimit = 20000
+            let result = PHAsset.fetchAssets(with: options)
+            var out: [PHAsset] = []
+            for index in 0..<result.count {
+                let asset = result.object(at: index)
+                if !seen.contains(asset.localIdentifier) { out.append(asset) }
+                if out.count >= limit { break }
+            }
+            return out
+        }
+        let shots = fetch(screenshots: true)
+        return shots.count >= limit ? shots : shots + fetch(screenshots: false).prefix(limit - shots.count)
+    }
+
+    /// One photo: read it on the phone, ask Adam to describe it, and fall back to the on-phone note if that fails.
+    private func process(_ asset: PHAsset) async -> [String: Any]? {
+        guard let image = await loadImage(asset) else { return nil }
+        let text = await describe(image, asset: asset)
+        if let jpeg = Self.smallJPEG(image), await describeInCloud(jpeg, asset: asset, hint: text) { return nil }
+        guard !text.isEmpty else { return nil }
+        var note: [String: Any] = ["text": text]
+        if let date = asset.creationDate { note["date"] = ISO8601DateFormatter().string(from: date) }
+        return note
+    }
+
+    /// Read so far and in total, for Home to show while the first pass runs.
+    static let progressKey = "adam.photoLearning.progress"
+    private static func progress(read: Int, total: Int) {
+        UserDefaults.standard.set(["read": read, "total": total], forKey: progressKey)
     }
 
     /// Asks Adam to describe one photo. True means the server handled it (kept a note or skipped a private photo).
