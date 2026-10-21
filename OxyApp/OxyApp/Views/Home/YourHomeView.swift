@@ -65,6 +65,8 @@ enum HomeService {
 @MainActor
 enum AskAdam {
     static let notification = Notification.Name("AdamAskDraft")
+    /// Unlike a draft, this sends the text straight away.
+    static let sendNotification = Notification.Name("AdamAskSend")
 
     static func draft(_ text: String) {
         HapticManager.shared.impact(.light)

@@ -4718,6 +4718,23 @@ app.post('/memory/photos/describe', photoVisionLimiter, requireSessionAuth, uplo
     res.status(502).json({ error: 'Could not look at that photo.' });
   }
 });
+// The cards on Home.
+app.get('/agent/home-feed', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    const [{ data: occasions }, { data: commitments }, { data: events }] = await Promise.all([
+      supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
+      supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
+      supabase.from('notification_events').select('source_ref').eq('user_id', userId).eq('source_ref->>offer', 'true').gte('created_at', since).order('created_at', { ascending: false }).limit(20)
+    ]);
+    const photoOffers = (events || []).map(row => row.source_ref).filter(ref => String(ref?.offerId || '').startsWith('photo:') && ref.ask && ref.prompt).map(ref => ({ id: ref.offerId, ask: ref.ask, prompt: ref.prompt }));
+    res.json({ cards: require('./services/home-feed').buildCards({ occasions: occasions || [], commitments: commitments || [], photoOffers }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.delete('/memory/photos', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -5958,7 +5975,7 @@ async function raiseOffer(userId, offer, now = new Date()) {
     title: 'A thought from Adam',
     body: offer.text,
     dedupeKey: `offer:${offer.id}`,
-    sourceRef: { offer: true, offerId: offer.id }
+    sourceRef: { offer: true, offerId: offer.id, ask: offer.text, prompt: offer.prompt }
   });
   if (!queued?.created) return null;
   await saveMessage(userId, 'assistant', { text: offer.text, kind: 'offer', offer: { id: offer.id, yes: offer.yes, prompt: offer.prompt } });

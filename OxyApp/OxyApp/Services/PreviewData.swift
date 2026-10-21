@@ -15,6 +15,7 @@ enum PreviewData {
         case let p where p.hasPrefix("/connectors/apps"): json = apps
         case let p where p.hasPrefix("/connectors/"): json = connectors
         case "/agent/activity": json = activity
+        case "/agent/home-feed": json = homeFeed
         case "/agent/context": json = context
         case let p where p.hasPrefix("/memory/") && p.hasSuffix("/items"): json = memory
         default: json = nil
@@ -56,6 +57,15 @@ enum PreviewData {
     {"configured":true,"connections":[
       {"id":"a","toolkit":"googlephotos","status":"ACTIVE","connected":true},
       {"id":"b","toolkit":"todoist","status":"ACTIVE","connected":true}
+    ]}
+    """
+
+    private static let homeFeed = """
+    {"cards":[
+      {"id":"c1","verb":"Send","rest":"the tenancy documents? Due tomorrow","prompt":"Help me finish this: send the tenancy documents.","brand":null},
+      {"id":"c2","verb":"Top up","rest":"Monzo by £13.71 tonight? It's over its overdraft limit","prompt":"Remind me to top up Monzo tonight.","brand":"monzo"},
+      {"id":"c3","verb":"Plan","rest":"something for Alisa's birthday in 3 days?","prompt":"Help with Alisa's birthday.","brand":null},
+      {"id":"c4","verb":"Add","rest":"the Sunday Market on Sunday 26 October, 11am to your calendar?","prompt":"Add the Sunday Market to my calendar.","brand":"google"}
     ]}
     """
 

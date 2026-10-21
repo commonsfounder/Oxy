@@ -26,6 +26,9 @@ struct MainTabView: View {
                 SiteSignInSheet(site: debugSignInSite ?? "") {}
             }
             #endif
+            .onReceive(NotificationCenter.default.publisher(for: AskAdam.sendNotification)) { _ in
+                opened = nil
+            }
             .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { _ in
                 opened = nil
             }
@@ -54,7 +57,7 @@ struct MainTabView: View {
                 CornerReveal(origin: hub, onClosed: { opened = nil }) {
                     switch choice {
                     case .activity: AdamActivityView()
-                    case .home: YourHomeView()
+                    case .home: HomeFeedView()
                     case .memory: MemoryView()
                     case .settings, .privateChat: AdamYouView()
                     }

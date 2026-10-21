@@ -328,7 +328,7 @@ struct ConnectorsView: View {
 
 // MARK: - AppIconView
 
-private struct AppIconView: View {
+struct AppIconView: View {
     let candidates: [String]
 
     var body: some View {

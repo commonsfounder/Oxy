@@ -12,6 +12,7 @@
 		AB1000000000000000000001 /* TaskInterfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000001 /* TaskInterfaceView.swift */; };
 		A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F08 /* WorkflowTimelineView.swift */; };
 		A10000010000000000000F14 /* YourHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F14 /* YourHomeView.swift */; };
+		A10000010000000000000F77 /* HomeFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F77 /* HomeFeedView.swift */; };
 		A10000010000000000000F16 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F16 /* SceneView.swift */; };
 		A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F90 /* PlaceResultsCard.swift */; };
 		A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F91 /* TravelOptionsCard.swift */; };
@@ -106,6 +107,7 @@
 		AB2000000000000000000001 /* TaskInterfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskInterfaceView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F08 /* WorkflowTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowTimelineView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F14 /* YourHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourHomeView.swift; sourceTree = "<group>"; };
+		A20000010000000000000F77 /* HomeFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F16 /* SceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F90 /* PlaceResultsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceResultsCard.swift; sourceTree = "<group>"; };
 		A20000010000000000000F91 /* TravelOptionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelOptionsCard.swift; sourceTree = "<group>"; };
@@ -455,6 +457,7 @@
 			children = (
 				A20000010000000000000F08 /* WorkflowTimelineView.swift */,
 				A20000010000000000000F14 /* YourHomeView.swift */,
+				A20000010000000000000F77 /* HomeFeedView.swift */,
 				A20000010000000000000F15 /* AdamActivityView.swift */,
 				A20000010000000000000F07 /* HomeBoardView.swift */,
 				A20000010000000000000100 /* AgenticHomeView.swift */,
@@ -604,6 +607,7 @@
 			files = (
 				A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */,
 				A10000010000000000000F14 /* YourHomeView.swift in Sources */,
+				A10000010000000000000F77 /* HomeFeedView.swift in Sources */,
 				A10000010000000000000F15 /* AdamActivityView.swift in Sources */,
 				A10000010000000000000F07 /* HomeBoardView.swift in Sources */,
 				A10000010000000000000F06 /* HomeBoardService.swift in Sources */,

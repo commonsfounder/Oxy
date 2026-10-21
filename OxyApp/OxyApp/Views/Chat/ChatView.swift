@@ -522,6 +522,11 @@ struct ChatView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await boardModel.refresh() } }
             }
+            .onReceive(NotificationCenter.default.publisher(for: AskAdam.sendNotification)) { note in
+                guard let text = note.object as? String else { return }
+                viewModel.inputText = text
+                viewModel.sendMessage(userId: appState.userId)
+            }
             .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { note in
                 guard let text = note.object as? String else { return }
                 viewModel.inputText = text

@@ -12,7 +12,7 @@ enum ThreadMenuChoice: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .activity: return "Activity"
-        case .home: return "Your home"
+        case .home: return "Home"
         case .memory: return "Memory"
         case .settings: return "Settings"
         case .privateChat: return "Private mode"
