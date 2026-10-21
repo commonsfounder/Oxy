@@ -12,6 +12,9 @@ final class PhotoLearner {
     static let enabledKey = "adam.photoLearning.enabled"
     static let statusKey = "adam.photoLearning.status"
     private static let doneKey = "adam.photoLearning.done"
+    /// Bump this when the photo reader improves, so everything is read again once with the better one.
+    private static let readerVersion = 2
+    private static let versionKey = "adam.photoLearning.readerVersion"
     private static let perRun = 250
     private static let batch = 20
 
@@ -41,6 +44,10 @@ final class PhotoLearner {
     /// Looks at new photos each time the app opens, and keeps going through an older library until it is all done.
     func runIfEnabled() async {
         guard UserDefaults.standard.bool(forKey: Self.enabledKey) else { return }
+        if UserDefaults.standard.integer(forKey: Self.versionKey) != Self.readerVersion {
+            await forgetEverything()
+            UserDefaults.standard.set(Self.readerVersion, forKey: Self.versionKey)
+        }
         let deadline = Date().addingTimeInterval(15 * 60)
         while await run(), Date() < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .seconds(2))

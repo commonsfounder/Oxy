@@ -165,6 +165,7 @@ const travelInventory = require('./services/travel-inventory');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
 const offers = require('./services/offers');
+const photoNotesService = require('./services/photo-notes');
 const apns = require('./services/apns');
 const { raiseRecentActionFollowUp, recoverySnapshot } = require('./services/action-follow-up');
 const commitments = require('./services/commitments');
@@ -3147,7 +3148,7 @@ async function getMemory(userId, trace = null, query = '') {
   return [manualProfile, ...factStrings].filter(Boolean).join('\n');
 }
 
-const INTERNAL_MEMORY_SOURCES = ['agent_episodic'];
+const INTERNAL_MEMORY_SOURCES = ['agent_episodic', 'photo_action'];
 function isUsefulMemoryContent(content) {
   const text = String(content || '').trim();
   if (!text) return false;
@@ -4707,11 +4708,14 @@ app.post('/memory/photos/describe', photoVisionLimiter, requireSessionAuth, uplo
     });
     if (result.skipped) return res.json({ saved: 0, skipped: result.reason });
     const saved = await require('./services/photo-notes').saveNotes(supabase, userId, [{ text: result.note, date: result.date }]);
-    // Only a fresh photo is worth a nudge; a screenshot from last month is just remembered.
-    const taken = Date.parse(result.date || '');
-    if (result.offer && saved.saved && Number.isFinite(taken) && Date.now() - taken < 3 * 86400000) {
+    // Every photo's suggested action is kept for Home; only a fresh photo is worth a nudge in chat.
+    if (result.offer) {
       const id = `photo:${require('crypto').createHash('sha1').update(result.offer.prompt).digest('hex').slice(0, 12)}`;
-      await raiseOffer(userId, { id, text: result.offer.ask, yes: 'Yes please', prompt: result.offer.prompt }).catch(() => {});
+      await photoNotesService.saveAction(supabase, userId, { id, ask: result.offer.ask, prompt: result.offer.prompt, date: result.date }).catch(() => {});
+      const taken = Date.parse(result.date || '');
+      if (saved.saved && Number.isFinite(taken) && Date.now() - taken < 3 * 86400000) {
+        await raiseOffer(userId, { id, text: result.offer.ask, yes: 'Yes please', prompt: result.offer.prompt }).catch(() => {});
+      }
     }
     res.json({ saved: saved.saved });
   } catch (err) {
@@ -4723,13 +4727,11 @@ app.get('/agent/home-feed', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const since = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [{ data: occasions }, { data: commitments }, { data: events }] = await Promise.all([
+    const [{ data: occasions }, { data: commitments }, photoOffers] = await Promise.all([
       supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
       supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
-      supabase.from('notification_events').select('source_ref').eq('user_id', userId).eq('source_ref->>offer', 'true').gte('created_at', since).order('created_at', { ascending: false }).limit(20)
+      photoNotesService.listActions(supabase, userId)
     ]);
-    const photoOffers = (events || []).map(row => row.source_ref).filter(ref => String(ref?.offerId || '').startsWith('photo:') && ref.ask && ref.prompt).map(ref => ({ id: ref.offerId, ask: ref.ask, prompt: ref.prompt }));
     res.json({ cards: require('./services/home-feed').buildCards({ occasions: occasions || [], commitments: commitments || [], photoOffers }) });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -91,3 +91,15 @@ test('a photo reply with a proposed action is read, and plain text still works',
   assert.equal(plain.offer, null);
   assert.equal(parseReply('{"note":"A dog on a beach","offer":null}').offer, null);
 });
+
+test('a photo action is kept once, listed while recent, and wiped with the photo notes', async () => {
+  const notes = require('../../api/services/photo-notes');
+  const db = fakeDb();
+  const action = { id: 'photo:abc', ask: 'Want me to add the market to your calendar?', prompt: 'Add the market to my calendar.', date: '2026-10-15' };
+  assert.equal(await notes.saveAction(db, 'u1', action), true);
+  assert.equal(await notes.saveAction(db, 'u1', action), false);
+  assert.equal((await notes.listActions(db, 'u1', { now: new Date('2026-10-21') })).length, 1);
+  assert.equal((await notes.listActions(db, 'u1', { now: new Date('2027-03-01') })).length, 0);
+  await notes.forgetAll(db, 'u1');
+  assert.equal((await notes.listActions(db, 'u1', { now: new Date('2026-10-21') })).length, 0);
+});

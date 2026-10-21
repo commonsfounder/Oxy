@@ -4,6 +4,7 @@
 // only these lines do. Stored as memories with source 'photos' so export and deletion cover them.
 
 const SOURCE = 'photos';
+const ACTION_SOURCE = 'photo_action';
 const MAX_BATCH = 40;
 const MAX_NOTE = 420;
 const MAX_STORED = 300;
@@ -50,9 +51,36 @@ async function search(supabase, userId, query = '', limit = 8) {
   return (words.length ? scored.filter(r => r.score > 0).sort((a, b) => b.score - a.score) : scored).slice(0, limit).map(r => r.content);
 }
 
+// What a photo suggests doing ("add this flyer to the calendar"), kept for every photo so Home can
+// surface it later. Stored as a hidden memory, so export and deletion already cover it.
+async function saveAction(supabase, userId, { id, ask, prompt, date }, now = new Date()) {
+  if (!id || !ask || !prompt) return false;
+  const content = JSON.stringify({ id, ask, prompt, date: date || null });
+  const { data: existing } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', ACTION_SOURCE).in('content', [content]);
+  if (existing?.length) return false;
+  const { error } = await supabase.from('memories').insert({ user_id: userId, content, source: ACTION_SOURCE, created_at: now.toISOString() });
+  if (error) throw error;
+  return true;
+}
+
+async function listActions(supabase, userId, { sinceDays = 45, now = new Date(), limit = 40 } = {}) {
+  const { data } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', ACTION_SOURCE).order('created_at', { ascending: false }).limit(200);
+  const cutoff = now.getTime() - sinceDays * 86400000;
+  const out = [];
+  for (const row of data || []) {
+    try {
+      const item = JSON.parse(row.content);
+      const taken = Date.parse(item.date || '');
+      if (item.id && item.ask && item.prompt && (!Number.isFinite(taken) || taken >= cutoff)) out.push({ id: item.id, ask: item.ask, prompt: item.prompt });
+    } catch { /* skip a row that is not ours */ }
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 async function forgetAll(supabase, userId) {
-  const { error } = await supabase.from('memories').delete().eq('user_id', userId).eq('source', SOURCE);
+  const { error } = await supabase.from('memories').delete().eq('user_id', userId).in('source', [SOURCE, ACTION_SOURCE]);
   if (error) throw error;
 }
 
-module.exports = { SOURCE, redact, noteLine, saveNotes, search, forgetAll };
+module.exports = { SOURCE, ACTION_SOURCE, redact, noteLine, saveNotes, saveAction, listActions, search, forgetAll };
