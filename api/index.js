@@ -533,6 +533,21 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
   }
 });
 
+// Twilio signs every webhook; texts that do not carry a valid signature are dropped. Only enforced once the auth token is set.
+function inboundSmsSignatureOk(req, providerName) {
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const provider = (providerName || process.env.MILLIE_PHONE_PROVIDER || 'twilio').toLowerCase();
+  if (provider !== 'twilio') return true;
+  if (!token) return true;
+  const given = String(req.get('x-twilio-signature') || '');
+  const url = `https://${req.get('host')}${req.originalUrl}`;
+  const data = Object.keys(req.body || {}).sort().reduce((acc, key) => acc + key + req.body[key], url);
+  const expected = require('crypto').createHmac('sha1', token).update(data).digest('base64');
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && require('crypto').timingSafeEqual(a, b);
+}
+
 // The optional :provider segment is for vendor switches: numbers already provisioned keep
 // posting to the URL they were given. With one provider, only the bare path is used.
 app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.urlencoded({ extended: false }), async (req, res) => {
@@ -548,6 +563,10 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
     return;
   }
   try {
+    if (!inboundSmsSignatureOk(req, providerName)) {
+      log('warn', 'millie_sms.inbound.bad_signature', { provider: providerName || 'default' });
+      return;
+    }
     const normalized = parseInboundSms(req.body, providerName);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
@@ -1019,7 +1038,16 @@ function createRequestTrace(label) {
 }
 
 
+let apnsTokenCache = { token: '', at: 0, key: '' };
 function apnsAuthToken() {
+  const cacheKey = `${process.env.APNS_KEY_ID}|${process.env.APNS_TEAM_ID}`;
+  if (apnsTokenCache.token && apnsTokenCache.key === cacheKey && Date.now() - apnsTokenCache.at < 40 * 60 * 1000) return apnsTokenCache.token;
+  const token = buildApnsAuthToken();
+  apnsTokenCache = { token, at: Date.now(), key: cacheKey };
+  return token;
+}
+
+function buildApnsAuthToken() {
   const keyId = process.env.APNS_KEY_ID;
   const teamId = process.env.APNS_TEAM_ID;
   const privateKey = (process.env.APNS_PRIVATE_KEY || '').replace(/\\n/g, '\n');
@@ -4832,7 +4860,10 @@ app.put('/memory/:userId/items/:id', async (req, res) => {
 app.delete('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const result = await forgetMemory(req.params.userId, req.body || { scope: 'all' });
+    if (!req.body || typeof req.body.scope !== 'string' || !req.body.scope) {
+      return res.status(400).json({ error: 'Say what to forget.' });
+    }
+    const result = await forgetMemory(req.params.userId, req.body);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

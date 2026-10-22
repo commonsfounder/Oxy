@@ -494,7 +494,8 @@ private struct MemoryDropBox: View {
                 placeholder: "Remember that…",
                 text: $draft,
                 axis: .vertical,
-                lineLimit: 1...4
+                lineLimit: 1...4,
+                autofocus: true
             )
 
             HStack {

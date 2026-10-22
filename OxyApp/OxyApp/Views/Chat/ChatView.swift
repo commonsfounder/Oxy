@@ -313,7 +313,7 @@ struct ChatView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                    if let networkError = viewModel.networkError {
+                    if let networkError = viewModel.networkError, !viewModel.messages.contains(where: { $0.turnError != nil }) {
                         ErrorBanner(
                             message: networkError,
                             onRetry: {

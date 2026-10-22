@@ -25,7 +25,7 @@ function noteLine(note) {
 async function saveNotes(supabase, userId, notes = [], now = new Date()) {
   const lines = [...new Set((Array.isArray(notes) ? notes : []).slice(0, MAX_BATCH).map(noteLine).filter(Boolean))];
   if (!lines.length) return { saved: 0 };
-  const { data: existing } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', SOURCE).in('content', lines);
+  const { data: existing } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', SOURCE).limit(20000);
   const have = new Set((existing || []).map(row => row.content));
   const fresh = lines.filter(line => !have.has(line));
   if (fresh.length) {
@@ -56,8 +56,8 @@ async function search(supabase, userId, query = '', limit = 8) {
 async function saveAction(supabase, userId, { id, ask, prompt, date }, now = new Date()) {
   if (!id || !ask || !prompt) return false;
   const content = JSON.stringify({ id, ask, prompt, date: date || null });
-  const { data: existing } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', ACTION_SOURCE).in('content', [content]);
-  if (existing?.length) return false;
+  const { data: existing } = await supabase.from('memories').select('content').eq('user_id', userId).eq('source', ACTION_SOURCE).limit(2000);
+  if ((existing || []).some(row => row.content === content)) return false;
   const { error } = await supabase.from('memories').insert({ user_id: userId, content, source: ACTION_SOURCE, created_at: now.toISOString() });
   if (error) throw error;
   return true;

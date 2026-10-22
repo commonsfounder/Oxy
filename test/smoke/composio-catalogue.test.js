@@ -33,7 +33,7 @@ test('connecting an app creates a managed sign-in once and returns the page to o
 });
 
 test('connections list reports which apps are signed in', async () => {
-  const { http } = fake({ 'GET /connected_accounts': { items: [{ id: 'a', status: 'ACTIVE', toolkit: { slug: 'linear' } }, { id: 'b', status: 'INITIATED', toolkit: { slug: 'asana' } }] } });
+  const { http } = fake({ 'GET /connected_accounts': { items: [{ id: 'a', user_id: 'u1', status: 'ACTIVE', toolkit: { slug: 'linear' } }, { id: 'b', user_id: 'u1', status: 'INITIATED', toolkit: { slug: 'asana' } }] } });
   const out = await createComposio({ env: { COMPOSIO_API_KEY: 'k' }, http }).listConnections('u1');
   assert.deepEqual(out.map(x => [x.toolkit, x.connected]), [['linear', true], ['asana', false]]);
 });
@@ -65,9 +65,17 @@ test('a failed app call is reported as failed, not success', async () => {
 });
 
 test('disconnecting an app deletes only that app\'s connected accounts', async () => {
-  const { http, calls } = fake({ 'GET /connected_accounts': { items: [{ id: 'ca_1', status: 'ACTIVE', toolkit: { slug: 'linear' } }] }, 'DELETE /connected_accounts/ca_1': {} });
+  const { http, calls } = fake({ 'GET /connected_accounts': { items: [{ id: 'ca_1', user_id: 'u1', status: 'ACTIVE', toolkit: { slug: 'linear' } }] }, 'DELETE /connected_accounts/ca_1': {} });
   const out = await createComposio({ env: { COMPOSIO_API_KEY: 'k' }, http }).disconnect('u1', 'Linear');
   assert.equal(out.removed, 1);
   assert.deepEqual(calls[0].query, { user_ids: ['u1'], toolkit_slugs: ['linear'] });
   assert.equal(calls[1].path, '/connected_accounts/ca_1');
+});
+
+test('other people\'s accounts are never listed or removed, whatever the server returns', async () => {
+  const { http, calls } = fake({ 'GET /connected_accounts': { items: [{ id: 'mine', user_id: 'u1', status: 'ACTIVE', toolkit: { slug: 'linear' } }, { id: 'theirs', user_id: 'u2', status: 'ACTIVE', toolkit: { slug: 'linear' } }] }, 'DELETE /connected_accounts/mine': {} });
+  const c = createComposio({ env: { COMPOSIO_API_KEY: 'k' }, http });
+  assert.deepEqual((await c.listConnections('u1')).map(x => x.id), ['mine']);
+  assert.equal((await c.disconnect('u1', 'linear')).removed, 1);
+  assert.ok(!calls.some(call => call.path.includes('theirs')));
 });

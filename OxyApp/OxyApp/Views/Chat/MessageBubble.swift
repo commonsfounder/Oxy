@@ -871,30 +871,45 @@ private struct FailedTurnView: View {
     let message: String
     var onRetry: (() -> Void)?
 
+    private var text: some View {
+        Text(message)
+            .font(.appBody(14, weight: .medium))
+            .foregroundStyle(Color.appInk)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var retry: some View {
+        Button {
+            HapticManager.shared.impact(.medium)
+            onRetry?()
+        } label: {
+            Text("Try again")
+                .font(.appBody(14, weight: .semibold))
+                .foregroundStyle(Color.appOnAction)
+                .fixedSize()
+                .padding(.horizontal, 14)
+                .frame(minHeight: 36)
+                .background(Capsule().fill(Color.appAction))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.95))
+    }
+
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            AppIcon("alert-circle", size: 16)
-                .foregroundStyle(Color.appDanger)
-            Text(message)
-                .font(.appBody(14, weight: .medium))
-                .foregroundStyle(Color.appInk)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            if let onRetry {
-                Button {
-                    HapticManager.shared.impact(.medium)
-                    onRetry()
-                } label: {
-                    Text("Try again")
-                        .font(.appBody(14, weight: .semibold))
-                        .foregroundStyle(Color.appOnAction)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 36)
-                        .background(Capsule().fill(Color.appAction))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 10) {
+                AppIcon("alert-circle", size: 16).foregroundStyle(Color.appDanger)
+                text
+                Spacer(minLength: 8)
+                if onRetry != nil { retry }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top, spacing: 10) {
+                    AppIcon("alert-circle", size: 16).foregroundStyle(Color.appDanger)
+                    text
                 }
-                .buttonStyle(.appScale(0.95))
+                if onRetry != nil { retry }
             }
         }
         .padding(.leading, 14)

@@ -103,7 +103,8 @@ struct HomeFeedView: View {
 
     private func refreshProgress() {
         if let value = UserDefaults.standard.dictionary(forKey: PhotoLearner.progressKey),
-           let read = value["read"] as? Int, let total = value["total"] as? Int, total > 0 {
+           let read = value["read"] as? Int, let total = value["total"] as? Int, total > 0,
+           Date().timeIntervalSince1970 - (value["at"] as? Double ?? 0) < 120 {
             reading = (read, total)
         } else {
             reading = nil
@@ -114,7 +115,9 @@ struct HomeFeedView: View {
 
     private func mark(_ card: HomeCard) {
         handled.insert(card.id)
-        UserDefaults.standard.set(Array(handled.suffix(300)), forKey: "adam.home.handled")
+        var order = (UserDefaults.standard.stringArray(forKey: "adam.home.handled") ?? []).filter { $0 != card.id }
+        order.append(card.id)
+        UserDefaults.standard.set(Array(order.suffix(500)), forKey: "adam.home.handled")
     }
 
     private func load() async {

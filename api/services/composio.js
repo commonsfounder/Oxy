@@ -18,7 +18,7 @@ function createComposio({ env = process.env, http = null } = {}) {
   const authConfigs = new Map(Object.entries(parseJson(env.COMPOSIO_AUTH_CONFIGS)));
 
   const send = http || (async (method, path, { query, body } = {}) => {
-    const res = await axios({ method, url: `${BASE_URL}${path}`, params: query, data: body, timeout: TIMEOUT_MS, headers: { 'x-api-key': apiKey } });
+    const res = await axios({ method, url: `${BASE_URL}${path}`, params: query, paramsSerializer: { indexes: null }, data: body, timeout: TIMEOUT_MS, headers: { 'x-api-key': apiKey } });
     return res.data;
   });
 
@@ -50,7 +50,7 @@ function createComposio({ env = process.env, http = null } = {}) {
   async function listConnections(userId) {
     requireConfigured();
     const res = await send('GET', '/connected_accounts', { query: { user_ids: [userId] } });
-    return (res?.items || []).map(item => ({ id: item.id, toolkit: item.toolkit?.slug || null, status: item.status || null, connected: item.status === 'ACTIVE' }));
+    return ownedBy(res, userId).map(item => ({ id: item.id, toolkit: item.toolkit?.slug || null, status: item.status || null, connected: item.status === 'ACTIVE' }));
   }
 
   // Signs the user out of one app by deleting its connected accounts.
@@ -58,7 +58,7 @@ function createComposio({ env = process.env, http = null } = {}) {
     requireConfigured();
     if (!SLUG.test(String(toolkit || ''))) throw new Error('Pick an app to disconnect.');
     const res = await send('GET', '/connected_accounts', { query: { user_ids: [userId], toolkit_slugs: [String(toolkit).toLowerCase()] } });
-    const ids = (res?.items || []).map(item => item.id).filter(Boolean);
+    const ids = ownedBy(res, userId).filter(item => item.toolkit?.slug === String(toolkit).toLowerCase()).map(item => item.id).filter(Boolean);
     for (const id of ids) await send('DELETE', `/connected_accounts/${id}`);
     return { removed: ids.length };
   }
@@ -71,6 +71,11 @@ function createComposio({ env = process.env, http = null } = {}) {
   }
 
   return { configured, startConnection, listConnections, disconnect, execute, isReadTool: (slug) => READ_VERBS.test(String(slug || '')) };
+}
+
+// Never trust the server-side filter alone: keep only accounts that name this user.
+function ownedBy(res, userId) {
+  return (res?.items || []).filter(item => item && item.user_id === userId);
 }
 
 function parseJson(text) {

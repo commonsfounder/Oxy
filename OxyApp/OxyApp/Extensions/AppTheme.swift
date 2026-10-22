@@ -332,6 +332,7 @@ struct AppLineField: View {
     @Binding var text: String
     var axis: Axis = .horizontal
     var lineLimit: ClosedRange<Int> = 1...1
+    var autofocus = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -353,6 +354,7 @@ struct AppLineField: View {
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .focused($isFocused)
+            .task { if autofocus { try? await Task.sleep(for: .milliseconds(250)); isFocused = true } }
 
             Rectangle()
                 .fill(isFocused ? Color.appInk.opacity(0.55) : Color.appAdaptive(dark: .white, light: .black).opacity(0.08))

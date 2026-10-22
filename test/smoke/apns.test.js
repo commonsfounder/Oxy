@@ -31,11 +31,12 @@ test('a push is sent over http2 to the device path with the app topic', async ()
   assert.equal(fakeConnect.last.lastHeaders['apns-topic'], 'ai.oxy.app');
 });
 
-test('Apple refusing a token is reported with its reason, and dead tokens are recognised', async () => {
+test('Apple refusing a token is reported with its reason, and only unregistered tokens count as dead', async () => {
   const result = await sendApns({ host: 'https://x', authToken: 'jwt', topic: 't', deviceToken: 'abc', payload: {}, connect: fakeConnect(400, 'BadDeviceToken') });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'BadDeviceToken');
-  assert.equal(isDeadToken(result), true);
+  assert.equal(isDeadToken(result), false);
+  assert.equal(isDeadToken({ status: 410, reason: 'Unregistered' }), true);
   assert.equal(isDeadToken({ status: 403, reason: 'InvalidProviderToken' }), false);
 });
 

@@ -35,8 +35,8 @@ function sendApns({ host, authToken, topic, deviceToken, payload, connect = http
   });
 }
 
-// A token Apple says is dead should be forgotten, not retried forever.
-const isDeadToken = (result) => result.status === 410 || ['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic'].includes(result.reason);
+// Only a token Apple says is unregistered is forgotten; BadDeviceToken can just mean the wrong environment.
+const isDeadToken = (result) => result.status === 410 || result.reason === 'Unregistered';
 
 // A device's own environment wins; devices registered before it was recorded follow the server default.
 function apnsHost(environment, defaultSandbox) {

@@ -32,7 +32,13 @@ final class PhotoLearner {
 
     private var done: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: Self.doneKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue.suffix(8000)), forKey: Self.doneKey) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: Self.doneKey) }
+    }
+
+    /// Oldest-first record of read photos, so the cap drops the oldest rather than random ones.
+    private var doneOrder: [String] {
+        get { UserDefaults.standard.stringArray(forKey: Self.doneKey) ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.suffix(20000)), forKey: Self.doneKey) }
     }
 
     /// Asks for photo access (whole library or the photos the user picks) and returns whether any was granted.
@@ -73,7 +79,9 @@ final class PhotoLearner {
         let todo = unreadAssets(limit: Self.perRun)
         let total = PHAsset.fetchAssets(with: .image, options: nil).count
         var seen = done
+        var order = doneOrder
         var pending: [[String: Any]] = []
+        var pendingIds: [String] = []
         var processed = 0
         let width = 4
         var index = 0
@@ -87,15 +95,21 @@ final class PhotoLearner {
                 return out
             }
             pending.append(contentsOf: notes)
-            for asset in chunk { seen.insert(asset.localIdentifier) }
+            for asset in chunk where seen.insert(asset.localIdentifier).inserted {
+                order.append(asset.localIdentifier)
+                pendingIds.append(asset.localIdentifier)
+            }
             processed += chunk.count
             looked += chunk.count
-            done = seen
+            doneOrder = order
             Self.progress(read: seen.count, total: total)
-            if pending.count >= Self.batch { await send(pending); pending = [] }
+            if pending.count >= Self.batch {
+                if await !send(pending) { forget(pendingIds, from: &seen, order: &order) }
+                pending = []; pendingIds = []
+            }
         }
-        if !pending.isEmpty { await send(pending) }
-        done = seen
+        if !pending.isEmpty, await !send(pending) { forget(pendingIds, from: &seen, order: &order) }
+        doneOrder = order
         if failedSends > 0 {
             Self.record("Couldn't read some photos. They'll be tried again.")
         } else if looked == 0 {
@@ -143,7 +157,7 @@ final class PhotoLearner {
     /// Read so far and in total, for Home to show while the first pass runs.
     static let progressKey = "adam.photoLearning.progress"
     private static func progress(read: Int, total: Int) {
-        UserDefaults.standard.set(["read": read, "total": total], forKey: progressKey)
+        UserDefaults.standard.set(["read": read, "total": total, "at": Date().timeIntervalSince1970], forKey: progressKey)
     }
 
     /// Asks Adam to describe one photo. True means the server handled it (kept a note or skipped a private photo).
@@ -182,12 +196,21 @@ final class PhotoLearner {
         UserDefaults.standard.removeObject(forKey: Self.doneKey)
     }
 
-    private func send(_ notes: [[String: Any]]) async {
+    /// A batch that could not be saved is un-marked, so those photos are read again next time.
+    private func forget(_ ids: [String], from seen: inout Set<String>, order: inout [String]) {
+        let drop = Set(ids)
+        seen.subtract(drop)
+        order.removeAll { drop.contains($0) }
+    }
+
+    private func send(_ notes: [[String: Any]]) async -> Bool {
         do {
             _ = try await APIClient.shared.request(path: "/memory/photos", method: "POST", body: ["notes": notes])
             sentNotes += notes.count
+            return true
         } catch {
             failedSends += 1
+            return false
         }
     }
 
