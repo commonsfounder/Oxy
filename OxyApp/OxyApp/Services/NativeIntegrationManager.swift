@@ -260,6 +260,14 @@ final class NativeIntegrationManager {
         } catch {}
     }
 
+    private static var apnsEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+
     func registerPushToken(_ deviceToken: Data, userId: String) async {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         UserDefaults.standard.set(token, forKey: "oxy_push_token")
@@ -271,6 +279,7 @@ final class NativeIntegrationManager {
                     "userId": userId,
                     "platform": "ios",
                     "pushToken": token,
+                    "apnsEnvironment": Self.apnsEnvironment,
                     "timezone": TimeZone.current.identifier
                 ]
             )

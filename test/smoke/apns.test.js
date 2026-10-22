@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
-const { sendApns, isDeadToken } = require('../../api/services/apns');
+const { sendApns, isDeadToken, apnsHost } = require('../../api/services/apns');
 
 function fakeConnect(status, reason) {
   return () => {
@@ -37,4 +37,11 @@ test('Apple refusing a token is reported with its reason, and dead tokens are re
   assert.equal(result.reason, 'BadDeviceToken');
   assert.equal(isDeadToken(result), true);
   assert.equal(isDeadToken({ status: 403, reason: 'InvalidProviderToken' }), false);
+});
+
+test('each device is pushed through the Apple server its token came from', () => {
+  assert.equal(apnsHost('sandbox', false), 'https://api.sandbox.push.apple.com');
+  assert.equal(apnsHost('production', true), 'https://api.push.apple.com');
+  assert.equal(apnsHost(null, true), 'https://api.sandbox.push.apple.com');
+  assert.equal(apnsHost(undefined, false), 'https://api.push.apple.com');
 });

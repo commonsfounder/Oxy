@@ -38,4 +38,10 @@ function sendApns({ host, authToken, topic, deviceToken, payload, connect = http
 // A token Apple says is dead should be forgotten, not retried forever.
 const isDeadToken = (result) => result.status === 410 || ['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic'].includes(result.reason);
 
-module.exports = { sendApns, isDeadToken };
+// A device's own environment wins; devices registered before it was recorded follow the server default.
+function apnsHost(environment, defaultSandbox) {
+  const sandbox = environment === 'sandbox' || (environment !== 'production' && defaultSandbox);
+  return sandbox ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
+}
+
+module.exports = { sendApns, isDeadToken, apnsHost };

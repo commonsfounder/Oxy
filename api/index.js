@@ -1038,15 +1038,16 @@ async function sendPushToUser(userId, briefing) {
 
   const { data: devices, error } = await supabase
     .from('devices')
-    .select('push_token, platform')
+    .select('push_token, platform, apns_environment')
     .eq('user_id', userId);
   if (error || !Array.isArray(devices)) return { sent: 0, error: error?.message || 'No devices' };
 
-  const host = process.env.APNS_USE_SANDBOX === 'true' ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
+  const defaultSandbox = process.env.APNS_USE_SANDBOX === 'true';
   let sent = 0;
   await Promise.all(devices
     .filter(device => device.platform === 'ios' && device.push_token)
     .map(async device => {
+      const host = apns.apnsHost(device.apns_environment, defaultSandbox);
       const result = await apns.sendApns({
         host,
         authToken: token,
@@ -5102,7 +5103,7 @@ app.post('/connectors', async (req, res) => {
 
 app.post('/devices/register', async (req, res) => {
   try {
-    const { userId, platform = 'ios', pushToken, timezone = TIMEZONE } = req.body || {};
+    const { userId, platform = 'ios', pushToken, timezone = TIMEZONE, apnsEnvironment } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
     if (!DEVICE_PLATFORM_ALLOWLIST.has(platform)) {
       return res.status(400).json({ error: 'Unsupported device platform.' });
@@ -5116,6 +5117,7 @@ app.post('/devices/register', async (req, res) => {
       platform,
       push_token: pushToken,
       timezone,
+      apns_environment: apnsEnvironment === 'sandbox' || apnsEnvironment === 'production' ? apnsEnvironment : null,
       updated_at: new Date().toISOString()
     }, { onConflict: 'user_id,push_token' });
     if (error) throw error;
@@ -8441,128 +8443,21 @@ app.get('/changelog', (req, res) => {
   ]);
 });
 
-function legalPage(title, body) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} · Adam</title>
-  <style>
-    body{margin:0;background:#0b0b0c;color:#f4f0ec;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    main{max-width:760px;margin:0 auto;padding:48px 20px 72px}
-    h1{font-size:34px;line-height:1.1;margin:0 0 10px}
-    h2{font-size:20px;margin:30px 0 10px}
-    p,li{color:#cfc8c1}
-    a{color:#e97961}
-    .meta{color:#8f8781;font-size:14px;margin-bottom:30px}
-  </style>
-</head>
-<body><main>${body}</main></body>
-</html>`;
-}
+const legalPages = require('./legal-pages');
 
 app.get('/privacy', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(legalPage('Privacy Policy', `
-    <h1>Privacy Policy</h1>
-    <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
-    <h2>Data Controller</h2>
-    <p>Adam is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
-    <h2>What We Collect</h2>
-    <ul>
-      <li>Chat messages and conversation history</li>
-      <li>Voice audio (transcribed and discarded after processing)</li>
-      <li>Location data (when location permission is granted)</li>
-      <li>Contacts (when contacts permission is granted)</li>
-      <li>Health data (when HealthKit permission is granted)</li>
-      <li>Calendar and reminder data (when calendar permission is granted)</li>
-      <li>Email content (when Gmail connector is connected)</li>
-      <li>OAuth tokens for connected services</li>
-      <li>Memories you ask Adam to keep, plus stable facts inferred from conversations</li>
-    </ul>
-    <h2>How We Use It</h2>
-    <ul>
-      <li>Providing the AI assistant service and completing requested actions</li>
-      <li>Improving the service through aggregated usage analytics</li>
-    </ul>
-    <h2>Lawful Basis</h2>
-    <p>Contract performance for account and assistant features. Legitimate interests for service improvement.</p>
-    <h2>Third-Party Processors</h2>
-    <ul>
-      <li>OpenAI — AI processing, speech and image generation</li>
-      <li>Google (Gmail, Calendar, Maps) — connector features</li>
-      <li>Supabase — database hosting (EU region)</li>
-      <li>Telegram — messaging connector (when enabled)</li>
-    </ul>
-    <h2>Data Retention</h2>
-    <ul>
-      <li>Conversations: 180 days</li>
-      <li>Memories: until you delete them</li>
-      <li>Account data: until you request deletion</li>
-    </ul>
-    <h2>Your Rights</h2>
-    <p>You have the right to access, rectification, erasure, portability, restriction, and objection. To exercise these rights, email <a href="mailto:support@oxy.app">support@oxy.app</a>.</p>
-    <h2>Security Incidents</h2>
-    <p>If a data breach affects your account, Adam will notify you within 72 hours of confirming the incident where legally required.</p>
-    <h2>Contact</h2>
-    <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
-  `));
+  res.send(legalPages.privacyPage());
 });
 
 app.get('/terms', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(legalPage('Terms of Service', `
-    <h1>Terms of Service</h1>
-    <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
-    <h2>The Service</h2>
-    <p>Adam is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
-    <h2>Acceptable Use</h2>
-    <ul>
-      <li>No illegal activity using Adam or connected services</li>
-      <li>No abuse of connected services (e.g. sending spam)</li>
-      <li>No attempts to circumvent safety measures or extract training data</li>
-    </ul>
-    <h2>Subscription</h2>
-    <p>Adam costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
-    <h2>Refund Policy</h2>
-    <p>You have a 14-day cooling-off period for new subscriptions under the UK Consumer Contracts Regulations 2013. Contact <a href="mailto:support@oxy.app">support@oxy.app</a> to request a refund within this period.</p>
-    <h2>Limitation of Liability</h2>
-    <p>Adam is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Adam's responses. Always verify important information independently.</p>
-    <h2>Governing Law</h2>
-    <p>These terms are governed by the laws of England and Wales.</p>
-    <h2>Contact</h2>
-    <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
-  `));
+  res.send(legalPages.termsPage());
 });
 
 app.get('/support', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.send(`<!DOCTYPE html><html><head><title>Adam Support</title>
-  <style>body{font-family:sans-serif;max-width:680px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}h1{font-size:28px}h2{font-size:20px;margin-top:32px}a{color:#2563eb}.faq{background:#f9f9f9;padding:16px;border-radius:8px;margin:12px 0}</style>
-  </head><body>
-  <h1>Adam Support</h1>
-  <p><strong>Email:</strong> <a href="mailto:support@oxy.app">support@oxy.app</a></p>
-  <p>We aim to respond within 48 hours. For security issues: <a href="mailto:security@oxy.app">security@oxy.app</a></p>
-
-  <h2>Delete Your Data</h2>
-  <ol>
-    <li>Open Adam and go to Settings</li>
-    <li>Scroll to "Danger Zone" at the bottom</li>
-    <li>Tap "Delete Account" and follow the confirmation steps</li>
-    <li>All your data (messages, memories, connected accounts) will be permanently deleted</li>
-  </ol>
-  <p>Alternatively, email <a href="mailto:support@oxy.app">support@oxy.app</a> with the subject "Delete my account" from your registered email address.</p>
-
-  <h2>Frequently Asked Questions</h2>
-  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Adam only accesses your email when you ask it to.</div>
-  <div class="faq"><strong>What does Adam remember?</strong><br>Adam extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
-  <div class="faq"><strong>Can I cancel my subscription?</strong><br>Yes, anytime. Cancel from Settings &rarr; Subscription or via your App Store/payment provider. You have 14 days from first purchase for a full refund (UK consumer law).</div>
-  <div class="faq"><strong>Is my data secure?</strong><br>Your data is stored in encrypted databases. Connector tokens are encrypted at rest. We never sell your data. See our <a href="/privacy">Privacy Policy</a>.</div>
-  <div class="faq"><strong>How do I report a bug?</strong><br>Email <a href="mailto:support@oxy.app">support@oxy.app</a> with your device, app version (visible in Settings), and what happened.</div>
-
-  <p><a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Service</a></p>
-  </body></html>`);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(legalPages.supportPage());
 });
 
 app.get('/robots.txt', (req, res) => {
