@@ -6,8 +6,8 @@ const { RETENTION_POLICY } = require('./services/data-retention');
 
 const COMPANY = 'Intuitive Devices';
 const APP_NAME = 'Adam';
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@intuitive.com';
-const SECURITY_EMAIL = process.env.SECURITY_EMAIL || 'security@intuitive.com';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@heyintuitive.com';
+const SECURITY_EMAIL = process.env.SECURITY_EMAIL || 'security@heyintuitive.com';
 const PRIVACY_UPDATED = '22 October 2026';
 const TERMS_UPDATED = '22 October 2026';
 
