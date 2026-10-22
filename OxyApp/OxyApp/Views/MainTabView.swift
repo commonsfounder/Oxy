@@ -57,7 +57,8 @@ struct MainTabView: View {
                 CornerReveal(origin: hub, onClosed: { opened = nil }) {
                     switch choice {
                     case .activity: AdamActivityView()
-                    case .home: HomeFeedView()
+                    case .today: HomeFeedView()
+                    case .home: YourHomeView()
                     case .memory: MemoryView()
                     case .settings, .privateChat: AdamYouView()
                     }

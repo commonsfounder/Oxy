@@ -17,13 +17,12 @@ struct HomeFeedView: View {
     @State private var cards: [HomeCard] = []
     @State private var loaded = false
     @State private var handled: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "adam.home.handled") ?? [])
-    @State private var showsPlaces = false
     @State private var reading: (read: Int, total: Int)?
 
     private var visible: [HomeCard] { cards.filter { !handled.contains($0.id) } }
 
     var body: some View {
-        SettingsPage(title: "Home", isRoot: true) {
+        SettingsPage(title: "Today", isRoot: true) {
             if let reading {
                 HStack(spacing: 10) {
                     ProgressView().scaleEffect(0.8)
@@ -44,20 +43,6 @@ struct HomeFeedView: View {
                     }
                 }
             }
-
-            Button { showsPlaces = true } label: {
-                HStack {
-                    Text("Devices and places")
-                        .font(.appBody(15, weight: .medium))
-                        .foregroundStyle(Color.appInk)
-                    Spacer()
-                    AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 52)
-                .settingsSurface()
-            }
-            .buttonStyle(.appScale(0.99))
         }
         .task {
             await load()
@@ -69,9 +54,6 @@ struct HomeFeedView: View {
             }
         }
         .refreshable { await load() }
-        .fullScreenCover(isPresented: $showsPlaces) {
-            YourHomeView().swipeToDismiss().environment(\.revealClose, nil)
-        }
     }
 
     private func cardView(_ card: HomeCard) -> some View {

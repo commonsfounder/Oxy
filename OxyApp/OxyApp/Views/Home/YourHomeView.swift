@@ -78,6 +78,7 @@ enum AskAdam {
 
 struct YourHomeView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.revealClose) private var revealClose
     @State private var home: HomeModel = .empty
     @State private var settings = OxySettings()
     @State private var loaded = false
@@ -94,7 +95,7 @@ struct YourHomeView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-            ScreenHeaderView(title: "Devices and places", onBack: { dismiss() })
+            ScreenHeaderView(title: "Your home", onBack: revealClose == nil ? { dismiss() } : nil)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30) {
                     if failed {
