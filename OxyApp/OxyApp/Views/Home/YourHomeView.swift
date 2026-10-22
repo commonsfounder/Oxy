@@ -77,6 +77,7 @@ enum AskAdam {
 // MARK: - Your home
 
 struct YourHomeView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var home: HomeModel = .empty
     @State private var settings = OxySettings()
     @State private var loaded = false
@@ -92,13 +93,10 @@ struct YourHomeView: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+            ScreenHeaderView(title: "Devices and places", onBack: { dismiss() })
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30) {
-                    Text("Your home")
-                        .font(.heroTitle)
-                        .foregroundStyle(Color.appInk)
-                        .accessibilityAddTraits(.isHeader)
-
                     if failed {
                         ErrorBanner(message: "Couldn't load your home.", onRetry: { Task { await load() } })
                     }
@@ -117,8 +115,9 @@ struct YourHomeView: View {
                     addressSection
                 }
                 .padding(.horizontal, AppSpacing.margin)
-                .padding(.top, 18)
+                .padding(.top, 10)
                 .padding(.bottom, 40)
+            }
             }
             .background(Color.appBackground.ignoresSafeArea())
             .refreshable { await load() }
