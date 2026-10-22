@@ -334,6 +334,7 @@ async function timedDev(area, event, fields, fn) {
 }
 
 const app = express();
+app.disable('x-powered-by');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const APP_URL = process.env.APP_URL || '';
 const ALLOWED_ORIGINS = [APP_URL].filter(Boolean);
@@ -852,9 +853,9 @@ const rateLimitStores = [];
 const audioRateLimit = new Map();
 
 function requestIp(req) {
-  return String(req.headers['x-forwarded-for'] || '')
-    .split(',')[0]
-    .trim()
+  // Fly sets this itself; a caller cannot choose it. The last forwarded hop is the proxy's own entry.
+  return String(req.headers['fly-client-ip'] || '').trim()
+    || String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()
     || req.ip
     || req.socket?.remoteAddress
     || 'unknown';
@@ -9991,6 +9992,14 @@ const actionDeps = {
   generateBrain,
   webSearchBrain
 };
+
+// Last stop for anything a route did not catch: a plain error, never raw database or stack text.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : (err?.message === 'Not allowed by CORS' ? 403 : 500);
+  if (status === 500) console.error('unhandled route error:', err?.message);
+  res.status(status).json({ error: status === 500 ? 'Something went wrong.' : status === 403 ? 'Not allowed.' : 'That request was not valid.' });
+});
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
