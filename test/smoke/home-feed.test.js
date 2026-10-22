@@ -15,7 +15,11 @@ test('real dates and commitments become cards, most urgent first, with a ready r
     now: NOW,
     occasions: [{ person_name: 'Alisa', occasion_type: 'birthday', month: 10, day: 24 }],
     commitments: [{ id: 'c1', what: 'send the tenancy documents', due_at: '2026-10-22T10:00:00Z', status: 'open' }],
-    photoOffers: [{ id: 'photo:abc', ask: 'Want me to add the Sunday Market to your calendar?', prompt: 'Add the Sunday Market to my calendar.' }]
+    photoOffers: [
+      { id: 'photo:abc', ask: 'Want me to add the Sunday Market to your calendar?', prompt: 'Add the Sunday Market to my calendar.' },
+      { id: 'photo:weak', ask: 'Want me to look at this?', prompt: 'Look at this.' },
+      { id: 'photo:odd', ask: 'Help with this photo', prompt: 'Help.' }
+    ]
   });
   assert.equal(cards[0].verb, 'Send');
   assert.match(cards[0].rest, /tenancy documents\? Due tomorrow/);

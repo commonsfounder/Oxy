@@ -63,10 +63,16 @@ function buildCards({ occasions = [], commitments = [], photoOffers = [], attent
     cards.push(card(`occasion:${name.toLowerCase()}:${type}`, days, 'Plan', `something for ${name}'s ${type} ${when(days)}?`, `Help me with ${name}'s ${type} ${when(days)}: suggest a gift and draft a short message.`));
   }
 
+  // Photo suggestions are the noisiest source, so only well-formed ones ("Want me to add ...") count, and not too many.
+  const WEAK_VERBS = new Set(['look', 'help', 'want', 'see', 'check', 'view', 'open', 'find', 'show', 'tell']);
+  let photoCount = 0;
   for (const offer of photoOffers) {
+    if (photoCount >= 4) break;
+    if (!/^want me to\s+\w+/i.test(clean(offer.ask)) || !offer.prompt) continue;
     const parts = splitVerb(offer.ask);
-    if (!parts || !offer.prompt) continue;
-    cards.push(card(offer.id, 1, parts.verb, parts.rest, offer.prompt));
+    if (!parts || WEAK_VERBS.has(parts.verb.toLowerCase())) continue;
+    cards.push(card(offer.id, 2, parts.verb, parts.rest, offer.prompt));
+    photoCount += 1;
   }
 
   for (const item of attentionCards) cards.push({ ...item, urgency: item.urgency ?? 1, brand: item.brand || brandIn(`${item.verb} ${item.rest}`) });
@@ -103,7 +109,7 @@ async function attentionToCards({ items = [], generate, userId = '', ttlMs = 30 
       const rest = clean(row?.rest, 160).replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, 'them');
       const prompt = clean(row?.prompt, 220);
       if (!item || !verb || !rest || !prompt) return null;
-      return { id: `mail:${crypto.createHash('sha1').update(String(item.detail || item.title)).digest('hex').slice(0, 10)}`, verb, rest, prompt, brand: BRANDS[String(row?.brand || '').toLowerCase()] || null, urgency: item.urgency === 'now' ? 0 : 1 };
+      return { id: `mail:${crypto.createHash('sha1').update(String(item.detail || item.title)).digest('hex').slice(0, 10)}`, verb, rest, prompt, brand: BRANDS[String(row?.brand || '').toLowerCase()] || null, urgency: 0 };
     }).filter(Boolean);
   } catch { cards = []; }
   cache.set(key, { at: now, cards });
