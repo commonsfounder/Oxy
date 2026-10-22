@@ -15,7 +15,7 @@ function safeParseJSON(value) {
 
 // Subject-less reminders ("remind me tomorrow") contain none of the pronouns below, so without
 // their own clause they never enter this pipeline and the model always asks what about.
-const BARE_REMINDER_RE = /^(?:can you |could you |please )?remind me\b(?!.*\b(?:to|about|that)\b)/i;
+const BARE_REMINDER_RE = /^(?:can you |could you |please )?remind me\b(?!\s+(?:what|who|where|when|why|how|which|if|whether)\b)(?!.*\b(?:to|about|that)\b)/i;
 
 // The pronoun has to be doing referential work — paired with a verb that takes an object ("play
 // it"), or inside a known follow-up phrase. A bare "it" anywhere in a sentence also catches

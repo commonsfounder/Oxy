@@ -80,7 +80,9 @@ function inferPersonalAdminAction(message) {
   }
 
   const personMatch = text.match(/^(?:what do you remember about|what do you know about|who is)\s+(.+?)[?.!]*$/i);
-  if (personMatch?.[1]) {
+  const personQuery = trimTrailingPunctuation(personMatch?.[1] || '');
+  // Only a short name; "who is the prime minister" or "about me" is a question for the model.
+  if (personQuery && personQuery.split(/\s+/).length <= 3 && !/^(?:the|a|an|my|me|you|i|your|this|that|it|we|us)\b/i.test(personQuery)) {
     return {
       reason: 'find_people',
       spoken: `I'll look up ${trimTrailingPunctuation(personMatch[1])}.`,
