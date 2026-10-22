@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E1000001000000000000B001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E1000001000000000000B002 /* PrivacyInfo.xcprivacy */; };
 		AB1000000000000000000002 /* AgentEnvironmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000002 /* AgentEnvironmentView.swift */; };
 		AB1000000000000000000F01 /* CornerReveal.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000F01 /* CornerReveal.swift */; };
 		AB1000000000000000000001 /* TaskInterfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000001 /* TaskInterfaceView.swift */; };
@@ -102,6 +103,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E1000001000000000000B002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AB2000000000000000000002 /* AgentEnvironmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEnvironmentView.swift; sourceTree = "<group>"; };
 		AB2000000000000000000F01 /* CornerReveal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CornerReveal.swift; sourceTree = "<group>"; };
 		AB2000000000000000000001 /* TaskInterfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskInterfaceView.swift; sourceTree = "<group>"; };
@@ -373,6 +375,7 @@
 			children = (
 				A20000010000000000000020 /* Assets.xcassets */,
 				D9000001000000000000000A /* HouseholdSounds.mlmodel */,
+				E1000001000000000000B002 /* PrivacyInfo.xcprivacy */,
 				A20000010000000000000F01 /* Fraunces.ttf */,
 				A20000010000000000000F02 /* Inter.ttf */,
 			);
@@ -595,6 +598,7 @@
 				A10000010000000000000020 /* Assets.xcassets in Resources */,
 				A10000010000000000000F03 /* Fraunces.ttf in Resources */,
 				A10000010000000000000F04 /* Inter.ttf in Resources */,
+				E1000001000000000000B001 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

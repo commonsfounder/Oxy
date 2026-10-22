@@ -29,3 +29,9 @@ extension Color {
     /// Red — #C0503E
     static let oxyRed = Color(red: 192/255, green: 80/255, blue: 62/255)
 }
+
+#if !DEBUG
+/// Release builds log nothing: diagnostic prints include message text and device identifiers.
+@inline(__always)
+func print(_ items: Any..., separator: String = " ", terminator: String = "\n") {}
+#endif
