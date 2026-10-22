@@ -113,3 +113,7 @@ Shared memory lives at `~/.claude/projects/-Users-chizigamonyewuchi-Documents-Ox
 - Before proposing a fix for a bug, reproduce it or read the actual error output — don't pattern-match to a plausible cause.
 - When blocked on a decision only the user can make, ask; for everything reversible that follows from the request, proceed.
 - Don't leave background processes running for the user to clean up.
+
+## UI work
+
+UI changes follow the loop in [docs/UI_LOOP.md](docs/UI_LOOP.md): look at real screenshots, critique hard, fix in small commits, look again, then swap roles. Check `docs/ui-loop/BATON.md` for whose turn it is.
