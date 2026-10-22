@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { buildCards, splitVerb, brandIn } = require('../../api/services/home-feed');
+const { buildCards, splitVerb, brandIn, attentionToCards } = require('../../api/services/home-feed');
 
 const NOW = new Date('2026-10-21T10:00:00Z');
 
@@ -34,4 +34,18 @@ test('done, far-off or overdue-for-ages items are left off', () => {
     ]
   });
   assert.equal(cards.length, 0);
+});
+
+test('email digest lines become action cards without email addresses, once per set of items', async () => {
+  let calls = 0;
+  const generate = async () => { calls += 1; return { text: '[{"i":0,"verb":"Top up","rest":"Monzo by £13.71 tonight? Write to notifications@studio.mercor.com","prompt":"Help me top up Monzo by £13.71.","brand":"Monzo"}]' }; };
+  const items = [{ title: 'Monzo', detail: 'Monzo needs you to add at least £13.71 (yesterday)', urgency: 'now' }];
+  const cards = await attentionToCards({ items, generate, userId: 'u1' });
+  assert.equal(cards[0].verb, 'Top up');
+  assert.equal(cards[0].brand, 'monzo');
+  assert.equal(cards[0].rest.includes('@'), false);
+  await attentionToCards({ items, generate, userId: 'u1' });
+  assert.equal(calls, 1);
+  assert.deepEqual(await attentionToCards({ items: [], generate, userId: 'u1' }), []);
+  assert.deepEqual(await attentionToCards({ items: [{ detail: 'x y z' }], generate: async () => ({ text: 'not json' }), userId: 'u2' }), []);
 });

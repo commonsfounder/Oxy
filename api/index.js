@@ -4727,12 +4727,16 @@ app.get('/agent/home-feed', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const [{ data: occasions }, { data: commitments }, photoOffers] = await Promise.all([
+    const homeFeed = require('./services/home-feed');
+    const [{ data: occasions }, { data: commitments }, photoOffers, { data: briefings }] = await Promise.all([
       supabase.from('occasions').select('person_name, occasion_type, month, day').eq('user_id', userId),
       supabase.from('commitments').select('id, what, due_at, status').eq('user_id', userId).eq('status', 'open'),
-      photoNotesService.listActions(supabase, userId)
+      photoNotesService.listActions(supabase, userId),
+      supabase.from('briefings').select('metadata, created_at').eq('user_id', userId).like('kind', '%_briefing').gte('created_at', new Date(Date.now() - 36 * 3600000).toISOString()).order('created_at', { ascending: false }).limit(1)
     ]);
-    res.json({ cards: require('./services/home-feed').buildCards({ occasions: occasions || [], commitments: commitments || [], photoOffers }) });
+    const attention = (Array.isArray(briefings?.[0]?.metadata?.attention) ? briefings[0].metadata.attention : []).filter(item => ['now', 'today', 'soon'].includes(item?.urgency));
+    const attentionCards = await homeFeed.attentionToCards({ items: attention, userId, generate: (request) => generateBrain({ model: FAST_MODEL, ...request }) });
+    res.json({ cards: homeFeed.buildCards({ occasions: occasions || [], commitments: commitments || [], photoOffers, attentionCards }) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1054,7 +1054,7 @@ private struct DirectionsResultCard: View {
                     }
                 }
                 .padding(.top, 2)
-            } else if let summary = action.cardText?.strippingMarkdown, !summary.isEmpty {
+            } else if let summary = action.cardText?.strippingMarkdown, !summary.isEmpty, !(action.isFailure && mapsUrl != nil) {
                 Text(summary)
                     .font(.appBody(13))
                     .foregroundStyle(Color.appMuted)
