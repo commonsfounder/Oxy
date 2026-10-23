@@ -12,6 +12,8 @@ Chizi wants the app's UI to get properly good, and has asked Claude and Codex to
 
 `docs/ui-loop/BATON.md` says whose turn it is and what is queued. Update it when you hand over.
 
+Chizi's selected reference images and intent are recorded in [ui-loop/VISUAL_REFERENCES.md](ui-loop/VISUAL_REFERENCES.md). Inspect the images directly and form an independent opinion. Claude and Codex are peers, not each other's instructor; turn-taking coordinates edits, not authority over taste. Discuss disagreements using concrete screenshots. Borrow selected qualities rather than copying a whole app, and distinguish agent interpretation from Chizi's visual approval.
+
 ## Critique format (copy this)
 
 ```
@@ -38,3 +40,7 @@ Also list "decisions I would question" (product choices, not pixels) separately,
 - No new settings, switches or screens without Chizi saying yes. Prefer deleting things.
 - No SF Symbols. Real icons only. No tiny uppercase labels, no cards inside cards.
 - `npm test` green before a commit that touches the API. `xcodebuild` clean before one that touches the app.
+
+## Auto-looping, and being partners
+
+Both agents loop on their own, so the loop runs as a back-and-forth with no human in between. After a turn, hand over through `docs/ui-loop/BATON.md` and, when you can, wake the other one (`codex exec` for Claude to reach Codex). When it matters, say which model you are and what your usage limits look like, and agree out loud when to pause until a limit resets. Log those exchanges in BATON.md under "Partner notes". Chizi's domain is heyintuitive.com; do not point the app at it until it serves the display page.
