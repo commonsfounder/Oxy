@@ -99,6 +99,8 @@ async function callGeminiWithTools(modelName, contents, config, trace = null, pr
 // Lookups that only read, asked for together in one turn, depend on nothing but the request, so
 // they can run side by side. Anything that writes, spends, or drives the browser keeps its order.
 const BROWSER_ITERATION_CEILING = 14;
+// After this long in one turn the agent is told to answer with what it has.
+const TURN_WALL_BUDGET_MS = 45000;
 const READ_ACTION = /^(search|get|find|list|check|web_search)(_|$)/;
 function areIndependentReads(actions) {
   if (!Array.isArray(actions) || actions.length < 2) return false;
@@ -250,14 +252,23 @@ async function runAgentLoop({
 
   await checkpoint(startIteration - 1);
 
+  const loopStartedAt = Date.now();
+  let wrappedUp = false;
   for (let i = startIteration; i < effectiveMaxIterations; i++) {
     logAgentStep(agentTrace, { type: 'think', iteration: i + 1 });
+    // A turn that has searched and browsed for a while must answer with what it has, not keep going.
+    const usedBrowser = executedActions.some(a => /^browser_|^run_browser|^web_browse/.test(String(a?.type || a?.action || '')));
+    const overBudget = i > startIteration && Date.now() - loopStartedAt > (usedBrowser ? TURN_WALL_BUDGET_MS * 2 : TURN_WALL_BUDGET_MS);
+    if (overBudget && !wrappedUp) {
+      wrappedUp = true;
+      resumedContents.push({ role: 'user', parts: [{ text: 'Time is up. Answer now in a few plain sentences using what you have found. If you could not finish, say what you found and what you need from me.' }] });
+    }
 
     if (onStep) onStep({ phase: 'thinking', iteration: i + 1 });
 
     let resp;
     try {
-      resp = await callGeminiWithTools(modelName, resumedContents, baseConfig, trace, provider);
+      resp = await callGeminiWithTools(modelName, resumedContents, wrappedUp ? { ...baseConfig, tools: [{ functionDeclarations: [] }], toolConfig: undefined } : baseConfig, trace, provider);
     } catch (err) {
       logAgentStep(agentTrace, { type: 'error', error: err.message });
       // Retry once on transient error for cream-of-crop reliability
