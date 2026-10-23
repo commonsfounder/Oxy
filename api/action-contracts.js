@@ -858,7 +858,7 @@ const ACTION_CONTRACTS = {
     aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
     inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time', departure_time: 'optional leave-at/around time' },
     paramHints: { mode: 'driving|walking|transit' },
-    guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff, or for generic local directions, walking, driving, and bus questions where a route summary is useful. Never pretend a route opened if all you have is a text answer. For live train times, platforms, or journey options, prefer a grounded search answer instead — this tool is not the source of truth for that.',
+    guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff, or for generic local directions, walking, driving, and bus questions where a route summary is useful. Never pretend a route opened if all you have is a text answer. For live train times, platforms, or journey options, prefer a grounded search answer instead — this tool is not the source of truth for that. If it fails or gives no route summary, do not stop there: answer the question in words from a web search (for example the line, the usual time and where to change).',
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none',
