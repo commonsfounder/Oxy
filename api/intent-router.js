@@ -130,6 +130,24 @@ function inferOutboundCommunicationAction(message) {
   return null;
 }
 
+// "Sign me into John Lewis": a straight hand-off to the sign-in page, not a goal for the agent to chase.
+const SITE_NAMES = { 'john lewis': 'johnlewis.com', amazon: 'amazon.co.uk', argos: 'argos.co.uk', asos: 'asos.com', ocado: 'ocado.com', tesco: 'tesco.com', sainsburys: 'sainsburys.co.uk', "sainsbury's": 'sainsburys.co.uk', currys: 'currys.co.uk', boots: 'boots.com', ebay: 'ebay.co.uk', nike: 'nike.com', zara: 'zara.com', 'marks and spencer': 'marksandspencer.com', 'm&s': 'marksandspencer.com', next: 'next.co.uk', trainline: 'thetrainline.com' };
+
+function inferSiteLoginAction(message) {
+  const text = normalizeText(message);
+  const match = text.match(/^(?:please\s+)?(?:can you\s+)?(?:log|sign)\s+(?:me\s+)?(?:in|into|on to|onto)\s+(?:to\s+)?(?:my\s+)?(.+?)(?:\s+account)?[?.!]*$/i);
+  if (!match) return null;
+  const name = match[1].trim().toLowerCase();
+  if (!name || name.split(/\s+/).length > 4) return null;
+  const site = SITE_NAMES[name] || (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name) ? name : (/^[a-z0-9]+$/.test(name) ? `${name}.com` : null));
+  if (!site) return null;
+  return {
+    reason: 'site_login',
+    spoken: "I'll open the sign-in page.",
+    actions: [{ type: 'ask_site_login', input: { site } }]
+  };
+}
+
 function inferDeterministicAction(message) {
   const text = normalizeText(message);
   if (!text) return null;
@@ -137,6 +155,7 @@ function inferDeterministicAction(message) {
   return inferExplicitWebBrowseAction(text)
     || inferStockPriceAction(text)
     || inferPlayAction(text)
+    || inferSiteLoginAction(text)
     || inferPersonalAdminAction(text)
     || inferOutboundCommunicationAction(text);
 }

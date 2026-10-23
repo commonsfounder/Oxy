@@ -9200,7 +9200,15 @@ app.get('/agent/tasks', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const status = req.query.status;
   try {
-    const tasks = await delegatedRunLifecycle.list(userId, status || null);
+    const all = await delegatedRunLifecycle.list(userId, status || null);
+    // A run nobody has touched for hours is not "still going": hide it instead of pinning it to the thread.
+    const now = Date.now();
+    const tasks = all.filter(task => {
+      const open = ['pending', 'running', 'paused'].includes(String(task.status || '').toLowerCase());
+      if (!open) return true;
+      const touched = Date.parse(task.updated_at || task.updatedAt || '') || now;
+      return now - touched < 6 * 60 * 60 * 1000;
+    });
     res.json({ tasks: tasks.map(safeAgentTaskSummary) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -103,3 +103,9 @@ test('a bare call/email/text request is left for the model to resolve against re
     assert.equal(inferOutboundCommunicationAction(message), null, message);
   }
 });
+
+test('"sign me into <shop>" goes straight to the sign-in page', () => {
+  const { inferDeterministicAction } = require('../../api/intent-router');
+  assert.deepEqual(inferDeterministicAction('sign me into john lewis').actions, [{ type: 'ask_site_login', input: { site: 'johnlewis.com' } }]);
+  assert.equal(inferDeterministicAction('sign in to the bank of mars please now'), null);
+});
