@@ -38,7 +38,7 @@ struct HomeFeedView: View {
                     .foregroundStyle(Color.appMuted)
                     .padding(.top, 8)
             } else {
-                VStack(spacing: 12) {
+                VStack(spacing: 0) {
                     ForEach(visible) { card in
                         cardView(card)
                     }
@@ -57,24 +57,46 @@ struct HomeFeedView: View {
         .refreshable { await load() }
     }
 
+    /// A small palette so each kind of ask has its own colour, steady from one launch to the next.
+    private static let tints: [Color] = [
+        Color(red: 0.93, green: 0.55, blue: 0.42), Color(red: 0.90, green: 0.72, blue: 0.30),
+        Color(red: 0.36, green: 0.72, blue: 0.66), Color(red: 0.55, green: 0.55, blue: 0.90)
+    ]
+
+    private func tint(for card: HomeCard) -> Color {
+        let seed = card.verb.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }
+        return Self.tints[seed % Self.tints.count]
+    }
+
+    /// The question first, then whatever explains it, in a quieter line.
+    private func split(_ rest: String) -> (String, String?) {
+        guard let end = rest.firstIndex(where: { $0 == "?" }) else { return (rest, nil) }
+        let head = String(rest[..<rest.index(after: end)])
+        let tail = rest[rest.index(after: end)...].trimmingCharacters(in: .whitespaces)
+        return (head, tail.isEmpty ? nil : tail)
+    }
+
     private func cardView(_ card: HomeCard) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            if let brand = card.brand {
-                AppIconView(candidates: [brand, "app-\(brand)"])
-                    .frame(width: 34, height: 34)
-                    .clipShape(Circle())
+        let color = tint(for: card)
+        let (question, context) = split(card.rest)
+        return HStack(alignment: .top, spacing: 14) {
+            Group {
+                if let brand = card.brand {
+                    AppIconView(candidates: [brand, "app-\(brand)"])
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous).fill(color)
+                        .overlay(Text(String(card.verb.prefix(1)).uppercased()).font(.appBody(19, weight: .bold)).foregroundStyle(Color.black.opacity(0.75)))
+                }
             }
-            WrapLayout(spacing: 5, lineSpacing: 6) {
-                Text(card.verb)
-                    .font(.appBody(16, weight: .semibold))
-                    .foregroundStyle(Color.appBackground)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.appInk, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                ForEach(Array(card.rest.split(separator: " ").enumerated()), id: \.offset) { _, word in
-                    Text(String(word))
-                        .font(.appBody(17))
-                        .foregroundStyle(Color.appInk)
+            .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 4) {
+                (Text(card.verb + " ").font(.appBody(18, weight: .semibold)).foregroundColor(color)
+                    + Text(question).font(.appBody(18)).foregroundColor(Color.appInk))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let context {
+                    Text(context).font(.appBody(14)).foregroundStyle(Color.appMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,10 +109,10 @@ struct HomeFeedView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Not now")
         }
-        .padding(16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(radius: 22)
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.appHairline).frame(height: 0.5) }
+        .contentShape(Rectangle())
         .onTapGesture {
             HapticManager.shared.impact(.light)
             mark(card)

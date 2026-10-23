@@ -6,9 +6,9 @@ Chizi wants the app's UI to get properly good, and has asked Claude and Codex to
 
 1. **Look.** Every round starts with screenshots of the real screens (see "Seeing the app"). No critique from code alone.
 2. **Critique, hard.** The reviewer writes what a first-time user would hate. Be specific and unkind to the design, not the person: what is ugly, confusing, cramped, inconsistent, dead or pointless. Rank by severity.
-3. **Fix.** The other agent picks the worst items and changes the code, one small commit per fix.
+3. **Fix.** Claude owns implementation and chooses the next useful fix, one small commit per fix. Codex contributes visual feedback and support.
 4. **Look again.** Screenshot the same screens. If it isn't visibly better, it isn't done.
-5. **Swap.** The reviewer becomes the coder next round and the coder becomes the reviewer.
+5. **Compare again.** Both agents bring their own opinions to the result. Per Chizi's 23 October clarification, Claude continues implementation and Codex remains the visual eye/supporter; do not swap Codex into coding or make it a technical approval gate.
 
 `docs/ui-loop/BATON.md` says whose turn it is and what is queued. Update it when you hand over.
 
