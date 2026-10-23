@@ -4725,7 +4725,7 @@ app.post('/memory/photos', requireSessionAuth, async (req, res) => {
 });
 const photoVisionLimiter = createRateLimiter(90, 60 * 1000, userOrIpRateKey);
 // One small copy of a photo comes in, is described, and is dropped; only the note is kept.
-app.post('/memory/photos/describe', photoVisionLimiter, requireSessionAuth, upload.single('image'), async (req, res) => {
+app.post('/memory/photos/describe', requireSessionAuth, photoVisionLimiter, upload.single('image'), async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   if (!req.file || !/^image\/(jpeg|png|heic)$/i.test(req.file.mimetype || '')) return res.status(400).json({ error: 'A photo is required.' });
@@ -6007,7 +6007,14 @@ async function offerCapReached(userId, now) {
 }
 
 // Puts one offer in the chat (and the notification route) unless this exact one was made before.
+const offersInFlight = new Set();
 async function raiseOffer(userId, offer, now = new Date()) {
+  if (offersInFlight.has(userId)) return null;
+  offersInFlight.add(userId);
+  try { return await raiseOfferLocked(userId, offer, now); } finally { offersInFlight.delete(userId); }
+}
+
+async function raiseOfferLocked(userId, offer, now) {
   if (await offerCapReached(userId, now)) return null;
   const queued = await notificationDelivery.raise(userId, {
     category: 'other',

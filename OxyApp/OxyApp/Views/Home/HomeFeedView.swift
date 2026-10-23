@@ -16,6 +16,7 @@ struct HomeFeedView: View {
     @Environment(\.revealClose) private var revealClose
     @State private var cards: [HomeCard] = []
     @State private var loaded = false
+    @State private var failed = false
     @State private var handled: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "adam.home.handled") ?? [])
     @State private var reading: (read: Int, total: Int)?
 
@@ -32,7 +33,7 @@ struct HomeFeedView: View {
                 }
             }
             if visible.isEmpty {
-                Text(loaded ? (reading == nil ? "Nothing needs you right now." : "Nothing yet. This fills in as I read.") : " ")
+                Text(loaded ? (failed ? "Couldn't load this. Pull down to try again." : reading == nil ? "Nothing needs you right now." : "Nothing yet. This fills in as I read.") : " ")
                     .font(.appBody(17))
                     .foregroundStyle(Color.appMuted)
                     .padding(.top, 8)
@@ -123,7 +124,8 @@ struct HomeFeedView: View {
     private func load() async {
         defer { loaded = true }
         guard let data = try? await APIClient.shared.request(path: "/agent/home-feed"),
-              let response = try? JSONDecoder().decode(HomeFeedResponse.self, from: data) else { return }
+              let response = try? JSONDecoder().decode(HomeFeedResponse.self, from: data) else { failed = true; return }
+        failed = false
         cards = response.cards
     }
 }

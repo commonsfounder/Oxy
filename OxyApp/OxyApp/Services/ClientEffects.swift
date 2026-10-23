@@ -4,8 +4,14 @@ import UIKit
 /// Changes to the app's own settings that Adam makes when you ask in chat ("make it dark", "stop the daily check-ins").
 @MainActor
 enum ClientEffects {
+    private static var recent: [String: Date] = [:]
+
     static func applyAll(_ results: [ActionResult], userId: String) {
         for effect in results.compactMap(\.clientEffect) {
+            // The same effect can arrive twice in one turn (streamed, then replayed); do it once.
+            let key = "\(effect.setting)=\(effect.value)"
+            if let last = recent[key], Date().timeIntervalSince(last) < 20 { continue }
+            recent[key] = Date()
             Task {
                 if needsApproval(effect), await !approved(effect) { return }
                 await apply(effect, userId: userId)

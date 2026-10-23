@@ -55,7 +55,8 @@ struct SiteSignInSheet: View {
             let host = $0.domain.hasPrefix(".") ? String($0.domain.dropFirst()) : $0.domain
             return host == domain || host.hasSuffix("." + domain)
         }
-        guard !cookies.isEmpty else {
+        // A signed-in page sets at least one hidden session cookie; only tracking cookies means you are not in yet.
+        guard cookies.contains(where: { $0.isHTTPOnly }) else {
             message = "Sign in on the page first, then tap I'm signed in."
             return
         }
@@ -68,7 +69,7 @@ struct SiteSignInSheet: View {
                 "expires": cookie.expiresDate.map { Int($0.timeIntervalSince1970) } ?? -1,
                 "httpOnly": cookie.isHTTPOnly,
                 "secure": cookie.isSecure,
-                "sameSite": cookie.sameSitePolicy == .sameSiteStrict ? "Strict" : "Lax"
+                "sameSite": cookie.sameSitePolicy == .sameSiteStrict ? "Strict" : (cookie.sameSitePolicy == .sameSiteLax ? "Lax" : "None")
             ]
         }
         do {
