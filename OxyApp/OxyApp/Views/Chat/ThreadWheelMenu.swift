@@ -374,8 +374,6 @@ private struct WheelItem: View, Animatable {
     /// The part of the circle that is on screen; items past it wait out of sight until the wheel turns.
     private var window: Double { step * Double(min(count, ThreadMenuChoice.reachable)) }
     private var windowStart: Double { firstAngle - step / 2 }
-    /// The bottom slot, nearest the thumb: the item resting here is the selected one.
-    private var focus: Double { firstAngle }
 
     /// Where the angle falls on the circle; items leaving one end return at the other.
     private var slot: Double {
@@ -399,11 +397,9 @@ private struct WheelItem: View, Animatable {
         let rest = restingPoint(open: open)
         let held = heldMix
         let point = CGPoint(x: rest.x + (liftedPoint.x - rest.x) * held, y: rest.y + (liftedPoint.y - rest.y) * held)
-        let nearness = max(0, 1 - abs(slot - focus) / step)
         let edge = min(1, max(0, min(slot - windowStart, windowStart + window - slot) / 10))
         let active = choice == .privateChat && incognito
-        let highlight: Double = active ? 1 : min(max((nearness - 0.4) / 0.6, 0), 1)
-        let selected = nearness > 0.5
+        let highlight: Double = active ? 1 : 0
         return ZStack {
             ZStack {
                 Circle().fill(Color.appReceivedBubble)
@@ -414,8 +410,8 @@ private struct WheelItem: View, Animatable {
             .frame(width: 52, height: 52)
             .overlay(alignment: .bottom) {
                 Text(active ? "Private · On" : choice.title)
-                    .font(.appBody(12, weight: selected || active ? .semibold : .medium))
-                    .foregroundStyle(Color.appInk.opacity(0.62 + 0.38 * max(nearness, active ? 1 : 0)))
+                    .font(.appBody(12, weight: active ? .semibold : .medium))
+                    .foregroundStyle(Color.appInk.opacity(active ? 1 : 0.8))
                     .lineLimit(1)
                     .fixedSize()
                     .alignmentGuide(.bottom) { d in d[.top] - 8 }

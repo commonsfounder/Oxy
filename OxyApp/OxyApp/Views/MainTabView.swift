@@ -183,12 +183,6 @@ private struct AdamYouView: View {
                     }
                 }
 
-                Text("Want something different? Just ask Adam, like \"switch to night\" or \"stop the daily check-ins\".")
-                    .font(.appBody(14))
-                    .foregroundStyle(Color.appMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-
                 VStack(spacing: 6) {
                     Button {
                         versionTapCount += 1

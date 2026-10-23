@@ -31,12 +31,12 @@ enum PreviewData {
         """
         {"history":[
           {"id":"h1","role":"user","content":"Can you find me a train to Manchester on Friday morning?","created_at":"\(iso(1500))"},
-          {"id":"h2","role":"assistant","content":"The 8:12 from Birmingham New Street gets you in at 9:44, and it's the cheapest at £23. Want me to hold it?","created_at":"\(iso(1499))"},
+          {"id":"h2","role":"assistant","content":"The 8:12 from Birmingham New Street gets you in at 9:44, and it's the cheapest at £23. Want me to put it in your calendar?","created_at":"\(iso(1499))"},
           {"id":"h3","role":"user","content":"yes","created_at":"\(iso(1497))"},
-          {"id":"h4","role":"assistant","content":"Done. It's in your calendar and I'll remind you the night before.","created_at":"\(iso(1496))"},
+          {"id":"h4","role":"assistant","content":"Done. It's in your calendar and I'll remind you the night before. I haven't booked the ticket.","created_at":"\(iso(1496))"},
           {"id":"h5","role":"assistant","content":"Alisa's birthday is in 3 days. Want a hand with a message or a gift?","created_at":"\(iso(40))","offer":{"id":"occasion:alisa:birthday:2026","yes":"Yes please","prompt":"Help me with Alisa's birthday."}},
           {"id":"h6","role":"user","content":"what's on my calendar tomorrow","created_at":"\(iso(6))"},
-          {"id":"h7","role":"assistant","content":"Tomorrow is light: dentist at 10, then nothing until the 8:12 train on Friday. Gmail isn't connected right now, so I couldn't check your mail.","created_at":"\(iso(5))"}
+          {"id":"h7","role":"assistant","content":"Tomorrow is light: dentist at 10, then nothing until the 8:12 train on Friday.","created_at":"\(iso(5))"}
         ]}
         """
     }
@@ -63,7 +63,7 @@ enum PreviewData {
     private static let homeFeed = """
     {"cards":[
       {"id":"c1","verb":"Send","rest":"the tenancy documents? Due tomorrow","prompt":"Help me finish this: send the tenancy documents.","brand":null},
-      {"id":"c2","verb":"Top up","rest":"Monzo by £13.71 tonight? It's over its overdraft limit","prompt":"Remind me to top up Monzo tonight.","brand":"monzo"},
+      {"id":"c2","verb":"Remind","rest":"me to top up Monzo by £13.71 tonight? It's over its overdraft limit","prompt":"Remind me to top up Monzo tonight.","brand":"monzo"},
       {"id":"c3","verb":"Plan","rest":"something for Alisa's birthday in 3 days?","prompt":"Help with Alisa's birthday.","brand":null},
       {"id":"c4","verb":"Add","rest":"the Sunday Market on Sunday 26 October, 11am to your calendar?","prompt":"Add the Sunday Market to my calendar.","brand":"google"}
     ]}
@@ -72,10 +72,10 @@ enum PreviewData {
     private static var activity: String {
         """
         {"events":[
-          {"id":"e1","type":"did","title":"Held the 8:12 train to Manchester","detail":"£23, Friday morning","at":"\(iso(1496))"},
+          {"id":"e1","type":"did","title":"Added the 8:12 train to your calendar","detail":"Friday morning, with a reminder the night before","at":"\(iso(1496))"},
           {"id":"e2","type":"checked","title":"Looked at flight prices to Istanbul","detail":"Cheapest is £164 on 14 Nov","at":"\(iso(300))"},
           {"id":"e3","type":"noticed","title":"A parcel is out for delivery","detail":"Due this afternoon","at":"\(iso(120))"},
-          {"id":"e4","type":"did","title":"Couldn't read your calendar","detail":"Google is not connected","at":"\(iso(7))","failed":true}
+          {"id":"e4","type":"did","title":"Couldn't open the parcel tracking page","detail":"It didn't load. I'll try again later","at":"\(iso(7))","failed":true}
         ],"asks":[
           {"id":"a1","type":"asked","title":"Pay the £84 council bill?","detail":"Due 3 Nov","at":"\(iso(90))","open":true}
         ],"upcoming":[

@@ -82,8 +82,8 @@ struct MemoryView: View {
                                 .buttonStyle(.appScale(0.99))
                             }
                         }
-                        .padding(.top, 12)
-                        .padding(.bottom, composerExpanded ? 36 : 24)
+                        .padding(.top, 4)
+                        .padding(.bottom, composerExpanded ? 28 : 8)
 
                         HStack {
                             SettingsSectionHeader(title: "What Adam knows")
@@ -101,7 +101,7 @@ struct MemoryView: View {
 
                         if !isLoading && !items.isEmpty {
                             MemorySearchField(text: $search)
-                                .padding(.bottom, 20)
+                                .padding(.bottom, 8)
                         }
 
                         if isLoading {
@@ -171,7 +171,7 @@ struct MemoryView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        Text("Adam looks these up when you ask about a photo. Turn this off in Settings, Privacy and control.")
+                        Text("Adam looks these up when you ask about a photo. To stop, tell Adam to stop looking through your photos.")
                             .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
