@@ -11,7 +11,7 @@ extension Color {
     static let appBackground = Color(UIColor { trait in
         if let chosen = ThreadBackground.current.uiColor { return chosen }
         return trait.userInterfaceStyle == .dark
-            ? UIColor(red: 0.035, green: 0.035, blue: 0.035, alpha: 1)   // #090909
+            ? UIColor(red: 0.055, green: 0.051, blue: 0.133, alpha: 1)   // #0E0D22, deep indigo
             : UIColor(red: 0.965, green: 0.976, blue: 0.992, alpha: 1)   // #F6F9FD
     })
 
@@ -105,6 +105,19 @@ extension Color {
     )
 }
 
+// MARK: - Object tiles
+extension Color {
+    /// The four tile colours, chosen from a word so the same thing is always the same colour.
+    static func appTile(for word: String) -> Color {
+        let tints: [Color] = [
+            Color(red: 0.93, green: 0.55, blue: 0.42), Color(red: 0.90, green: 0.72, blue: 0.30),
+            Color(red: 0.36, green: 0.72, blue: 0.66), Color(red: 0.55, green: 0.55, blue: 0.90)
+        ]
+        let seed = word.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }
+        return tints[seed % tints.count]
+    }
+}
+
 // MARK: - Spacing
 enum AppSpacing {
     static let xs: CGFloat = 4
@@ -127,9 +140,14 @@ extension Font {
     static var fineprint: Font { .appBody(12, weight: .medium) }
     static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
     /// The serif headline scale: first screens, page headers, and the title of a card or sheet.
-    static var heroTitle: Font { .appEditorial(28, weight: 400, soft: 30, wonk: false, relativeTo: .title1) }
-    static var pageTitle: Font { .appEditorial(24, weight: 400, soft: 30, wonk: false, relativeTo: .title2) }
-    static var sectionTitle: Font { .appEditorial(20, weight: 400, soft: 30, wonk: false, relativeTo: .title3) }
+    static var heroTitle: Font { .appRounded(32, weight: .bold, relativeTo: .title1) }
+    static var pageTitle: Font { .appRounded(34, weight: .bold, relativeTo: .largeTitle) }
+    static var sectionTitle: Font { .appRounded(20, weight: .semibold, relativeTo: .title3) }
+    /// Big friendly figures and focal lines.
+    static func appRounded(_ size: CGFloat, weight: Font.Weight = .bold, relativeTo style: UIFont.TextStyle = .title1) -> Font {
+        let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size, compatibleWith: nil)
+        return .system(size: min(scaled, size * 1.3), weight: weight, design: .rounded)
+    }
 }
 
 // MARK: - Radius
@@ -1139,7 +1157,7 @@ enum ThreadBackground: String, CaseIterable, Identifiable {
         case .automatic: return nil
         case .warm: return UIColor(red: 0.973, green: 0.945, blue: 0.898, alpha: 1)   // #F8F1E5
         case .sea: return UIColor(red: 0.914, green: 0.953, blue: 0.937, alpha: 1)    // #E9F3EF
-        case .night: return UIColor(red: 0.059, green: 0.090, blue: 0.188, alpha: 1)  // #0F1730
+        case .night: return UIColor(red: 0.055, green: 0.051, blue: 0.133, alpha: 1)  // #0E0D22
         }
     }
 

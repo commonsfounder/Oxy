@@ -32,15 +32,22 @@ struct HomeFeedView: View {
                         .foregroundStyle(Color.appMuted)
                 }
             }
+            summaryLine
             if visible.isEmpty {
                 Text(loaded ? (failed ? "Couldn't load this. Pull down to try again." : reading == nil ? "Nothing needs you right now." : "Nothing yet. This fills in as I read.") : " ")
                     .font(.appBody(17))
                     .foregroundStyle(Color.appMuted)
                     .padding(.top, 8)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(visible) { card in
-                        cardView(card)
+                if let first = visible.first { focalCard(first) }
+                let rest = Array(visible.dropFirst())
+                if !rest.isEmpty {
+                    Text("Next up")
+                        .font(.appRounded(18, weight: .semibold, relativeTo: .title3))
+                        .foregroundStyle(Color.appInk)
+                        .padding(.top, 12)
+                    VStack(spacing: 0) {
+                        ForEach(rest) { card in cardView(card) }
                     }
                 }
             }
@@ -57,6 +64,85 @@ struct HomeFeedView: View {
         .refreshable { await load() }
     }
 
+    /// State first: the one line that says how the day looks.
+    @ViewBuilder
+    private var summaryLine: some View {
+        if loaded, !failed, !visible.isEmpty {
+            Text(visible.count == 1 ? "1 thing needs you" : "\(visible.count) things need you")
+                .font(.appRounded(22, weight: .semibold, relativeTo: .title2))
+                .foregroundStyle(Color.appInk)
+        }
+    }
+
+    /// The most pressing ask, given the room and the two answers it needs.
+    private func focalCard(_ card: HomeCard) -> some View {
+        let color = tint(for: card)
+        let (question, context) = split(card.rest)
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 12) {
+                tile(card, color: color, size: 52)
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(card.verb + " " + question)
+                    .font(.appRounded(26, weight: .bold, relativeTo: .title1))
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let context {
+                    Text(context).font(.appBody(16)).foregroundStyle(Color.appMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 10) {
+                Button { ask(card) } label: {
+                    Text("Yes please")
+                        .font(.appBody(17, weight: .semibold))
+                        .foregroundStyle(Color.appOnAction)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Color.appAction, in: Capsule())
+                }
+                .buttonStyle(.appScale(0.97))
+                Button { dismiss(card) } label: {
+                    Text("Not now")
+                        .font(.appBody(17, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                        .padding(.horizontal, 22)
+                        .frame(minHeight: 50)
+                        .background(Color.appFillSubtle, in: Capsule())
+                }
+                .buttonStyle(.appScale(0.97))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(LinearGradient(colors: [color.opacity(0.22), Color.settingsRaised], startPoint: .topLeading, endPoint: .bottom))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).strokeBorder(color.opacity(0.25), lineWidth: 0.8))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func tile(_ card: HomeCard, color: Color, size: CGFloat) -> some View {
+        Group {
+            if let brand = card.brand {
+                AppIconView(candidates: [brand, "app-\(brand)"] + Self.logoURL(brand))
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: size * 0.3, style: .continuous).fill(color)
+                    .overlay(Text(String(card.verb.prefix(1)).uppercased()).font(.appRounded(size * 0.42, weight: .bold)).foregroundStyle(Color.black.opacity(0.75)))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func ask(_ card: HomeCard) {
+        HapticManager.shared.impact(.light)
+        mark(card)
+        NotificationCenter.default.post(name: AskAdam.sendNotification, object: card.prompt)
+        revealClose?()
+    }
+
     /// A small palette so each kind of ask has its own colour, steady from one launch to the next.
     private static let tints: [Color] = [
         Color(red: 0.93, green: 0.55, blue: 0.42), Color(red: 0.90, green: 0.72, blue: 0.30),
@@ -69,10 +155,7 @@ struct HomeFeedView: View {
         return name.isEmpty ? [] : ["https://www.google.com/s2/favicons?domain=\(name).com&sz=128"]
     }
 
-    private func tint(for card: HomeCard) -> Color {
-        let seed = card.verb.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }
-        return Self.tints[seed % Self.tints.count]
-    }
+    private func tint(for card: HomeCard) -> Color { Color.appTile(for: card.verb) }
 
     /// The question first, then whatever explains it, in a quieter line.
     private func split(_ rest: String) -> (String, String?) {

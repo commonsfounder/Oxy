@@ -195,19 +195,21 @@ struct SettingsRow<Trailing: View>: View {
             if let lead {
                 Group {
                     switch lead {
-                    case .icon(let name): AppIcon(name, size: 18).foregroundStyle(Color.appMuted)
-                    case .dot(let solid): AdamDot(solid: solid, size: 10)
+                    case .icon(let name):
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.appTile(for: title))
+                            .frame(width: 40, height: 40)
+                            .overlay(AppIcon(name, size: 18).foregroundStyle(Color.black.opacity(0.75)))
+                    case .dot(let solid): AdamDot(solid: solid, size: 10).frame(width: 22)
                     }
                 }
-                .frame(width: 22)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.appBody(15, weight: .medium))
+                    .font(.appRounded(17, weight: .semibold, relativeTo: .headline))
                     .foregroundStyle(Color.appInk)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.appBody(13))
+                        .font(.appBody(14))
                         .foregroundStyle(Color.appMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }

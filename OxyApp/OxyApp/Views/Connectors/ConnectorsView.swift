@@ -142,12 +142,25 @@ struct ConnectorsView: View {
                     Text(message).font(.appBody(13)).foregroundStyle(Color.appMuted)
                 }
 
+                let connected = sections.flatMap(\.entries).filter(isConnected)
+                if !connected.isEmpty {
+                    Text("Connected")
+                        .font(.appRounded(20, weight: .semibold, relativeTo: .title3))
+                        .foregroundStyle(Color.appInk)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(connected) { entry in tile(entry) }
+                    }
+                }
+
                 ForEach(sections) { section in
-                    SettingsGroup(title: section.title) {
-                        SettingsList {
-                            ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
-                                row(entry)
-                                if index < section.entries.count - 1 { SettingsRule(inset: 48) }
+                    let open = section.entries.filter { !isConnected($0) }
+                    if !open.isEmpty {
+                        SettingsGroup(title: section.title) {
+                            SettingsList {
+                                ForEach(Array(open.enumerated()), id: \.element.id) { index, entry in
+                                    row(entry)
+                                    if index < open.count - 1 { SettingsRule(inset: 48) }
+                                }
                             }
                         }
                     }
@@ -197,6 +210,33 @@ struct ConnectorsView: View {
         } message: {
             Text("Adam will stop using this app until you connect it again.")
         }
+    }
+
+    /// A connected app as an object: its logo, its name and a quiet status, one tap to manage.
+    private func tile(_ entry: Entry) -> some View {
+        Button { manage = entry } label: {
+            VStack(alignment: .leading, spacing: 18) {
+                AppIconView(candidates: iconCandidates(entry))
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.name).font(.appRounded(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(Color.appInk)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
+                        Text(pending == entry.key ? "Working" : "Connected").font(.appBody(13, weight: .medium)).foregroundStyle(Color.appSuccess)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Color.settingsRaised))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.7))
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.appScale(0.97))
+        .accessibilityLabel("\(entry.name), connected")
+        .accessibilityHint("Opens the option to disconnect")
     }
 
     private func row(_ entry: Entry) -> some View {

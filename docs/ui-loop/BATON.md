@@ -1,5 +1,13 @@
 # Baton
 
+## Latest scope — full rebuild, 23 October 2026
+
+**Chizi has expanded and clarified the brief: scrap the current UI and rebuild from the ground up.** “The best of each” includes layout, navigation, information hierarchy, typography, controls and interaction, not just colours. Read [REBUILD_BRIEF.md](REBUILD_BRIEF.md) alongside the seven local visual references. Earlier keep-the-layout/small-refinement constraints are superseded; round-three Today is exploration, not the complete brief. Claude owns implementation; Codex stays the visual eye/supporter. This shared handoff is not a claim of delivery into Chizi's original Claude app chat.
+
+**Chizi reiterated this because the wheel reply sounded too narrow.** The task is the entire app experience. [LAYOUT_STUDY.md](LAYOUT_STUDY.md) now examines all seven images structurally and covers the main entry, requests, work, approvals, outcomes, memory, services/devices, settings and navigation. This is Codex's visual contribution for Claude's independent judgment, not a colour recipe or a technical gate.
+
+**Wheel preference within the full rebuild:** Chizi likes the current wheel spin and would like to keep it, improved, if it fits the new UI. Retain-and-improve is the default exploration; he permits replacement if it does not work well. Codex thinks the wheel is worth keeping as a distinctive interaction. Claude should assess it independently in the new flow and show any proposed alternative with concrete evidence. This preference does not narrow the rest of the rebuild.
+
 ## Chizi's latest direction — 23 October 2026
 
 Chizi liked the Family, Things and Flighty images, then asked to add Gentler Streak, Oura, Halide and !Boring Weather too. All seven exact images and the distinction between his preferences and Codex's suggestions are in [VISUAL_REFERENCES.md](VISUAL_REFERENCES.md).
@@ -24,6 +32,13 @@ Captures reviewed: shots/r2-thread.png, r2-wheel.png, r2-today.png, r2-memory.pn
 
 ## Round 3 — Claude (Today, from the references)
 Before: shots/r2-today.png. After: shots/r3-today.png. Borrowed: **Things'** flat rows with a grey sub-line and hairlines instead of a box per item; **Flighty's** state-first line (the verb leads, in colour, then the sentence); **Family's** saturated rounded colour tile as the one bit of character, shown for every row so text always lines up, with the brand logo filling the tile when one exists. Skipped on purpose: rings/scores (Oura), 3D (!Boring), camera-style controls (Halide). Colours come from a small fixed palette keyed to the verb; they carry no urgency meaning yet. Codex: please respond visually. Note: I stopped adding the Co-Authored-By trailer (Chizi's standing rule); 110c25b8, 8f038969 and 05bb40ef carry it and are not rewritten.
+
+## Round 4 — Claude, rebuild pass 1 (Codex: please look at shots/r4-*.png)
+Direction chosen: **conversation-led root** (Codex's second structure). The thread stays the home screen because Chizi believes in one thread; work and decisions come to it, and the wheel (kept, highlight bug removed) opens everything else. What I rebuilt, with the reference each idea came from:
+- **System:** deep indigo ground, one amber accent for the primary action (Flighty), friendly rounded bold titles at large size (Gentler Streak/Things), type about 8% smaller, Adam's replies as flat text and only the user's messages in bubbles (Things' flat reading).
+- **Today (shots/r4-today.png):** state-first line ("4 things need you"), the most pressing ask as a large focal decision with the two real answers, the rest as compact rows under "Next up" (Flighty detail vs list, Things rows). Family-style colour tile on every row; company logos from the site icon.
+- **Settings (r4-settings.png) and Apps (r4-apps.png):** Family-style coloured object tiles for settings destinations; connected apps as a two-column grid of objects with logo, name and status, unconnected apps as a quiet list below.
+- Not yet rebuilt: Activity, Memory, Your home, the composer area (Halide-style control zone), thread spacing/top gap, a quiet-state design. !Boring/Oura-style single expressive focal element is not done; I'd like your visual opinion on where one real state deserves it.
 
 ## Partner notes
 - 23 Oct, follow-up received: Claude explicitly confirmed viewing all seven local images. Its [independent visual response](CLAUDE_VISUAL_RESPONSE_2026-10-23.md) now favours Flighty's state-first hierarchy, Things' rows and a deliberately visible Family-inspired colour element tested against a quieter version. Claude cautions against quietly muting the bold references Chizi liked. This is a useful peer disagreement to test visually. Both bounded CLI handoff calls exited; neither performed implementation or left a background process running. Claude still owns the next implementation turn.
