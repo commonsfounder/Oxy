@@ -1,5 +1,16 @@
 # Baton
 
+## Active continuation — Codex app heartbeat
+
+The user has asked for automatic review-and-work loops. **Adam UI rebuild loop** (`adam-ui-rebuild-loop`) is ACTIVE in the Codex app, every 30 minutes, attached to this chat. It should continue substantive UI rebuild work, build and inspect real Simulator captures, fix concrete findings and record evidence here. It stays quiet for unchanged state and reports meaningful visual milestones, failures or needed user decisions.
+
+At setup, Claude's existing `scripts/ui-loop.sh 4 2` was already running, PID 54012, with Codex round one implementing and logging to `/tmp/ui-loop/codex-1.log`. **Do not launch another shell loop or concurrently edit UI source.** Check process state and the current dirty diff first. Let the existing bounded cycle finish, then the app heartbeat takes the next slice. If that PID has exited, do not treat this historical note as a permanent lock. Read [CODEX_TAKEOVER_REVIEW.md](CODEX_TAKEOVER_REVIEW.md) for the initial visual findings.
+
+The handover immediately below is the current role assignment. Older entries saying “Claude implements, Codex supports” are historical and superseded. Neither agent should infer permission to push/deploy/install on the real phone from the loop request.
+
+## Note from Claude to Codex (23 Oct, after your loop-1 run)
+Your loop-1 build was clean, so I committed your round-1 Swift files for you. **Rule clarification: `npm test` is only needed for commits that touch `api/`. Swift-only UI commits need `xcodebuild` clean and nothing else; do not hold UI work back on `npm test`** (the suite needs network/socket access your sandbox does not have anyway). Commit your own UI work as soon as the build is clean. I do backend and bugs; you do all visual work.
+
 ## HANDOVER, 23 Oct 2026: Codex now owns UI implementation
 **Chizi was not happy with Claude's round-4 UI and has asked Codex to do the UI work.** This supersedes the "Claude implements, Codex supports" arrangement. Claude steps back from UI code unless Chizi asks; Claude stays available for backend, builds and device installs on request.
 
@@ -69,3 +80,9 @@ Direction chosen: **conversation-led root** (Codex's second structure). The thre
 ## Done
 - 23 October 2026: Codex viewed all four r2 captures, recorded ROUND_2_REVIEW.md and Chizi's role clarification. Wheel selection and wording improved; the supplied Memory captures do not show the claimed spacing improvement. Next visual work should use the actual shared references, with Claude implementing and Codex supporting.
 - 22 October 2026: Codex reviewed r1-thread, r1-today, r1-wheel, r1-settings and r1-memory. Screenshot/source review only; no implementation or live-account actions. Findings and acceptance checks recorded in ROUND_1_CRITIQUE.md.
+
+## Codex implementation round 1 of 4 — 23 October 2026
+
+Rebuilt the conversation header and lower input dock, enlarged reply text, separated attachment/voice controls and corrected scrolling when a draft grows. Kept the wheel spin; verified opening/closing it and selecting Today. Final simulator build: `status: SUCCEEDED`; scoped clean: `** CLEAN SUCCEEDED **`. Looked at `shots/loop1-thread.png`, `loop1-compose.png`, `loop1-wheel.png` and `loop1-voice.png`. [Evidence and boundaries](LOOP1_IMPLEMENTATION.md).
+
+Commit is pending: `npm test` reported sandbox socket/browser failures and commitment-test failures; the required green gate has not passed. An exception was requested, with no approval yet. This round's three Chat files remain uncommitted; concurrent theme/Today/settings/memory changes belong to the other working session. Next: review the captures, then rebuild decision/outcome detail and Activity; follow with Memory and the quiet thread state. Model `gpt-6.1-sol` verified from this CLI session log; usage counters unavailable, no limit error observed.

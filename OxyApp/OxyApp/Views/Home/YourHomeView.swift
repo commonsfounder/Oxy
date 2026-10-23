@@ -136,13 +136,13 @@ struct YourHomeView: View {
     // MARK: Not connected
 
     private var notConnected: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            AdamPresence(state: .complete, size: 72)
+        VStack(alignment: .leading, spacing: 28) {
+            AdamPresence(state: .complete, size: 100)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your home isn't connected yet")
                     .font(.sectionTitle)
                     .foregroundStyle(Color.appInk)
-                Text("Connect Adam to give it awareness of what's happening around your home.")
+                Text("Add a device to see its status here.")
                     .font(.appBody(15))
                     .foregroundStyle(Color.appMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -160,15 +160,7 @@ struct YourHomeView: View {
             }
             .buttonStyle(.appScale(0.97))
 
-            VStack(alignment: .leading, spacing: 0) {
-                previewRow("Answers out loud, in the room")
-                SettingsRule()
-                previewRow("Notices what changes around the house")
-                SettingsRule()
-                previewRow("Keeps watching for what you ask it to")
-            }
-            .padding(.horizontal, 16)
-            .settingsSurface()
+
         }
     }
 

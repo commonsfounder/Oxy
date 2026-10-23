@@ -133,7 +133,7 @@ struct ConnectorsView: View {
                     OxySkeletonCard(height: 148)
                 }
             } else {
-                Text(connectedCount == 0 ? "Connect the apps you use and Adam can help with them." : connectedCount == 1 ? "Adam can use 1 of your apps." : "Adam can use \(connectedCount) of your apps.")
+                Text(connectedCount == 0 ? "No apps connected" : "\(connectedCount) connected")
                     .font(.appBody(16))
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -145,9 +145,9 @@ struct ConnectorsView: View {
                 let connected = sections.flatMap(\.entries).filter(isConnected)
                 if !connected.isEmpty {
                     Text("Connected")
-                        .font(.appRounded(20, weight: .semibold, relativeTo: .title3))
+                        .font(.appBody(15, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                         ForEach(connected) { entry in tile(entry) }
                     }
                 }
@@ -215,24 +215,24 @@ struct ConnectorsView: View {
     /// A connected app as an object: its logo, its name and a quiet status, one tap to manage.
     private func tile(_ entry: Entry) -> some View {
         Button { manage = entry } label: {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 24) {
                 AppIconView(candidates: iconCandidates(entry))
-                    .frame(width: 48, height: 48)
+                    .frame(width: 38, height: 38)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.name).font(.appRounded(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(Color.appInk)
-                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
                         Circle().fill(Color.appSuccess).frame(width: 6, height: 6)
-                        Text(pending == entry.key ? "Working" : "Connected").font(.appBody(13, weight: .medium)).foregroundStyle(Color.appSuccess)
+                        Text(pending == entry.key ? "Working" : "Connected").font(.appBody(12, weight: .medium)).foregroundStyle(Color.appMuted)
                     }
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Color.settingsRaised))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.7))
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.settingsRaised))
+
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.appScale(0.97))
         .accessibilityLabel("\(entry.name), connected")

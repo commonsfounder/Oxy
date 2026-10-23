@@ -170,7 +170,7 @@ struct MessageBubble: View {
                         HStack(alignment: .bottom, spacing: 0) {
                             Spacer(minLength: 64)
                             Text(AttributedString(ReplyQuote.split(message.content)?.body ?? message.content))
-                                .font(.appBody(isCompact ? 15 : 16))
+                                .font(.appBody(isCompact ? 16 : 18))
                                 .foregroundStyle(Color.appInk.opacity(0.9))
                                 .lineSpacing(isCompact ? 3 : 4)
                                 .padding(.horizontal, 12)
@@ -206,7 +206,7 @@ struct MessageBubble: View {
                                 if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
                             }
                             .animation(.appStandard, value: isLongForm)
-                        Spacer(minLength: isLongForm ? 8 : 64)
+                        Spacer(minLength: 8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -637,7 +637,7 @@ private struct AssistantAnswerView: View {
                 switch block {
                 case .paragraph(let text):
                     Text(.chatMarkdown(text))
-                        .font(.appBody(compact ? 14.5 : 15.5))
+                        .font(.appBody(compact ? 16 : 18))
                         .foregroundStyle(Color.appInk.opacity(isStreaming ? 0.9 : 0.96))
                         .lineSpacing(compact ? 4 : 5.5)
                         .fixedSize(horizontal: false, vertical: true)
@@ -685,7 +685,7 @@ private struct AssistantListRow: View {
                 .foregroundStyle(Color.appAccent.opacity(0.86))
                 .frame(width: marker == "•" ? 14 : 18, alignment: .trailing)
             Text(.chatMarkdown(text))
-                .font(.appBody(compact ? 14.5 : 15.5))
+                .font(.appBody(compact ? 16 : 18))
                 .foregroundStyle(Color.appInk.opacity(0.94))
                 .lineSpacing(compact ? 4 : 5)
                 .fixedSize(horizontal: false, vertical: true)

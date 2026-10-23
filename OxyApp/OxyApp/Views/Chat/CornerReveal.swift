@@ -38,7 +38,7 @@ struct CornerReveal<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @AppStorage(RevealStyle.storageKey) private var styleRaw = RevealStyle.bounce.rawValue
-    @State private var out = false
+    @State private var out = true
     @State private var closing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -62,11 +62,7 @@ struct CornerReveal<Content: View>: View {
             }
         }
         .ignoresSafeArea()
-        .task {
-            // Let the screen build itself while it is still out of sight, so building never lands inside the motion.
-            try? await Task.sleep(for: .milliseconds(80))
-            open()
-        }
+        .onAppear(perform: open)
     }
 
     /// The phone's own safe-area insets: the overlay runs edge to edge, so the screen is given them back.
@@ -96,11 +92,11 @@ struct CornerReveal<Content: View>: View {
                 screen
                     .opacity(out ? 1 : 0)
                     .animation(.easeOut(duration: 0.08), value: out)
-                    .clipShape(RoundedRectangle(cornerRadius: out ? 52 : 300, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: out ? 28 : 100, style: .continuous))
                     .scaleEffect(out ? 1 : 0.05, anchor: UnitPoint(x: origin.x / max(size.width, 1), y: origin.y / max(size.height, 1)))
             case .swing:
                 screen
-                    .clipShape(RoundedRectangle(cornerRadius: 52, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .rotationEffect(.degrees(out ? 0 : 100), anchor: .topTrailing)
             case .ripple:
                 let reach = max(hypot(origin.x, origin.y), hypot(size.width - origin.x, origin.y),
@@ -115,7 +111,7 @@ struct CornerReveal<Content: View>: View {
                     }
             case .drop:
                 screen
-                    .clipShape(RoundedRectangle(cornerRadius: 52, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .offset(y: out ? 0 : -(size.height + 80))
             }
         }
@@ -127,7 +123,7 @@ struct CornerReveal<Content: View>: View {
             return
         }
         switch style {
-        case .bounce: withAnimation(.spring(response: 0.5, dampingFraction: 0.55)) { out = true }
+        case .bounce: withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) { out = true }
         case .swing: withAnimation(.spring(response: 0.55, dampingFraction: 0.62)) { out = true }
         case .ripple: withAnimation(.spring(response: 0.5, dampingFraction: 1)) { out = true }
         case .drop: withAnimation(.spring(response: 0.46, dampingFraction: 0.86)) { out = true }
@@ -139,8 +135,7 @@ struct CornerReveal<Content: View>: View {
         closing = true
         HapticManager.shared.impact(.light)
         withAnimation(reduceMotion ? .easeIn(duration: 0.15) : .spring(response: 0.3, dampingFraction: 1)) { out = false }
-        Task {
-            try? await Task.sleep(for: .milliseconds(reduceMotion ? 170 : 320))
+        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.17 : 0.32)) {
             onClosed()
         }
     }

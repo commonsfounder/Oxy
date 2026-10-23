@@ -1,92 +1,84 @@
 import SwiftUI
 
-/// No bar: the thread runs to the top of the screen and fades out under the status bar.
-/// The only control is the menu hub, floating top right, with a small dot for live state.
+/// Navigation has its own space, clear of the conversation.
 struct ThreadHeader: View {
     var isIncognito: Bool
     var isWorking: Bool
     var activity: AdamActivityState? = nil
     var deviceOnline: Bool
+    var isDemo = false
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
 
     var body: some View {
-        ZStack(alignment: .top) {
-            HStack {
-                Spacer()
-                Button {
-                    HapticManager.shared.impact(.light)
-                    wheelOpen = true
-                } label: {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(isIncognito ? "Private" : "Adam")
+                        .font(.appRounded(28, relativeTo: .title2))
+                        .foregroundStyle(Color.appInk)
+                    if isDemo {
+                        Text("Sample")
+                            .font(.appBody(12, weight: .medium))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                }
+                if let status = visibleStatus {
+                    Text(status)
+                        .font(.appBody(13, weight: .medium))
+                        .foregroundStyle(activity == .waiting ? Color.appNeedsYou : Color.appMuted)
+                }
+            }
+            Spacer(minLength: 8)
+            Button {
+                HapticManager.shared.impact(.light)
+                wheelOpen = true
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Menu")
+                        .font(.appBody(14, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
                     WheelHub(progress: 0, incognito: isIncognito, activity: activity)
                         .overlay(alignment: .topTrailing) { statusDot }
+                        .onGeometryChange(for: CGPoint.self) { proxy in
+                            let frame = proxy.frame(in: .global)
+                            return CGPoint(x: frame.midX, y: frame.midY)
+                        } action: { hubCenter = $0 }
                 }
-                .buttonStyle(.appScale)
-                .opacity(wheelOpen ? 0 : 1)
-                .onGeometryChange(for: CGPoint.self) { proxy in
-                    let frame = proxy.frame(in: .global)
-                    return CGPoint(x: frame.midX, y: frame.midY)
-                } action: { hubCenter = $0 }
-                .accessibilityLabel("Menu")
-                .accessibilityValue(isIncognito ? "Private mode on" : statusDescription)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
+            .buttonStyle(.appScale)
+            .opacity(wheelOpen ? 0 : 1)
+            .accessibilityLabel("Menu")
+            .accessibilityValue(isIncognito ? "Private mode on" : (visibleStatus ?? ""))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 18)
-        .background {
-            LinearGradient(
-                stops: [
-                    .init(color: Color.appBackground, location: 0),
-                    .init(color: Color.appBackground.opacity(0.92), location: 0.55),
-                    .init(color: Color.appBackground.opacity(0), location: 1)
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
+        .padding(.horizontal, AppSpacing.chatMargin)
+        .padding(.vertical, 12)
+        .frame(minHeight: 72)
+        .background(Color.appBackground.ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
         }
-        .animation(.appStandard, value: isWorking)
         .animation(.appStandard, value: activity)
         .animation(.appStandard, value: deviceOnline)
     }
 
     @ViewBuilder
     private var statusDot: some View {
-        if isWorking {
-            // The mark in the hub shows the work itself; no separate dot.
-            EmptyView()
-        } else if deviceOnline {
+        if !isWorking && deviceOnline {
             Circle().fill(Color.appDone)
                 .frame(width: 9, height: 9)
                 .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
         }
     }
 
-    private var statusDescription: String {
-        if isWorking { return "Adam is working" }
-        if deviceOnline { return "Adam is online" }
-        return ""
-    }
-}
-
-private struct PulsingDot: View {
-    let color: Color
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var on = false
-
-    var body: some View {
-        Circle().fill(color)
-            .frame(width: 9, height: 9)
-            .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
-            .background(
-                Circle().fill(color.opacity(0.35))
-                    .scaleEffect(on && !reduceMotion ? 2.2 : 1)
-                    .opacity(on && !reduceMotion ? 0 : 0.8)
-            )
-            .onAppear {
-                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { on = true }
-            }
+    private var visibleStatus: String? {
+        if isIncognito { return "Not saved" }
+        switch activity {
+        case .listening: return "Listening"
+        case .waiting: return "Needs you"
+        case .working: return "Working"
+        case nil: return nil
+        }
     }
 }

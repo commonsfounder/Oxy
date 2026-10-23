@@ -135,19 +135,20 @@ struct AdamActivityView: View {
                     withAnimation(.appStandard) { filter = item }
                 } label: {
                     Text(item.rawValue)
-                        .font(.appBody(13, weight: .semibold))
+                        .font(.appBody(15, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
                         .padding(.horizontal, 15)
                         .frame(minHeight: 44)
-                        .background(filter == item ? Color.appBackground : Color.clear, in: Capsule())
+                        .overlay(alignment: .bottom) {
+                            Capsule().fill(filter == item ? Color.appAccent : Color.clear).frame(height: 2)
+                        }
                 }
                 .buttonStyle(.appScale)
                 .accessibilityAddTraits(filter == item ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: dynamicTypeSize.isAccessibilitySize ? 24 : 28))
+        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -163,8 +164,7 @@ struct AdamActivityView: View {
                     row(item)
                 }
             }
-            .padding(.horizontal, 16)
-            .settingsSurface()
+            .padding(.top, 4)
         }
     }
 
@@ -187,7 +187,7 @@ struct AdamActivityView: View {
                             .font(.appBody(12, weight: .semibold))
                             .foregroundStyle(item.isFailure ? Color.appWarning : Color.appMuted)
                         Text(item.title)
-                            .font(.appBody(15, weight: .medium))
+                            .font(.appBody(17, weight: .medium))
                             .foregroundStyle(Color.appInk)
                             .lineLimit(expanded ? nil : 2)
                             .multilineTextAlignment(.leading)
@@ -202,7 +202,7 @@ struct AdamActivityView: View {
                     Spacer(minLength: 4)
                     marker(for: item)
                 }
-                .padding(.vertical, 15)
+                .padding(.vertical, 20)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -280,7 +280,7 @@ struct AdamActivityView: View {
             Text(filter == .comingUp ? "Nothing scheduled" : "Nothing yet")
                 .font(.sectionTitle)
                 .foregroundStyle(Color.appInk)
-            Text("What Adam notices, does, asks you and schedules shows up here. Your conversations stay in Chat.")
+            Text("Your updates and completed work will appear here.")
                 .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)

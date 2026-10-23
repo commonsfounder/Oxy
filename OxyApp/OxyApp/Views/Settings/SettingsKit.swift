@@ -196,16 +196,16 @@ struct SettingsRow<Trailing: View>: View {
                 Group {
                     switch lead {
                     case .icon(let name):
-                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.appTile(for: title))
-                            .frame(width: 40, height: 40)
-                            .overlay(AppIcon(name, size: 18).foregroundStyle(Color.black.opacity(0.75)))
+                        AppIcon(name, size: 22)
+                            .foregroundStyle(Color.appAccent)
+                            .frame(width: 32, height: 40)
                     case .dot(let solid): AdamDot(solid: solid, size: 10).frame(width: 22)
                     }
                 }
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.appRounded(17, weight: .semibold, relativeTo: .headline))
+                    .font(.appBody(18, weight: .medium))
                     .foregroundStyle(Color.appInk)
                 if let subtitle {
                     Text(subtitle)

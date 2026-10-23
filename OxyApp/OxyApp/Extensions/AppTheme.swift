@@ -11,7 +11,7 @@ extension Color {
     static let appBackground = Color(UIColor { trait in
         if let chosen = ThreadBackground.current.uiColor { return chosen }
         return trait.userInterfaceStyle == .dark
-            ? UIColor(red: 0.055, green: 0.051, blue: 0.133, alpha: 1)   // #0E0D22, deep indigo
+            ? UIColor(red: 0.055, green: 0.067, blue: 0.082, alpha: 1)   // #0E0D22, deep indigo
             : UIColor(red: 0.965, green: 0.976, blue: 0.992, alpha: 1)   // #F6F9FD
     })
 
@@ -36,12 +36,12 @@ extension Color {
     )
 
     static let appMuted = appDynamicColor(
-        dark: Color(red: 0.580, green: 0.580, blue: 0.580),
+        dark: Color(red: 0.64, green: 0.68, blue: 0.73),
         light: Color(red: 0.420, green: 0.420, blue: 0.420)
     )
 
     static let appAccent = appDynamicColor(
-        dark: Color(red: 0.961, green: 0.769, blue: 0.298),   // #F5C44C, one warm accent as in Flighty
+        dark: Color(red: 0.52, green: 0.72, blue: 1.00),   // #F5C44C, one warm accent as in Flighty
         light: Color(red: 0.075, green: 0.369, blue: 0.882)   // #135EE1
     )
 
@@ -89,9 +89,9 @@ extension Color {
 
     // MARK: - Roles (thread and cards)
     /// The strongest surface against the current background: the button to press.
-    static let appAction = appDynamicColor(dark: Color(red: 0.961, green: 0.769, blue: 0.298), light: Color(red: 0.067, green: 0.067, blue: 0.067))
+    static let appAction = appDynamicColor(dark: Color(red: 0.72, green: 0.94, blue: 0.85), light: Color(red: 0.075, green: 0.369, blue: 0.882))
     /// Text on `appAction`.
-    static let appOnAction = appDynamicColor(dark: Color(red: 0.10, green: 0.08, blue: 0.02), light: Color.white)
+    static let appOnAction = appDynamicColor(dark: Color(red: 0.04, green: 0.12, blue: 0.10), light: Color.white)
     /// Adam is doing something (progress, live watches).
     static let appWorking = appAccent
     /// Something is waiting on the user.
@@ -125,8 +125,8 @@ enum AppSpacing {
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
     static let xl: CGFloat = 24
-    static let chatMargin: CGFloat = 20
-    static let margin: CGFloat = 20
+    static let chatMargin: CGFloat = 24
+    static let margin: CGFloat = 24
 }
 
 extension Font {
@@ -140,13 +140,13 @@ extension Font {
     static var fineprint: Font { .appBody(12, weight: .medium) }
     static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
     /// The serif headline scale: first screens, page headers, and the title of a card or sheet.
-    static var heroTitle: Font { .appRounded(32, weight: .bold, relativeTo: .title1) }
+    static var heroTitle: Font { .appRounded(30, weight: .semibold, relativeTo: .title1) }
     static var pageTitle: Font { .appRounded(34, weight: .bold, relativeTo: .largeTitle) }
     static var sectionTitle: Font { .appRounded(20, weight: .semibold, relativeTo: .title3) }
     /// Big friendly figures and focal lines.
     static func appRounded(_ size: CGFloat, weight: Font.Weight = .bold, relativeTo style: UIFont.TextStyle = .title1) -> Font {
         let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size, compatibleWith: nil)
-        return .system(size: min(scaled, size * 1.3), weight: weight, design: .rounded)
+        return .system(size: scaled, weight: weight, design: .default)
     }
 }
 
@@ -294,11 +294,10 @@ extension Font {
         ))
     }
 
-    /// System text that follows the phone's text-size setting, capped so layouts stay usable.
+    /// Interface text follows the phone's preferred reading size.
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let base = size * 0.92
-        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: base)
-        return .system(size: min(scaled, base * 1.7), weight: weight)
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
+        return .system(size: scaled, weight: weight)
     }
 
     static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -1157,7 +1156,7 @@ enum ThreadBackground: String, CaseIterable, Identifiable {
         case .automatic: return nil
         case .warm: return UIColor(red: 0.973, green: 0.945, blue: 0.898, alpha: 1)   // #F8F1E5
         case .sea: return UIColor(red: 0.914, green: 0.953, blue: 0.937, alpha: 1)    // #E9F3EF
-        case .night: return UIColor(red: 0.055, green: 0.051, blue: 0.133, alpha: 1)  // #0E0D22
+        case .night: return UIColor(red: 0.055, green: 0.067, blue: 0.082, alpha: 1)  // #0E0D22
         }
     }
 

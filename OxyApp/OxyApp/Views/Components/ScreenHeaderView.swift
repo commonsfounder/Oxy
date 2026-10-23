@@ -1,16 +1,12 @@
 import SwiftUI
 
-/// Silent-luxury screen header that matches the chat screen's `AppHeaderView`:
-/// pure black, no system nav-bar chrome. A title on the left and, when a back
-/// action is provided, a soft circular Liquid Glass chevron beside it. Used by
-/// the More-tab sub-screens (Profile, Pendant, Memory, Connectors, Settings) and
-/// the More root so they no longer show chunky `.large` system title bars.
+/// Shared navigation and title geometry for the app's detail surfaces.
 struct ScreenHeaderView: View {
     let title: String
     /// Provide for pushed/presented screens; leave nil for tab roots (e.g. More).
     var onBack: (() -> Void)? = nil
 
-    private let circle: CGFloat = 38
+    private let circle: CGFloat = 44
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,10 +25,9 @@ struct ScreenHeaderView: View {
             Text(title)
                 .font(.pageTitle)
                 .foregroundStyle(Color.appInk)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, onBack == nil ? 8 : 0)
-                .padding(.bottom, 8)
+                .padding(.bottom, 20)
                 .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, minHeight: onBack == nil ? 64 : nil, alignment: .topLeading)

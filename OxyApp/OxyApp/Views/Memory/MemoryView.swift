@@ -50,84 +50,55 @@ struct MemoryView: View {
                 // native, reliable gesture instead of a custom drag (which rendered a
                 // visible red sliver behind every row — not worth re-fighting SwiftUI for).
                 List {
-                    Group {
-                        VStack(alignment: .leading, spacing: 20) {
-                            if composerExpanded {
-                                SettingsSectionHeader(title: "Remember")
-                                MemoryDropBox(
-                                    draft: $draft,
-                                    isSaving: isSaving,
-                                    message: saveMessage,
-                                    onSave: { Task { await saveMemory() } },
-                                    onCollapse: { withAnimation(.appStandard) { composerExpanded = false } }
-                                )
-                            } else {
-                                // Collapsed: a single quiet line. Tapping it reveals the full composer.
-                                Button {
-                                    HapticManager.shared.impact(.light)
-                                    saveMessage = nil
-                                    withAnimation(.appStandard) { composerExpanded = true }
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        AppIcon("plus", size: 14)
-                                            .foregroundStyle(Color.appMuted)
-                                        Text("Remember something…")
-                                            .font(.appBody(15))
-                                            .foregroundStyle(Color.appMuted)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(.vertical, 14)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.appScale(0.99))
-                            }
-                        }
-                        .padding(.top, 4)
-                        .padding(.bottom, composerExpanded ? 28 : 8)
-
+                    VStack(alignment: .leading, spacing: 18) {
+                        MemorySearchField(text: $search)
                         HStack {
-                            SettingsSectionHeader(title: "What Adam knows")
+                            Text("\(items.filter { $0.source != "photos" }.count) saved memories")
+                                .font(.appBody(14)).foregroundStyle(Color.appMuted)
                             Spacer()
-                            if items.contains(where: { $0.source != "photos" }) {
-                                let own = items.filter { $0.source != "photos" }.count
-                                Text(own == 1 ? "1 memory" : "\(own) memories")
-                                    .font(.appBody(13))
-                                    .foregroundStyle(Color.appMuted)
-                                    .contentTransition(.numericText())
-                                    .animation(.appStandard, value: items.count)
+                            Button {
+                                HapticManager.shared.impact(.light)
+                                saveMessage = nil
+                                withAnimation(.appStandard) { composerExpanded.toggle() }
+                            } label: {
+                                HStack(spacing: 7) {
+                                    AppIcon(composerExpanded ? "xmark" : "plus", size: 14)
+                                    Text(composerExpanded ? "Close" : "Add memory")
+                                }
+                                .font(.appBody(14, weight: .semibold))
+                                .foregroundStyle(Color.appAccent)
+                                .frame(minHeight: 44)
                             }
+                            .buttonStyle(.appScale(0.98))
                         }
-                        .padding(.bottom, 12)
-
-                        if !isLoading && !items.isEmpty {
-                            MemorySearchField(text: $search)
-                                .padding(.bottom, 8)
+                        if composerExpanded {
+                            MemoryDropBox(draft: $draft, isSaving: isSaving, message: saveMessage,
+                                onSave: { Task { await saveMemory() } },
+                                onCollapse: { withAnimation(.appStandard) { composerExpanded = false } })
                         }
-
                         if isLoading {
-                            ForEach(0..<4, id: \.self) { _ in
-                                OxySkeletonCard(height: 44, cornerRadius: 0)
-                                SettingsDivider()
-                            }
+                            OxySkeletonCard(height: 90, cornerRadius: 12)
                         } else if items.isEmpty {
-                            SettingsStatement(text: "Nothing saved yet", solid: false)
-                                .padding(.vertical, 20)
-                        } else if groupedItems.isEmpty {
-                            Text("No memories match \"\(search)\".")
-                                .font(.appBody(14))
-                                .foregroundStyle(Color.appMuted)
+                            Text("Nothing saved yet")
+                                .font(.appBody(20, weight: .medium)).foregroundStyle(Color.appInk)
+                                .padding(.vertical, 30)
+                        } else if groupedItems.isEmpty && !search.isEmpty {
+                            Text("No memories match “\(search)”.")
+                                .font(.appBody(16)).foregroundStyle(Color.appMuted)
                                 .padding(.vertical, 20)
                         }
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
 
                     ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
                         Text(group.title)
-                            .font(.appBody(18, weight: .semibold))
+                            .font(.appBody(15, weight: .semibold))
                             .foregroundStyle(Color.appInk)
-                            .padding(.top, index == 0 ? 16 : 30)
+                            .padding(.top, index == 0 ? 8 : 26)
                             .padding(.bottom, 4)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                             .listRowSeparator(.hidden)
@@ -171,7 +142,7 @@ struct MemoryView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        Text("Adam looks these up when you ask about a photo. To stop, tell Adam to stop looking through your photos.")
+                        Text("Notes saved from your photos.")
                             .font(.appBody(12))
                             .foregroundStyle(Color.appMuted)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -351,7 +322,7 @@ private struct MemoryRow: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.content)
-                        .font(.appBody(15))
+                        .font(.appBody(18))
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -380,8 +351,8 @@ private struct MemorySearchField: View {
         HStack(spacing: 8) {
             AppIcon("search", size: 15)
                 .foregroundStyle(Color.appMuted)
-            TextField("Search memories…", text: $text)
-                .font(.appBody(14))
+            TextField("", text: $text, prompt: Text("Search memories").foregroundStyle(Color.appMuted))
+                .font(.appBody(16))
                 .foregroundStyle(Color.appInk)
                 .tint(Color.appMuted)
                 .autocorrectionDisabled()

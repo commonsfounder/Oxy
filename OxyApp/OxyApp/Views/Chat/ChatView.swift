@@ -379,7 +379,14 @@ struct ChatView: View {
                             }
                         )
                         .onPreferenceChange(ChatViewportHeightKey.self) { height in
+                            let resized = scrollViewportHeight != height
                             scrollViewportHeight = height
+                            if resized, didSettleAtBottom, isScrollPinnedToBottom {
+                                Task { @MainActor in
+                                    await Task.yield()
+                                    proxy.scrollTo("bottom", anchor: .bottom)
+                                }
+                            }
                         }
                         .onPreferenceChange(ChatBottomDistanceKey.self) { bottomY in
                             guard scrollViewportHeight > 0 else { return }
@@ -392,6 +399,7 @@ struct ChatView: View {
                                 isWorking: !boardModel.working.isEmpty,
                                 activity: hubActivity,
                                 deviceOnline: boardModel.deviceOnline,
+                                isDemo: appState.isDemoSession,
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
                             )
@@ -451,7 +459,7 @@ struct ChatView: View {
                     )
                             }
                             .background(alignment: .bottom) {
-                                ComposerBackdrop().padding(.top, -36)
+                                ComposerBackdrop()
                             }
                         }
                         .onChange(of: viewModel.messages.count) {
@@ -469,6 +477,13 @@ struct ChatView: View {
                             guard viewModel.scrollTargetMessageID == nil else { return }
                             guard isScrollPinnedToBottom else { return }
                             withAnimation(.appSpring) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: viewModel.inputText) {
+                            guard isScrollPinnedToBottom else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(100))
                                 proxy.scrollTo("bottom", anchor: .bottom)
                             }
                         }
@@ -1038,16 +1053,14 @@ struct ChatView: View {
     }
 }
 
-/// Messages blur as they pass under the composer. Blur only, so they stay readable shapes rather than vanishing.
+/// A solid dock keeps the last reply readable above the input controls.
 private struct ComposerBackdrop: View {
     var body: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .mask(LinearGradient(stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.45)
-            ], startPoint: .top, endPoint: .bottom))
+        Color.appBackground
             .ignoresSafeArea(edges: .bottom)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.appHairline).frame(height: 0.5)
+            }
             .allowsHitTesting(false)
     }
 }
@@ -1469,6 +1482,7 @@ private struct ChatInputBar: View {
     let onRemoveAttachment: () -> Void
 
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1518,51 +1532,40 @@ private struct ChatInputBar: View {
             }
 
             composer
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 20)
+                .padding(.horizontal, AppSpacing.chatMargin)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
         }
         .onAppear { pulse = true }
     }
 
-    /// One capsule holds everything: attach on the left, text in the middle, voice or send on the right.
+    /// Attachment and voice are distinct controls around the text entry.
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 0) {
+        HStack(alignment: .bottom, spacing: 10) {
             if !isVoiceActive {
                 Button(action: onAttach) {
-                    AppIcon(sf: "plus", size: 18)
-                        .foregroundStyle(Color.appInk.opacity(0.8))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
+                    AppIcon("plus", size: 20)
+                        .foregroundStyle(Color.appInk)
+                        .frame(width: 44, height: 52)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Add a photo, video or file")
                 .buttonStyle(.appScale)
                 .disabled(isSending)
             }
 
-            if isVoiceActive {
-                voiceField
-            } else {
-                textField
+            HStack(alignment: .bottom, spacing: 4) {
+                if isVoiceActive { voiceField } else { textField }
+                actionButton
             }
-
-            actionButton
+            .padding(4)
+            .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isFocused.wrappedValue || incognito ? Color.appAccent : Color.appCardOutline, lineWidth: 1)
+            }
+            .animation(.appFast, value: isFocused.wrappedValue)
         }
-        .padding(.horizontal, 2)
-        .background(Color.appSurface2.opacity(0.6))
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl + 4, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.xl + 4, style: .continuous)
-                .strokeBorder(
-                    incognito
-                        ? Color.appAccent.opacity(0.28)
-                        : (isFocused.wrappedValue ? Color.appAccent.opacity(0.12) : Color.appHairline),
-                    lineWidth: (incognito || isFocused.wrappedValue) ? 0.75 : 0.5
-                )
-                .animation(.appFast, value: isFocused.wrappedValue)
-                .animation(.appFast, value: incognito)
-        )
     }
 
     private var actionButton: some View {
@@ -1577,27 +1580,25 @@ private struct ChatInputBar: View {
                         .controlSize(.small)
                         .tint(Color.appMuted)
                 } else {
-                    AppIcon(sf: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"), size: 15)
+                    AppIcon(canSend ? "arrow-up" : (isRecording ? "stop" : "mic"), size: 18)
                 }
             }
             .foregroundStyle(buttonForeground)
             .frame(width: 34, height: 34)
             .background {
-                if isRecording {
+                if isRecording && !reduceMotion {
                     Circle()
                         .strokeBorder(Color.appAction.opacity(pulse ? 0 : 0.4), lineWidth: 2)
                         .scaleEffect(pulse ? 1.6 : 1)
                         .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: pulse)
                 }
-                if canSend || showsStop || isRecording {
-                    Circle().fill(buttonFill)
-                }
+                Circle().fill(buttonFill)
             }
             .frame(width: 44, height: 44)
             .contentShape(Circle())
         }
         .disabled(!canAct && !showsStop)
-        .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : "Talk to Adam"))
+        .accessibilityLabel(showsStop ? "Stop" : (canSend ? "Send" : (isRecording ? "Finish recording" : "Talk to Adam")))
         .buttonStyle(ScaleButtonStyle())
         .animation(.appFast, value: canAct)
         .animation(.appFast, value: canSend)
@@ -1605,10 +1606,10 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(isSending ? "You're offline" : (incognito ? "Private · not saved" : "Message Adam"), text: $text, axis: .vertical)
-            .font(.appBody(15, weight: .regular))
+        TextField("", text: $text, prompt: Text(isSending ? "You're offline" : (incognito ? "Private message" : "Ask Adam")).foregroundStyle(Color.appMuted), axis: .vertical)
+            .font(.appBody(17, weight: .regular))
             .foregroundStyle(Color.appInk)
-            .tint(Color.appMuted)
+            .tint(Color.appAccent)
             .lineLimit(1...6)
             .focused(isFocused)
             .disabled(isSending)
@@ -1670,11 +1671,11 @@ private struct ChatInputBar: View {
 
     private var buttonFill: Color {
         if canSend || showsStop || isRecording { return Color.appAction }
-        return Color.appSurface
+        return Color.appFillSubtle
     }
 
     private var buttonForeground: Color {
-        if canSend || isRecording { return Color.appOnAction }
+        if canSend || showsStop || isRecording { return Color.appOnAction }
         return canAct ? Color.appInk.opacity(0.8) : Color.appMuted.opacity(0.5)
     }
 

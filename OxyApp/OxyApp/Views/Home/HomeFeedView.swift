@@ -10,10 +10,10 @@ struct HomeCard: Codable, Identifiable, Equatable {
 
 private struct HomeFeedResponse: Codable { let cards: [HomeCard] }
 
-/// What needs doing: a few short sentences, each led by a verb, with a company's logo when one is named.
-/// Tapping one hands it to Adam as a normal request.
+/// Suggestions open the same conversation; this surface never executes an action itself.
 struct HomeFeedView: View {
     @Environment(\.revealClose) private var revealClose
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var cards: [HomeCard] = []
     @State private var loaded = false
     @State private var failed = false
@@ -24,37 +24,51 @@ struct HomeFeedView: View {
 
     var body: some View {
         SettingsPage(title: "Today", isRoot: true) {
-            if let reading {
-                HStack(spacing: 10) {
-                    ProgressView().scaleEffect(0.8)
-                    Text("Reading your photos for things that need doing: \(reading.read) of \(reading.total)")
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
+            HStack(spacing: 8) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                    .font(.appBody(15)).foregroundStyle(Color.appMuted)
+                Spacer()
+                if loaded && !failed {
+                    Text("\(visible.count)")
+                        .font(.appMono(13, weight: .medium))
+                        .foregroundStyle(Color.appAccent)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.appAccent.opacity(0.12), in: Capsule())
+                        .accessibilityLabel("\(visible.count) suggestions")
                 }
             }
-            summaryLine
-            if visible.isEmpty {
-                Text(loaded ? (failed ? "Couldn't load this. Pull down to try again." : reading == nil ? "Nothing needs you right now." : "Nothing yet. This fills in as I read.") : " ")
-                    .font(.appBody(17))
-                    .foregroundStyle(Color.appMuted)
-                    .padding(.top, 8)
-            } else {
-                if let first = visible.first { focalCard(first) }
-                let rest = Array(visible.dropFirst())
-                if !rest.isEmpty {
-                    Text("Next up")
-                        .font(.appRounded(18, weight: .semibold, relativeTo: .title3))
-                        .foregroundStyle(Color.appInk)
-                        .padding(.top, 12)
-                    VStack(spacing: 0) {
-                        ForEach(rest) { card in cardView(card) }
-                    }
+            .padding(.top, -8)
+
+            if let reading {
+                HStack(spacing: 10) {
+                    ProgressView().tint(Color.appAccent)
+                    Text("Reading photos · \(reading.read) of \(reading.total)")
+                        .font(.appBody(14)).foregroundStyle(Color.appMuted)
                 }
+                .padding(.vertical, 8)
+            }
+
+            if !loaded {
+                OxySkeletonCard(height: 210, cornerRadius: 18)
+                OxySkeletonCard(height: 92, cornerRadius: 18)
+            } else if failed {
+                quietState("Couldn't load today", detail: "Pull down to try again.", icon: "refresh")
+            } else if let first = visible.first {
+                featured(first)
+                if visible.count > 1 {
+                    VStack(spacing: 0) {
+                        ForEach(Array(visible.dropFirst())) { card in
+                            suggestion(card)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+            } else {
+                quietState("You're all caught up", detail: reading == nil ? "Nothing needs your attention." : "New suggestions will appear as photos are read.", icon: "check-circle")
             }
         }
         .task {
             await load()
-            // While photos are being read, keep the cards and the count fresh.
             while !Task.isCancelled {
                 refreshProgress()
                 try? await Task.sleep(for: .seconds(8))
@@ -64,76 +78,135 @@ struct HomeFeedView: View {
         .refreshable { await load() }
     }
 
-    /// State first: the one line that says how the day looks.
-    @ViewBuilder
-    private var summaryLine: some View {
-        if loaded, !failed, !visible.isEmpty {
-            Text(visible.count == 1 ? "1 thing needs you" : "\(visible.count) things need you")
-                .font(.appRounded(22, weight: .semibold, relativeTo: .title2))
-                .foregroundStyle(Color.appInk)
-        }
-    }
-
-    /// The most pressing ask, given the room and the two answers it needs.
-    private func focalCard(_ card: HomeCard) -> some View {
-        let color = tint(for: card)
-        let (question, context) = split(card.rest)
-        return VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 12) {
-                tile(card, color: color, size: 52)
-                Spacer(minLength: 0)
+    private func featured(_ card: HomeCard) -> some View {
+        let parts = split(card.rest)
+        return VStack(alignment: .leading, spacing: 22) {
+            HStack {
+                sourceIcon(card, size: 30)
+                Spacer()
+                Text("Suggestion")
+                    .font(.appBody(13, weight: .medium))
+                    .foregroundStyle(Color.appMuted)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(card.verb + " " + question)
-                    .font(.appRounded(26, weight: .bold, relativeTo: .title1))
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title(card, question: parts.0))
+                    .font(.appRounded(27, weight: .semibold, relativeTo: .title1))
+                    .tracking(-0.6)
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
-                if let context {
-                    Text(context).font(.appBody(16)).foregroundStyle(Color.appMuted)
+                if let context = parts.1 {
+                    Text(context)
+                        .font(.appBody(16))
+                        .foregroundStyle(Color.appMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            HStack(spacing: 10) {
-                Button { ask(card) } label: {
-                    Text("Yes please")
-                        .font(.appBody(17, weight: .semibold))
-                        .foregroundStyle(Color.appOnAction)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Color.appAction, in: Capsule())
-                }
-                .buttonStyle(.appScale(0.97))
-                Button { dismiss(card) } label: {
-                    Text("Not now")
-                        .font(.appBody(17, weight: .medium))
-                        .foregroundStyle(Color.appInk)
-                        .padding(.horizontal, 22)
-                        .frame(minHeight: 50)
-                        .background(Color.appFillSubtle, in: Capsule())
-                }
-                .buttonStyle(.appScale(0.97))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { primaryAction(card); laterAction(card) }
+                VStack(alignment: .leading, spacing: 12) { primaryAction(card); laterAction(card) }
             }
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(LinearGradient(colors: [color.opacity(0.22), Color.settingsRaised], startPoint: .topLeading, endPoint: .bottom))
-        )
-        .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).strokeBorder(color.opacity(0.25), lineWidth: 0.8))
+        .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 1).fill(Color.appAccent)
+                .frame(width: 36, height: 3).padding(.top, 0)
+                .accessibilityHidden(true)
+        }
         .accessibilityElement(children: .contain)
     }
 
-    private func tile(_ card: HomeCard, color: Color, size: CGFloat) -> some View {
-        Group {
-            if let brand = card.brand {
-                AppIconView(candidates: [brand, "app-\(brand)"] + Self.logoURL(brand))
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: size * 0.3, style: .continuous).fill(color)
-                    .overlay(Text(String(card.verb.prefix(1)).uppercased()).font(.appRounded(size * 0.42, weight: .bold)).foregroundStyle(Color.black.opacity(0.75)))
+    private func primaryAction(_ card: HomeCard) -> some View {
+        Button { ask(card) } label: {
+            HStack(spacing: 12) {
+                Text("Continue").font(.appBody(16, weight: .semibold))
+                AppIcon("arrow-up-right", size: 16)
             }
+            .foregroundStyle(Color.appOnAction)
+            .padding(.horizontal, 22).padding(.vertical, 15)
+            .frame(minHeight: 50)
+            .background(Color.appAction, in: Capsule())
         }
-        .frame(width: size, height: size)
+        .buttonStyle(.appScale(0.97))
+        .accessibilityHint("Asks Adam to help with this suggestion")
+    }
+
+    private func laterAction(_ card: HomeCard) -> some View {
+        Button { dismiss(card) } label: {
+            Text("Not now").font(.appBody(15, weight: .medium))
+                .foregroundStyle(Color.appMuted)
+                .padding(.horizontal, 14).frame(minHeight: 50)
+        }
+        .buttonStyle(.appScale(0.97))
+    }
+
+    private func suggestion(_ card: HomeCard) -> some View {
+        let parts = split(card.rest)
+        return HStack(alignment: .top, spacing: 8) {
+            Button { ask(card) } label: {
+                HStack(alignment: .top, spacing: 16) {
+                    sourceIcon(card, size: 28).frame(width: 36, height: 40)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(title(card, question: parts.0))
+                            .font(.appBody(18, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let detail = parts.1 {
+                            Text(detail).font(.appBody(14)).foregroundStyle(Color.appMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.appScale(0.99))
+            .accessibilityHint("Asks Adam to help with this suggestion")
+            Button { dismiss(card) } label: {
+                AppIcon("xmark", size: 12).foregroundStyle(Color.appMuted)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss suggestion")
+        }
+        .padding(.vertical, 22)
+        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
+    }
+
+    @ViewBuilder
+    private func sourceIcon(_ card: HomeCard, size: CGFloat) -> some View {
+        if let brand = card.brand {
+            AppIconView(candidates: [brand, "app-\(brand)"])
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else {
+            AppIcon("sparkles", size: size * 0.72)
+                .foregroundStyle(Color.appAccent)
+                .frame(width: size, height: size)
+        }
+    }
+
+    private func quietState(_ title: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            AppIcon(icon, size: 32).foregroundStyle(Color.appAccent)
+                .padding(20).background(Color.appAccent.opacity(0.10), in: Circle())
+            Text(title).font(.appRounded(28, weight: .semibold)).foregroundStyle(Color.appInk)
+            Text(detail).font(.appBody(16)).foregroundStyle(Color.appMuted)
+        }
+        .padding(.top, 46)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func title(_ card: HomeCard, question: String) -> String {
+        (card.verb + " " + question).trimmingCharacters(in: CharacterSet(charactersIn: "? "))
+    }
+
+    private func split(_ text: String) -> (String, String?) {
+        guard let end = text.firstIndex(of: "?") else { return (text, nil) }
+        let head = String(text[..<end])
+        let tail = text[text.index(after: end)...].trimmingCharacters(in: .whitespaces)
+        return (head, tail.isEmpty ? nil : tail)
     }
 
     private func ask(_ card: HomeCard) {
@@ -141,76 +214,6 @@ struct HomeFeedView: View {
         mark(card)
         NotificationCenter.default.post(name: AskAdam.sendNotification, object: card.prompt)
         revealClose?()
-    }
-
-    /// A small palette so each kind of ask has its own colour, steady from one launch to the next.
-    private static let tints: [Color] = [
-        Color(red: 0.93, green: 0.55, blue: 0.42), Color(red: 0.90, green: 0.72, blue: 0.30),
-        Color(red: 0.36, green: 0.72, blue: 0.66), Color(red: 0.55, green: 0.55, blue: 0.90)
-    ]
-
-    /// A company with no bundled logo gets its site icon, looked up by name.
-    private static func logoURL(_ brand: String) -> [String] {
-        let name = brand.lowercased().filter { $0.isLetter || $0.isNumber }
-        return name.isEmpty ? [] : ["https://www.google.com/s2/favicons?domain=\(name).com&sz=128"]
-    }
-
-    private func tint(for card: HomeCard) -> Color { Color.appTile(for: card.verb) }
-
-    /// The question first, then whatever explains it, in a quieter line.
-    private func split(_ rest: String) -> (String, String?) {
-        guard let end = rest.firstIndex(where: { $0 == "?" }) else { return (rest, nil) }
-        let head = String(rest[..<rest.index(after: end)])
-        let tail = rest[rest.index(after: end)...].trimmingCharacters(in: .whitespaces)
-        return (head, tail.isEmpty ? nil : tail)
-    }
-
-    private func cardView(_ card: HomeCard) -> some View {
-        let color = tint(for: card)
-        let (question, context) = split(card.rest)
-        return HStack(alignment: .top, spacing: 14) {
-            Group {
-                if let brand = card.brand {
-                    AppIconView(candidates: [brand, "app-\(brand)"] + Self.logoURL(brand))
-                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                } else {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous).fill(color)
-                        .overlay(Text(String(card.verb.prefix(1)).uppercased()).font(.appBody(19, weight: .bold)).foregroundStyle(Color.black.opacity(0.75)))
-                }
-            }
-            .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 4) {
-                (Text(card.verb + " ").font(.appBody(18, weight: .semibold)).foregroundColor(color)
-                    + Text(question).font(.appBody(18)).foregroundColor(Color.appInk))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let context {
-                    Text(context).font(.appBody(14)).foregroundStyle(Color.appMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button { dismiss(card) } label: {
-                AppIcon("xmark", size: 11)
-                    .foregroundStyle(Color.appMuted)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Not now")
-        }
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.appHairline).frame(height: 0.5) }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            HapticManager.shared.impact(.light)
-            mark(card)
-            NotificationCenter.default.post(name: AskAdam.sendNotification, object: card.prompt)
-            revealClose?()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Asks Adam to do this")
-        .accessibilityAddTraits(.isButton)
     }
 
     private func refreshProgress() {
@@ -238,47 +241,5 @@ struct HomeFeedView: View {
               let response = try? JSONDecoder().decode(HomeFeedResponse.self, from: data) else { failed = true; return }
         failed = false
         cards = response.cards
-    }
-}
-
-
-/// Lays views out left to right and wraps them onto new lines, like words in a paragraph.
-private struct WrapLayout: Layout {
-    var spacing: CGFloat = 4
-    var lineSpacing: CGFloat = 4
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, maxX: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width { y += lineHeight + lineSpacing; x = 0; lineHeight = 0 }
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-            maxX = max(maxX, x - spacing)
-        }
-        return CGSize(width: maxX, height: y + lineHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        // Group into lines first, so every word can sit centred on its line next to the taller verb pill.
-        var lines: [[(index: Int, size: CGSize)]] = [[]]
-        var x: CGFloat = 0
-        for (index, view) in subviews.enumerated() {
-            let size = view.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > bounds.width { lines.append([]); x = 0 }
-            lines[lines.count - 1].append((index, size))
-            x += size.width + spacing
-        }
-        var y = bounds.minY
-        for line in lines {
-            let height = line.map(\.size.height).max() ?? 0
-            var cursor = bounds.minX
-            for item in line {
-                subviews[item.index].place(at: CGPoint(x: cursor, y: y + (height - item.size.height) / 2), proposal: ProposedViewSize(item.size))
-                cursor += item.size.width + spacing
-            }
-            y += height + lineSpacing
-        }
     }
 }

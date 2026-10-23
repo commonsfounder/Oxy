@@ -169,13 +169,14 @@ private struct AdamYouView: View {
     var body: some View {
         NavigationStack {
             SettingsPage(title: "Settings", isRoot: true) {
-                SettingsList {
+                VStack(spacing: 0) {
                     youRow(title: "You", subtitle: youStatus, icon: "person") { destination = .you }
-                    SettingsRule(inset: 34)
+                    SettingsRule(inset: 44)
                     youRow(title: "Apps", subtitle: appsStatus, icon: "cube") { destination = .apps }
-                    SettingsRule(inset: 34)
-                    youRow(title: "Account", subtitle: appState.isDemoSession ? "Demo account" : "Your account and data", icon: "envelope") { destination = .account }
+                    SettingsRule(inset: 44)
+                    youRow(title: "Account", subtitle: appState.isDemoSession ? "Sample account" : "Your account and data", icon: "envelope") { destination = .account }
                 }
+                .padding(.vertical, 4)
 
                 if UserDefaults.standard.bool(forKey: HouseholdSoundMonitor.preferenceKey) {
                     SettingsList {
@@ -191,7 +192,7 @@ private struct AdamYouView: View {
                             showBackendURLEditor = true
                         }
                     } label: {
-                        AdamMark().frame(width: 32, height: 32)
+                        AdamMark().frame(width: 20, height: 20)
                             .frame(minWidth: 44, minHeight: 44)
                             .contentShape(Rectangle())
                     }

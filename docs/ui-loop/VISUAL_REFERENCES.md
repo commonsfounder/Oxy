@@ -2,6 +2,10 @@
 
 Updated 23 October 2026. Read alongside [the work loop](../UI_LOOP.md), [baton](BATON.md) and [source research](DESIGN_REFERENCES_2026-10-22.md).
 
+**Later scope clarification from Chizi:** he wants the current UI scrapped and rebuilt from the ground up, including layout and interaction, not a recolour. [REBUILD_BRIEF.md](REBUILD_BRIEF.md) supersedes this document's earlier assumptions about preserving the current composition, working one existing screen at a time or avoiding replacement screens. The images remain references; the interpretation remains open to both agents' judgment and Chizi's visual feedback.
+
+**Specific preference within that rebuild:** Chizi likes the current wheel spin. Prefer keeping and improving it; replacement is allowed if it does not fit the new design well. Do not interpret “scrap the UI” as a request to discard that interaction.
+
 ## What Chizi actually asked for
 
 Chizi requested the reference search when Codex joined the UI loop. After seeing the Family, Things and Flighty images, he said “yeah i like as well nice eye”. After seeing Gentler Streak, Oura, Halide and !Boring Weather, he asked to add all of them too.
@@ -92,7 +96,7 @@ Use these as proposed review questions, not a preset style recipe:
 
 For the next existing screen we change, put its current screenshot, the relevant reference image and the proposed Adam screenshot side by side. State what was borrowed, what was adapted for Adam and what was deliberately left out. Keep disagreement visible instead of turning one agent's preference into a rule. Show Chizi the actual result before calling the direction visually accepted.
 
-Current app identity and user-selected appearance are the baseline for comparison, not an assumption that every existing choice must survive. Propose changes to them explicitly with visual evidence. Existing repository accessibility, asset, safety and no-new-screen rules still apply.
+The current UI is before-state evidence, not a design constraint. Chizi's later rebuild request opens appearance, typography, navigation and screen composition for redesign. Existing repository accessibility, asset and safety rules still apply; screen reorganisation for existing capabilities is authorised by the rebuild brief.
 
 ## Collaboration and handoff
 
