@@ -404,7 +404,7 @@ app.use(cors({
       allowedOrigins: ALLOWED_ORIGINS,
       allowedExtensionIds: ALLOWED_EXTENSION_IDS
     })) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'));
+    return cb(null, false);
   },
   credentials: true
 }));
@@ -766,6 +766,30 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/agent/continuity/')) return next();
   return defaultBodyParser(req, res, next);
 });
+// A missing body is an empty one, so handlers that destructure it answer 400 instead of crashing.
+app.use((req, res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
+
+// A 500 never carries database or JS error text: a bad id becomes 400, anything else a plain line.
+app.use((req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode === 500 && body && body.error !== undefined) {
+      const raw = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+      if (/invalid input syntax for type|22P02/i.test(raw)) {
+        res.status(400);
+        return json({ ...body, error: 'That id is not valid.' });
+      }
+      console.error('route 500:', raw.slice(0, 300));
+      return json({ ...body, error: 'Something went wrong.' });
+    }
+    return json(body);
+  };
+  next();
+});
+
 app.use((req, res, next) => {
   res.setHeader('X-Oxy-Commit', getRuntimeVersion().gitCommit);
   res.setHeader('Vary', 'Origin');
@@ -848,6 +872,24 @@ app.use((req, res, next) => {
     next();
   });
 });
+
+// Words the phone shows are cleaned on the way out: search tracking tags and raw provider errors never reach the screen.
+function scrubReplyText(text) {
+  return String(text)
+    .replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, '')
+    .replace(/Google not connected: Failed to refresh Google token[^).\n]*/gi, 'Your Google account needs reconnecting')
+    .replace(/Failed to refresh Google token[^).\n]*/gi, 'Your Google account needs reconnecting');
+}
+
+function scrubbedSse(obj) {
+  if (obj && (obj.type === 'text' || obj.type === 'replace')) {
+    const next = { ...obj };
+    if (typeof next.chunk === 'string') next.chunk = scrubReplyText(next.chunk);
+    if (typeof next.text === 'string') next.text = scrubReplyText(next.text);
+    return JSON.stringify(next);
+  }
+  return JSON.stringify(obj);
+}
 
 const rateLimitStores = [];
 const audioRateLimit = new Map();
@@ -4397,7 +4439,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     if (obj?.type === 'audio') {
       console.log(`[audio][backend:${audioTraceId}] sending audio event bytes=${Buffer.from(obj.data || '', 'base64').length} mime=${obj.mimeType || 'audio/wav'}`);
     }
-    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    res.write(`data: ${scrubbedSse(obj)}\n\n`);
   };
 
   try {
@@ -7021,7 +7063,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
-    const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    const sse = obj => res.write(`data: ${scrubbedSse(obj)}\n\n`);
     if (browserActions.length) sse({ type: 'actions', results: browserActions });
     sse({ type: 'replace', text: spoken });
     if (wantsTTS) {
@@ -7318,7 +7360,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
-        const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        const sse = obj => res.write(`data: ${scrubbedSse(obj)}\n\n`);
         sse({ type: 'text', chunk: deterministicQuickReply });
         if (wantsTTS) {
           try {
@@ -7399,7 +7441,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
-        const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        const sse = obj => res.write(`data: ${scrubbedSse(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
         let actionResults = await timedDev('chat', 'action_execution', {
           actionCount: deterministicAction.actions.length,
@@ -7610,7 +7652,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           res.setHeader('Connection', 'keep-alive');
           res.flushHeaders();
         } catch {}
-        agenticSse = obj => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+        agenticSse = obj => { try { res.write(`data: ${scrubbedSse(obj)}\n\n`); } catch {} };
         agenticSendStatus = (status, label, extra = {}) => agenticSse({ type: 'status', status, label, ...extra });
       }
 
@@ -7782,7 +7824,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         if (obj?.type === 'audio') {
           console.log(`[audio][backend:chat-stream] sending audio event seq=${obj.seq ?? 'na'} chunk=${obj.chunk ?? 'na'} bytes=${Buffer.from(obj.data || '', 'base64').length} mime=${obj.mimeType || 'audio/wav'}`);
         }
-        res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        res.write(`data: ${scrubbedSse(obj)}\n\n`);
       };
       const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
       // A searched answer can be silent for longer than the phone waits; keep the line alive.
@@ -9315,19 +9357,23 @@ app.patch('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
 app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  const task = await delegatedRunLifecycle.get(userId, req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
-  const started = await startDelegatedTaskExecution.start({
-    userId,
-    task,
-    runtime: {
-      deviceId: req.body?.deviceId,
-      deviceType: req.body?.deviceType,
-      projectRef: req.body?.projectRef,
-      kind: req.body?.kind
-    }
-  });
-  res.status(started.status).json(started.body);
+  try {
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    const started = await startDelegatedTaskExecution.start({
+      userId,
+      task,
+      runtime: {
+        deviceId: req.body?.deviceId,
+        deviceType: req.body?.deviceType,
+        projectRef: req.body?.projectRef,
+        kind: req.body?.kind
+      }
+    });
+    res.status(started.status).json(started.body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Stops a delegated run. The run's next progress write fails its ownership check, so it halts at
@@ -9903,7 +9949,7 @@ app.post('/routines', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const { name, prompt, interval_minutes: rawInterval } = req.body || {};
-    if (!name || !prompt) return res.status(400).json({ error: 'name and prompt required' });
+    if (typeof name !== 'string' || typeof prompt !== 'string' || !name.trim() || !prompt.trim()) return res.status(400).json({ error: 'name and prompt required' });
     let intervalMinutes = null;
     if (rawInterval !== undefined && rawInterval !== null && rawInterval !== '') {
       const parsed = Number(rawInterval);
@@ -10003,6 +10049,8 @@ const actionDeps = {
 // Last stop for anything a route did not catch: a plain error, never raw database or stack text.
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
+  if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'That file is too large.' });
+  if (err?.code === 'LIMIT_UNEXPECTED_FILE' || err?.name === 'MulterError') return res.status(400).json({ error: 'That upload was not valid.' });
   const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : (err?.message === 'Not allowed by CORS' ? 403 : 500);
   if (status === 500) console.error('unhandled route error:', err?.message);
   res.status(status).json({ error: status === 500 ? 'Something went wrong.' : status === 403 ? 'Not allowed.' : 'That request was not valid.' });
