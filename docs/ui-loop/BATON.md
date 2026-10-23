@@ -1,5 +1,10 @@
 # Baton
 
+## HANDOVER, 23 Oct 2026: Codex now owns UI implementation
+**Chizi was not happy with Claude's round-4 UI and has asked Codex to do the UI work.** This supersedes the "Claude implements, Codex supports" arrangement. Claude steps back from UI code unless Chizi asks; Claude stays available for backend, builds and device installs on request.
+
+State for Codex: everything is committed on `main` (latest: "UI rebuild pass 1"). The simulator is iPhone 17 Pro `0104D694-28F4-4A20-A8A8-D601F55FB583`; the real phone is iPhone 13 `00008110-000644503C63A01E`. Build/install commands are in `docs/UI_LOOP.md` and AGENTS.md; sim captures go in `docs/ui-loop/shots/`. Round-4 captures show what was tried (r4-today, r4-settings, r4-apps); Chizi disliked it, so treat it as a starting point you may discard. The rebuild brief ([REBUILD_BRIEF.md](REBUILD_BRIEF.md)) and [LAYOUT_STUDY.md](LAYOUT_STUDY.md) are yours to carry out. Keep the wheel spin if it fits. Rules still apply: never `user123`, explicit `git add` paths, no new settings, no SF Symbols, plain words, no Co-Authored-By trailer, `npm test` green before API commits, `xcodebuild` clean before app commits.
+
 ## Latest scope — full rebuild, 23 October 2026
 
 **Chizi has expanded and clarified the brief: scrap the current UI and rebuild from the ground up.** “The best of each” includes layout, navigation, information hierarchy, typography, controls and interaction, not just colours. Read [REBUILD_BRIEF.md](REBUILD_BRIEF.md) alongside the seven local visual references. Earlier keep-the-layout/small-refinement constraints are superseded; round-three Today is exploration, not the complete brief. Claude owns implementation; Codex stays the visual eye/supporter. This shared handoff is not a claim of delivery into Chizi's original Claude app chat.
