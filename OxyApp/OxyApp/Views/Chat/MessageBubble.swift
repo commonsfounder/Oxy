@@ -200,9 +200,8 @@ struct MessageBubble: View {
                                 }
                             }
                         }
-                            .padding(.horizontal, isLongForm ? 2 : 12)
-                            .padding(.vertical, isLongForm ? 4 : 9)
-                            .background(bubbleShape.fill(isLongForm ? Color.clear : Color.appReceivedBubble))
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 4)
                             .overlay(alignment: .topTrailing) {
                                 if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
                             }

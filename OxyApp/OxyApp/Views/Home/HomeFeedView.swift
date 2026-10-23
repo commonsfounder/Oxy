@@ -63,6 +63,12 @@ struct HomeFeedView: View {
         Color(red: 0.36, green: 0.72, blue: 0.66), Color(red: 0.55, green: 0.55, blue: 0.90)
     ]
 
+    /// A company with no bundled logo gets its site icon, looked up by name.
+    private static func logoURL(_ brand: String) -> [String] {
+        let name = brand.lowercased().filter { $0.isLetter || $0.isNumber }
+        return name.isEmpty ? [] : ["https://www.google.com/s2/favicons?domain=\(name).com&sz=128"]
+    }
+
     private func tint(for card: HomeCard) -> Color {
         let seed = card.verb.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }
         return Self.tints[seed % Self.tints.count]
@@ -82,7 +88,7 @@ struct HomeFeedView: View {
         return HStack(alignment: .top, spacing: 14) {
             Group {
                 if let brand = card.brand {
-                    AppIconView(candidates: [brand, "app-\(brand)"])
+                    AppIconView(candidates: [brand, "app-\(brand)"] + Self.logoURL(brand))
                         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 } else {
                     RoundedRectangle(cornerRadius: 13, style: .continuous).fill(color)

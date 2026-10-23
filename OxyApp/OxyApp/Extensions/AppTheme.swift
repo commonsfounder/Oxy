@@ -41,7 +41,7 @@ extension Color {
     )
 
     static let appAccent = appDynamicColor(
-        dark: Color(red: 0.302, green: 0.557, blue: 1.000),   // #4D8EFF
+        dark: Color(red: 0.961, green: 0.769, blue: 0.298),   // #F5C44C, one warm accent as in Flighty
         light: Color(red: 0.075, green: 0.369, blue: 0.882)   // #135EE1
     )
 
@@ -76,7 +76,7 @@ extension Color {
 
     /// The user's own messages: a soft slate-blue wash, quieter than Adam's words.
     static let appUserBubble = appDynamicColor(
-        dark: Color(red: 0.302, green: 0.557, blue: 1.000).opacity(0.26),
+        dark: Color.white.opacity(0.13),
         light: Color(red: 0.075, green: 0.369, blue: 0.882).opacity(0.12)
     )
 
@@ -89,9 +89,9 @@ extension Color {
 
     // MARK: - Roles (thread and cards)
     /// The strongest surface against the current background: the button to press.
-    static let appAction = appInk
+    static let appAction = appDynamicColor(dark: Color(red: 0.961, green: 0.769, blue: 0.298), light: Color(red: 0.067, green: 0.067, blue: 0.067))
     /// Text on `appAction`.
-    static let appOnAction = appBackground
+    static let appOnAction = appDynamicColor(dark: Color(red: 0.10, green: 0.08, blue: 0.02), light: Color.white)
     /// Adam is doing something (progress, live watches).
     static let appWorking = appAccent
     /// Something is waiting on the user.
@@ -278,8 +278,9 @@ extension Font {
 
     /// System text that follows the phone's text-size setting, capped so layouts stay usable.
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
-        return .system(size: min(scaled, size * 1.7), weight: weight)
+        let base = size * 0.92
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: base)
+        return .system(size: min(scaled, base * 1.7), weight: weight)
     }
 
     static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
