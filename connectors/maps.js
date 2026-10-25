@@ -121,6 +121,7 @@ function mapsDirectionsFallback(destination, params = {}) {
     text: `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${cleanedDestination} are ready.`,
     actionSummary: 'Directions ready',
     cardText: `Open ${modeLabel} directions in Maps`,
+    modelNote: 'This only opens a Maps link: no time or distance was worked out. Give the time yourself from a search and say it in your answer.',
     deepLink: link,
     webLink: link
   };
@@ -669,6 +670,7 @@ async function execute(userId, action, params) {
         webLink: route ? link : (flag === 'r' ? undefined : link),
         actionSummary: route || flag !== 'r' ? 'Directions ready' : 'Route unavailable',
         cardText: route?.detail || (flag === 'r' ? 'No transit route summary available' : `Open ${modeLabel} directions in Maps`),
+        ...(route ? {} : { modelNote: 'This only opens a Maps link: no time or distance was worked out. Give the time yourself from a search and say it in your answer.', }),
         headline: route?.headline,
         distanceText: route?.distanceText,
         itinerary: route?.itinerary,

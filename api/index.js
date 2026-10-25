@@ -2147,6 +2147,13 @@ function isClarificationRequest(message) {
   return /^(huh|what|what\?|wdym|what do you mean|what does that mean|i don'?t get it)$/i.test(String(message || '').trim());
 }
 
+// "Remember X, then tell me Y" is two jobs. The quick memory shortcuts only handle the first, so a
+// message that also asks for something else goes to the agent, which can do both.
+const FOLLOW_ON_REQUEST = /(?:[,;.]|\band\b)\s*(?:then|and then|also|after that)\b|\b(?:and|then)\s+(?:tell|show|give|let|work out|calculate|find|check|remind|how (?:many|much|long)|what)\b/i;
+function hasFollowOnRequest(text) {
+  return FOLLOW_ON_REQUEST.test(String(text || ''));
+}
+
 async function inferContextualDeterministicTurn(userId, message, settings, trace = null, options = {}) {
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
@@ -2156,7 +2163,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   // longer needs a branch: the session persists, and the agent loop simply calls
   // browser_observe to see where it left off, exactly as it would on any other page.
 
-  const structuredMemory = parseStructuredMemoryRequest(text);
+  const structuredMemory = hasFollowOnRequest(text) ? null : parseStructuredMemoryRequest(text);
   if (structuredMemory) {
     const spokenByType = {
       track_commitment: "I'll track that commitment.",
@@ -2170,7 +2177,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
     };
   }
 
-  const explicitMemory = parseExplicitMemoryRequest(text);
+  const explicitMemory = hasFollowOnRequest(text) ? null : parseExplicitMemoryRequest(text);
   if (explicitMemory) {
     try {
       await saveMemory(userId, explicitMemory, 'manual');
@@ -4552,8 +4559,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       });
       finalSpoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken, dataResults);
     }
-    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
-    if (actionConfirmation) finalSpoken = actionConfirmation;
+    finalSpoken = reconcileSpokenWithActions(finalSpoken, actionResults) || finalSpoken;
     audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
       ttsError = err.message;
       console.error('[tts error]', err.message);
@@ -4723,8 +4729,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       });
       spoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken || spoken, dataResults);
     }
-    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
-    if (actionConfirmation) spoken = actionConfirmation;
+    spoken = reconcileSpokenWithActions(spoken, actionResults) || spoken;
 
     if (!spoken) {
       spoken = dataResults.length ? buildConciseDataAnswer(dataResults) : 'I looked through it.';
@@ -6666,6 +6671,22 @@ function summarizeCompletedActionsConcise(actionResults) {
     .join('; ')}.`;
 }
 
+// The model's own answer is kept when at least one step really worked and it wrote something
+// substantial: replacing it with a canned line for a failed or hand-off side step throws away
+// what the user asked for. Pending approvals and simulations still replace it, because the
+// user must see those exactly. A hand-off link is added to the end of the model's answer.
+function reconcileSpokenWithActions(spoken, actionResults) {
+  const confirmation = summarizeFinishedActionsForUser(actionResults);
+  if (!confirmation) return spoken;
+  const results = normalizeActionResultsForClient(actionResults);
+  const mustShow = results.some(entry => entry?.result?.outcome === 'awaiting_user' || entry?.result?.pending || entry?.result?.outcome === 'simulated');
+  const someWorked = results.some(entry => entry?.result?.outcome === 'completed');
+  const text = String(spoken || '').trim();
+  if (mustShow || !someWorked || text.length < 20) return confirmation;
+  const handoffs = results.filter(entry => entry?.result?.outcome === 'handoff_required').map(entry => entry.result?.text).filter(Boolean);
+  return handoffs.length ? `${text}\n\n${handoffs.join('\n')}` : text;
+}
+
 function summarizeFinishedActionsForUser(actionResults) {
   const normalizedResults = normalizeActionResultsForClient(actionResults);
   if (!normalizedResults.length) return '';
@@ -8039,7 +8060,7 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
-        const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
+        const actionConfirmation = reconcileSpokenWithActions(spoken, actionResults);
         if (actionConfirmation && actionConfirmation !== spoken) {
           spoken = actionConfirmation;
           sse({ type: 'replace', text: spoken });
@@ -8162,8 +8183,7 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
         textLength: String(spoken || '').length
       });
     }
-    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
-    if (actionConfirmation) spoken = actionConfirmation;
+    spoken = reconcileSpokenWithActions(spoken, actionResults) || spoken;
 
     if (!spoken) {
       spoken = actionResults.length
@@ -10109,6 +10129,8 @@ app.use((err, req, res, next) => {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+module.exports.reconcileSpokenWithActions = reconcileSpokenWithActions;
+module.exports.hasFollowOnRequest = hasFollowOnRequest;
 module.exports.escalateUnseenAlerts = () => notificationDelivery.escalateUnseen();
 module.exports.runRetentionSweep = runRetentionSweep;
 module.exports.parseActions = parseActions;
