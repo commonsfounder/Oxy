@@ -29,6 +29,7 @@ test('a turn meter collects only what was recorded inside it, and flags unpriced
   assert.strictEqual(summary.reasoningTokens, 400);
   assert.strictEqual(summary.webSearches, 1);
   assert.strictEqual(summary.unpricedCalls, 1);
-  assert.ok(summary.estimatedUsd > 0 && summary.estimatedUsd < 0.001);
+  // two priced calls (a fraction of a cent) plus one web search at one cent
+  assert.ok(summary.estimatedUsd > 0.01 && summary.estimatedUsd < 0.011);
   assert.ok(meter.lifetimeReport().calls >= 4);
 });

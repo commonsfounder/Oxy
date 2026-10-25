@@ -9,12 +9,23 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 
 const als = new AsyncLocalStorage();
 
+// Standard-tier list prices in USD per million tokens, from the vendors' own pricing pages
+// (OpenAI, Anthropic, Google) as read on 2026-10-25. Claude Haiku 5.5 is $0.50/$2.50 above 100k
+// prompt tokens and Gemini 4 Argon doubles on 2026-12-01; neither is modelled here.
 const DEFAULT_PRICES = {
   'gpt-6-luna': { in: 0.10, cached: 0.01, out: 0.50 },
   'gpt-6-sol': { in: 2.00, cached: 0.20, out: 10.00 },
+  'gpt-6.1-sol': { in: 2.00, cached: 0.10, out: 10.00 },
   'gpt-6-astra': { in: 10.00, cached: 1.00, out: 50.00 },
   'claude-haiku-5-5': { in: 0.10, cached: 0.01, out: 0.50 },
+  'claude-sonnet-5-5': { in: 2.00, cached: 0.10, out: 10.00 },
+  'claude-opus-5-5': { in: 4.00, cached: 0.20, out: 20.00 },
+  'claude-fable-5-1': { in: 10.00, cached: 0.25, out: 50.00 },
+  'gemini-4-argon': { in: 2.00, cached: 0.10, out: 10.00 },
+  'gemini-3.8-flash': { in: 0.75, cached: 0.075, out: 3.75 },
 };
+// Web search is billed per call on top of tokens: $10 per 1,000 on OpenAI and on Anthropic.
+const WEB_SEARCH_USD = 0.01;
 
 function prices(env = process.env) {
   let extra = {};
@@ -50,6 +61,7 @@ function add(totals, model, usage, webSearches, table) {
   totals.reasoningTokens += usage.reasoning;
   totals.webSearches += webSearches;
   if (cost === null) totals.unpricedCalls += 1; else totals.estimatedUsd += cost;
+  totals.estimatedUsd += webSearches * WEB_SEARCH_USD;
   const entry = totals.byModel[model] || { calls: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   entry.calls += 1; entry.inputTokens += usage.input; entry.outputTokens += usage.output; entry.reasoningTokens += usage.reasoning;
   totals.byModel[model] = entry;
