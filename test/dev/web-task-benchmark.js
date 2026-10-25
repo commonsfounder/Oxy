@@ -3,7 +3,7 @@
 // Public-web task benchmark: the same read-only tasks can be given to Adam and done by hand,
 // then compared. Runs against a live deployment as a test account (it leaves chat history behind).
 //
-//   node test/dev/web-task-benchmark.js [--id=a,b] [--out=path]
+//   node test/dev/web-task-benchmark.js [--suite=web|multistep] [--id=a,b] [--out=path]
 //   BASE_URL (default the Fly app)   OXY_BENCH_USER (default demo-test-user)
 //
 // Each task has an optional automatic check; tasks without one are graded by reading the answer
@@ -19,7 +19,7 @@ const BASE = (process.env.BASE_URL || 'https://milgrain-live-2026.fly.dev').repl
 const USER = process.env.OXY_BENCH_USER || 'demo-test-user';
 const TURN_TIMEOUT_MS = Number(process.env.OXY_BENCH_TURN_TIMEOUT_MS || 180000);
 
-const TASKS = [
+const WEB_TASKS = [
   { id: 'wiki-population', kind: 'lookup', message: 'What is the current population of Reykjavik according to Wikipedia?' },
   { id: 'wiki-director', kind: 'lookup', message: 'Who directed the film Paddington 2, and what year did it come out?', expectText: [/paul king/i, /2017/] },
   { id: 'museum-hours', kind: 'lookup', message: 'What time does the British Museum open on a Saturday?' },
@@ -36,12 +36,28 @@ const TASKS = [
   { id: 'walk-bullring', kind: 'live', message: 'How long does it take to walk from Birmingham New Street station to the Bullring?' },
 ];
 
+const SUITES = { web: WEB_TASKS, multistep: require('./benchmark-multistep-tasks') };
+
+function matches(pattern, text) {
+  const [regex, count] = Array.isArray(pattern) ? pattern : [pattern, 1];
+  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
+  return (text.match(new RegExp(regex.source, flags)) || []).length >= count;
+}
+
+// Returns the grade and the reasons a check failed, so a fail says which part broke.
 function grade(task, text, actions) {
+  const names = actions.map((a) => a.action);
   const checks = [];
-  if (task.expectAction) checks.push(actions.some((a) => a.action === task.expectAction));
-  for (const pattern of task.expectText || []) checks.push(pattern.test(text));
-  if (!checks.length) return 'unchecked';
-  return checks.every(Boolean) ? 'pass' : 'fail';
+  const miss = (label, ok) => checks.push({ label, ok });
+  if (task.expectAction) miss(`used ${task.expectAction}`, names.includes(task.expectAction));
+  for (const name of task.expectActions || []) miss(`used ${name}`, names.includes(name));
+  if (task.expectAny) miss(`used one of ${task.expectAny.join('/')}`, task.expectAny.some((n) => names.includes(n)));
+  if (task.minSteps) miss(`took at least ${task.minSteps} steps`, actions.length >= task.minSteps);
+  for (const pattern of task.expectText || []) miss(`answer matches ${Array.isArray(pattern) ? `${pattern[0]} x${pattern[1]}` : pattern}`, matches(pattern, text));
+  for (const pattern of task.forbidText || []) miss(`answer avoids ${pattern}`, !pattern.test(text));
+  if (!checks.length) return { grade: 'unchecked', failedChecks: [] };
+  const failedChecks = checks.filter((c) => !c.ok).map((c) => c.label);
+  return { grade: failedChecks.length ? 'fail' : 'pass', failedChecks };
 }
 
 async function runTask(token, task) {
@@ -63,7 +79,7 @@ async function runTask(token, task) {
     const turn = summarizeTurn(actions);
     return {
       ...base, ms,
-      grade: grade(task, body.text || '', actions),
+      ...grade(task, body.text || '', actions),
       answer: String(body.text || '').slice(0, 1200),
       steps: turn.steps,
       failures: turn.failures,
@@ -84,13 +100,17 @@ function report(results) {
   console.log('failed steps by cause:', JSON.stringify(byCause));
   for (const r of results) {
     const where = r.firstFailure ? ` first failure: ${r.firstFailure.action} (${r.firstFailure.cause})` : '';
-    console.log(`${String(r.ms).padStart(7)}ms  ${r.grade.padEnd(9)} ${r.id.padEnd(24)} ${(r.steps || []).map((s) => s.action).join(',') || '(no actions)'}${where}`);
+    console.log(`${String(r.ms).padStart(7)}ms  ${r.grade.padEnd(9)} ${r.id.padEnd(28)} ${(r.steps || []).map((s) => s.action).join(',') || '(no actions)'}${where}`);
+    if (r.failedChecks?.length) console.log(`${' '.repeat(20)}failed: ${r.failedChecks.join('; ')}`);
   }
 }
 
 async function main() {
   const ids = (process.argv.find((a) => a.startsWith('--id=')) || '').slice(5).split(',').filter(Boolean);
-  const tasks = ids.length ? TASKS.filter((t) => ids.includes(t.id)) : TASKS;
+  const suiteName = (process.argv.find((a) => a.startsWith('--suite=')) || '--suite=web').slice(8);
+  const suite = SUITES[suiteName];
+  if (!suite) { console.error(`Unknown suite "${suiteName}". Use: ${Object.keys(SUITES).join(', ')}`); process.exit(2); }
+  const tasks = ids.length ? suite.filter((t) => ids.includes(t.id)) : suite;
   const token = createSessionToken(USER);
   console.log(`${tasks.length} tasks against ${BASE} as ${USER}\n`);
   const results = [];
@@ -103,11 +123,11 @@ async function main() {
   report(results);
   const outDir = path.join(__dirname, 'benchmark-results');
   fs.mkdirSync(outDir, { recursive: true });
-  const out = (process.argv.find((a) => a.startsWith('--out=')) || '').slice(6) || path.join(outDir, `adam-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  const out = (process.argv.find((a) => a.startsWith('--out=')) || '').slice(6) || path.join(outDir, `adam-${suiteName}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
   fs.writeFileSync(out, JSON.stringify({ base: BASE, user: USER, at: new Date().toISOString(), results }, null, 2));
   console.log(`\nsaved ${out}`);
 }
 
 if (require.main === module) main();
 
-module.exports = { TASKS, runTask, grade };
+module.exports = { SUITES, runTask, grade };

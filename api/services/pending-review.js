@@ -11,9 +11,16 @@ function summarizeActionInput(input) {
   return values.length ? ` (${values.join(' · ')})` : '';
 }
 
+// A reply to a waiting approval is short ("yes", "make it shorter"). A longer message is a new
+// request, even when it happens to contain a word like "instead", "more" or "stop".
+const REPLY_MAX_WORDS = 12;
+function isShortReply(message) {
+  return String(message || '').trim().split(/\s+/).filter(Boolean).length <= REPLY_MAX_WORDS;
+}
+
 function isPendingConfirmMessage(message) {
   const text = String(message || '').trim().toLowerCase();
-  if (!text) return false;
+  if (!text || !isShortReply(text)) return false;
   if (/\b(wait|hold on|actually|change|edit|instead|but|before|not yet|don't|do not|stop|cancel)\b/i.test(text)) {
     return false;
   }
@@ -24,6 +31,7 @@ function isPendingConfirmMessage(message) {
 
 function isPendingCancelMessage(message) {
   const text = String(message || '').trim();
+  if (!isShortReply(text)) return false;
   return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it|not now|not yet)$/i
     .test(text) ||
     /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text) ||
@@ -32,6 +40,7 @@ function isPendingCancelMessage(message) {
 }
 
 function isPendingRevisionMessage(message) {
+  if (!isShortReply(message)) return false;
   return /\b(change|edit|rewrite|make it|instead|actually|wait|hold on|tone|shorter|longer|more|less|add|remove|don't|do not)\b/i
     .test(String(message || '').trim());
 }
