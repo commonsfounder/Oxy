@@ -1,0 +1,379 @@
+{
+  "base": "https://milgrain-live-2026.fly.dev",
+  "user": "demo-test-user",
+  "at": "2026-10-25T13:20:13.070Z",
+  "results": [
+    {
+      "id": "wiki-population",
+      "kind": "lookup",
+      "message": "What is the current population of Reykjavik according to Wikipedia?",
+      "ms": 5188,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "Reykjavík municipality had a population of 139,804 on January 1, 2026. ([en.wikipedia.org](https://en.wikipedia.org/wiki/Reykjav%C3%ADk))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:en.wikipedia.org/wiki/Reykjav%C3%ADk population Reykjavik Wikipedia current population\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "wiki-director",
+      "kind": "lookup",
+      "message": "Who directed the film Paddington 2, and what year did it come out?",
+      "ms": 7762,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "Paddington 2 was directed by Paul King and released in 2017. ([filmsandfestivals.britishcouncil.org](https://filmsandfestivals.britishcouncil.org/projects/paddington-2))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Paddington 2 director release year\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "museum-hours",
+      "kind": "lookup",
+      "message": "What time does the British Museum open on a Saturday?",
+      "ms": 5823,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "The British Museum is open on Saturdays from 10:00 am to 5:00 pm; last entry is 4:45 pm. The search result is from the Museum’s official site and was crawled about five months ago. ([britishmuseum.org](https://www.britishmuseum.org/visit))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"British Museum official opening hours Saturday\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "wiki-tallest",
+      "kind": "browse",
+      "message": "On Wikipedia, find the tallest building in Birmingham, UK and tell me how tall it is.",
+      "ms": 18604,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "The Octagon is Birmingham’s tallest building, at 155 metres (509 feet), according to Wikipedia. ([wikipedia.org](https://en.wikipedia.org/wiki/List_of_tallest_buildings_and_structures_in_the_Birmingham_metropolitan_area))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:en.wikipedia.org/wiki/List_of_tallest_buildings_in_Birmingham tallest building Birmingham UK height\"}"
+        },
+        {
+          "action": "web_browse",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://en.wikipedia.org/wiki/List_of_tallest_buildings_and_structures_in_the_Birmingham_metropolitan_area\",\"query\":\"tallest building height The Octagon\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "jl-kettle",
+      "kind": "shop",
+      "message": "How much is the Bosch Sky kettle on John Lewis?",
+      "ms": 6966,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "John Lewis lists the Bosch Sky Variable Temperature Kettle, 1.7L, for £69.99–£100. The search result was crawled yesterday. ([johnlewis.com](https://www.johnlewis.com/brand/bosch/kettles/_/N-1z13z3zZ1yzznku))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com Bosch Sky kettle John Lewis price\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "tesco-milk",
+      "kind": "shop",
+      "message": "On Tesco's website, how much is 2 pints of semi-skimmed milk?",
+      "ms": 18710,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "Tesco lists its 2-pint bottle of semi-skimmed milk at £1.20. I couldn’t verify the live product page because Tesco’s site blocked the check.",
+      "steps": [
+        {
+          "action": "browser_open",
+          "ok": false,
+          "outcome": "failed",
+          "cause": "other",
+          "error": "Could not open that page: browser_open needs an absolute http(s) url, or a site it already knows.",
+          "input": "{\"site\":\"Tesco\",\"searchFor\":\"2 pints semi skimmed milk\",\"objective\":\"Find current Tesco price for 2 pints of semi-skimmed milk\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:tesco.com/groceries/en-GB/products 2 pints semi skimmed milk Tesco price\",\"num_results\":\"5\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://www.tesco.com/shop/en-GB/products/252207537?isCom=true\",\"objective\":\"Verify current price for Tesco 2 pints semi-skimmed milk\"}"
+        }
+      ],
+      "failures": 1,
+      "firstFailure": {
+        "action": "browser_open",
+        "ok": false,
+        "outcome": "failed",
+        "cause": "other",
+        "error": "Could not open that page: browser_open needs an absolute http(s) url, or a site it already knows.",
+        "input": "{\"site\":\"Tesco\",\"searchFor\":\"2 pints semi skimmed milk\",\"objective\":\"Find current Tesco price for 2 pints of semi-skimmed milk\"}"
+      }
+    },
+    {
+      "id": "currys-cheapest-kettle",
+      "kind": "shop",
+      "message": "What's the cheapest kettle on Currys right now?",
+      "ms": 6045,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "Currys’ search result lists the LOGIK L17PKB26 Traditional Kettle in black for £24.99. The listing was crawled three days ago, so that price isn’t confirmed as of October 25, 2026. ([currys.co.uk](https://www.currys.co.uk/appliances/small-kitchen-appliances/kettles?searchTerm=kett))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk kettles cheapest kettle Currys price\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "argos-kettle",
+      "kind": "botwall",
+      "message": "What's the price of the cheapest kettle on Argos?",
+      "ms": 7857,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "Argos’s price-sorted kettle results show the HOMCOM Stainless Steel Kettle and 4 Slice Toaster Set – Grey and Silver Tone at £56.99. The page was crawled five days ago, so this may not reflect prices today. ([argos.co.uk](https://www.argos.co.uk/browse/appliances/drinks-appliances/kettles/c%3A788365/opt/page%3A4/sort%3Aprice/))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:argos.co.uk kettles cheapest kettle price Argos UK\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "kettle-cards",
+      "kind": "cards",
+      "message": "Find me three good kettles under £60 and show me the options.",
+      "ms": 32261,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "I’ve put the three Argos options side by side. The Bosch is cheapest at £24.99; the Russell Hobbs Luna has the most reviews, with 4.7/5 from 3,267 buyers.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:argos.co.uk/browse/appliances/drinks-appliances/kettles Argos kettle under £60 customer reviews rating price\"}"
+        },
+        {
+          "action": "show_results",
+          "ok": false,
+          "outcome": "failed",
+          "cause": "bad_input",
+          "error": "show_results needs at least 2 options that each have a title.",
+          "input": "{\"results\":\"[{\\\"title\\\":\\\"Breville VKT227 Curve Kettle\\\",\\\"price\\\":\\\"£40\\\",\\\"rating\\\":\\\"4.8/5 from 1,010 reviews\\\",\\\"url\\\":\\\"https://www.argos.co.uk/browse/appliances/kettles/c%3A29560/\\\"},{\\\"title\\\":"
+        },
+        {
+          "action": "show_scene",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"title\":\"Kettles under £60\",\"scene\":\"{\\\"title\\\":\\\"Kettles under £60\\\",\\\"mode\\\":\\\"interface\\\",\\\"panel\\\":[{\\\"type\\\":\\\"compare\\\",\\\"id\\\":\\\"kettles\\\",\\\"items\\\":[{\\\"title\\\":\\\"Breville VKT227 Curve\\\",\\\"fact"
+        }
+      ],
+      "failures": 1,
+      "firstFailure": {
+        "action": "show_results",
+        "ok": false,
+        "outcome": "failed",
+        "cause": "bad_input",
+        "error": "show_results needs at least 2 options that each have a title.",
+        "input": "{\"results\":\"[{\\\"title\\\":\\\"Breville VKT227 Curve Kettle\\\",\\\"price\\\":\\\"£40\\\",\\\"rating\\\":\\\"4.8/5 from 1,010 reviews\\\",\\\"url\\\":\\\"https://www.argos.co.uk/browse/appliances/kettles/c%3A29560/\\\"},{\\\"title\\\":"
+      }
+    },
+    {
+      "id": "london-weather",
+      "kind": "live",
+      "message": "What's the weather in London tomorrow?",
+      "ms": 6644,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "London forecast (Sunday, October 25; update time not provided):\n\nSunday: Very windy; partly sunny, with a couple of brief showers starting around midday. High 57°F (14°C), low 46°F (8°C).\nMonday, October 26: Cloudy with a little morning rain; breezy at times in the afternoon. High 61°F (16°C), low 58°F (14°C).\nTuesday, October 27: A couple of morning showers, then breezy with decreasing clouds. High 62°F (16°C), low 46°F (8°C).\n\nPrecipitation amounts and wind speeds aren’t available in the forecast results.",
+      "steps": [
+        {
+          "action": "get_forecast",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"city\":\"London\",\"when\":\"tomorrow\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "bbc-headline",
+      "kind": "live",
+      "message": "What's the top headline on BBC News right now?",
+      "ms": 8532,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "The BBC News homepage’s lead headline is “Live: Storm Boelo brings 85mph gusts and travel disruption with amber weather warnings in effect.” ([please.untaint.us](https://please.untaint.us/?url=https%3A%2F%2Fwww.bbc.co.uk%2Fnews))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"BBC News top headline latest BBC News homepage\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "prague-hotel",
+      "kind": "travel",
+      "message": "Find me a hotel in Prague for two nights next weekend under £150 a night.",
+      "ms": 78005,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "I couldn’t verify a price for both nights. The cheapest lead I found is [a&o Prague Rhea](https://www.kayak.de/Prag-Hotels.19865.hotel.ksp), rated 7.5, at €55+ for Saturday night only; that doesn’t confirm Friday’s price or availability, and it’s in euros rather than pounds.",
+      "steps": [
+        {
+          "action": "search_hotels",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"location\":\"Prague\",\"check_in\":\"2026-10-30\",\"check_out\":\"2026-11-01\",\"max_price\":\"150\",\"style\":\"budget\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://www.kayak.de/Prag-Hotels.19865.hotel.ksp\",\"objective\":\"Check hotel prices and availability for Prague, 30 October to 1 November 2026.\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Prague hotels 30 October 2026 1 November 2026 under £150 per night hotel prices\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "lisbon-flight",
+      "kind": "travel",
+      "message": "What's the cheapest flight from London to Lisbon next Friday?",
+      "ms": 35452,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "For London to Lisbon 2026-10-30: TAP Air Portugal, direct, 2h 50m — £221 return (Vacaymatch, quoted for 30 October–1 November 2026; nonstop; 2h 50m); easyJet, 1 stop — £33 one-way (easyJet, quoted for 30 October 2026, London Gatwick–Lisbon); easyJet, 1 stop — £52 one-way (easyJet, quoted for 30 October 2026, London Luton–Lisbon); Ryanair, 1 stop, 14h 55m — £142 return (Vacaymatch, quoted for 30 October–1 November 2026; 1 stop; 14h 55m); easyJet, 1 stop, 14h 55m — £142 return (Vacaymatch, quoted for 30 October–1 November 2026; 1 stop; 14h 55m). These are prices observed in search results just now, not held quotes — availability and price are only confirmed on the airline or hotel's own site, and I have not checked whether any of them can actually be booked.",
+      "steps": [
+        {
+          "action": "search_flights",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"from\":\"London\",\"to\":\"Lisbon\",\"depart_date\":\"2026-10-30\",\"adults\":\"1\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "walk-bullring",
+      "kind": "live",
+      "message": "How long does it take to walk from Birmingham New Street station to the Bullring?",
+      "ms": 7409,
+      "grade": "unchecked",
+      "failedChecks": [],
+      "answer": "Walking directions to Bullring, Birmingham are ready.",
+      "steps": [
+        {
+          "action": "get_directions",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null,
+          "input": "{\"origin\":\"Birmingham New Street station\",\"destination\":\"Bullring, Birmingham\",\"mode\":\"walking\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Birmingham New Street station to Bullring walking time\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    }
+  ]
+}

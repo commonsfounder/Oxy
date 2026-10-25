@@ -520,6 +520,13 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
       resolvedVia = searchFor && knowledge.entryPoints.search ? `search:${knowledge.entryPoints.searchSource}` : 'home';
     }
   }
+  // A shop named but not known ("Next"): try its likely addresses before giving up.
+  if (!target && site && !String(site).includes('.')) {
+    const label = String(site).toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (const host of label ? [`www.${label}.co.uk`, `www.${label}.com`] : []) {
+      if (await require('node:dns').promises.lookup(host).then(() => true, () => false)) { target = `https://${host}/`; resolvedVia = 'name'; break; }
+    }
+  }
   url = target;
   if (!url || !/^https?:\/\//i.test(String(url))) {
     throw new Error('browser_open needs an absolute http(s) url, or a site it already knows.');

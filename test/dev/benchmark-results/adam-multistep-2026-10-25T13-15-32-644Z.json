@@ -1,0 +1,473 @@
+{
+  "base": "https://milgrain-live-2026.fly.dev",
+  "user": "demo-test-user",
+  "at": "2026-10-25T13:15:32.649Z",
+  "results": [
+    {
+      "id": "kettle-two-shops",
+      "kind": "compare",
+      "message": "Find a kettle under £60 with at least 4 stars at John Lewis and another at Currys, then tell me which shop is cheaper and by how much.",
+      "ms": 76402,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "John Lewis’s 1.5L kettle was listed at **£15** with **4.5 stars**; Currys’ Russell Hobbs Brontë was **£41.99** with **4 stars**. On those prices, John Lewis is **£26.99 cheaper**, but its price result was from last month, so I couldn’t confirm it’s still current.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com kettles under £60 customer rating 4 stars price John Lewis kettle\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk kettle under £60 customer reviews rating 4 stars price Currys kettle\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"John Lewis Electric Kettle 1.5L £20 4.5 stars product\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Currys Russell Hobbs Bronte 26750 Jug Kettle 24.99 4.0 rating\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://www.johnlewis.com/john-lewis-electric-kettle-1-5l/grey/p5523668\",\"objective\":\"Check current price and rating for qualifying John Lewis kettle\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://www.currys.co.uk/appliances/small-kitchen-appliances/kettles/russell-hobbs?msockid=2209508951976029332d46ea50906105\",\"objective\":\"Check current price and rating for qualifying Currys k"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk/products kettle \\\"4.5\\\" \\\"£\\\" kettle reviews Currys 1.7L\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"John Lewis Bosch MyMoment Serene TWK4M 1.7L £39.99 4.7 stars Currys Russell Hobbs Bronte 26750 £41.99 4.0 stars\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "milk-times-six",
+      "kind": "lookup-then-math",
+      "message": "How much is 2 pints of semi-skimmed milk at Tesco, and what would 6 of them cost?",
+      "ms": 7752,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "Tesco British Semi Skimmed Milk, 2 pints (1.13L), is listed at £1.20. The search result was crawled yesterday. ([tesco.com](https://www.tesco.com/shop/en-GB/search?query=semi+skimmed+milk))\n\nTesco’s British semi-skimmed milk, 2 pints (1.13L), is listed at **£1.20** in a Tesco price-match document dated March 2026, so the result is older than today, 25 October 2026. ([digitalcontent.api.tesco.com](https://digitalcontent.api.tesco.com/v2/media/ghs-mktg/b963ba03-8881-4a41-abaf-5c0e250310ef/Aldi_Price_March_18_March.pdf))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:tesco.com/groceries 2 pints semi skimmed milk Tesco price\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Tesco 2 pint semi-skimmed milk price UK\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "lisbon-budget",
+      "kind": "plan",
+      "message": "I have £400 for two nights in Lisbon from London next weekend, flights and hotel included. Is that realistic? Give me the cheapest flight, a hotel, and the total.",
+      "ms": 53525,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "I couldn’t verify a flight price for 30 October–1 November. The exact-date hotel result was $458 for two nights (about £342), but room availability wasn’t confirmed; that would leave roughly £58 of your budget for flights. I found a £52 Ryanair fare, but it’s for different dates, so I can’t give you a reliable total or say the trip fits £400.",
+      "steps": [
+        {
+          "action": "search_flights",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"from\":\"London\",\"to\":\"Lisbon\",\"depart_date\":\"2026-10-30\",\"return_date\":\"2026-11-01\",\"adults\":\"1\",\"notes\":\"Return trip; two nights; next weekend\"}"
+        },
+        {
+          "action": "search_hotels",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"location\":\"Lisbon\",\"check_in\":\"2026-10-30\",\"check_out\":\"2026-11-01\",\"guests\":\"1\",\"notes\":\"Two-night stay next weekend\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"London Lisbon return flights 30 October 2026 1 November 2026 cheapest\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Lisbon hotel 30 October 2026 1 November 2026 2 nights price\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"GBP USD exchange rate 25 October 2026 current\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "edinburgh-trip",
+      "kind": "plan",
+      "message": "What's the weather in Edinburgh this Saturday, should I take a coat, and how long is the train from Birmingham New Street?",
+      "ms": 9009,
+      "grade": "fail",
+      "failedChecks": [
+        "answer matches /coat|jacket|layer|umbrella|waterproof/i",
+        "answer matches /\\b\\d+\\s*(?:h|hr|hour)/i"
+      ],
+      "answer": "I couldn't get a reliable transit route summary to Edinburgh Waverley right now.",
+      "steps": [
+        {
+          "action": "get_forecast",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"city\":\"Edinburgh\",\"when\":\"Saturday 31 October 2026\"}"
+        },
+        {
+          "action": "search_trains",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null,
+          "input": "{\"origin\":\"Birmingham New Street\",\"destination\":\"Edinburgh Waverley\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "director-chain",
+      "kind": "chain",
+      "message": "Who directed Paddington 2, what is the most recent film they directed, and what year did it come out?",
+      "ms": 8010,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "As of October 25, 2026, Paul King’s most recent released feature film as director is *Wonka* (2023). *Paddington in Peru* (2024) was directed by Dougal Wilson, not King. ([en.wikipedia.org](https://en.wikipedia.org/wiki/Paul_King_%28director%29))\n\nThe latest released film Paul King directed is *Wonka* (2023). The more recent result, *Untitled Paul King Film*, is listed as in pre-production, not released. ([productionlist.com](https://www.productionlist.com/production/untitled-paul-king-film))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Paddington 2 director filmography most recent film directed Paul King 2026\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Paul King latest directed film 2025 2026 film director\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "tallest-architect",
+      "kind": "chain",
+      "message": "Find the tallest building in Birmingham, then tell me who designed it and what year it was completed.",
+      "ms": 21665,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "Birmingham’s tallest building is **One Eastside**, designed by **Glancy Nicholls Architects** and completed in **2026**. It’s 155 metres tall. ([Pension Insurance Corporation](https://www.pensioncorporation.com/news-insights/press-releases/2026/PIC-completes-one-eastside-birmingham))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"tallest building in Birmingham England tallest building designed completed year\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Birmingham tallest building The Octagon 155m completed 2025 architect Glenn Howells One Eastside completed 2026 Glancy Nicholls\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "museum-morning",
+      "kind": "plan",
+      "message": "Plan a Saturday morning at the British Museum: what time it opens, and how long it takes to walk there from Euston station.",
+      "ms": 18657,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The British Museum opens at **10am on Saturday**; the hours listed are until 5pm. From Euston, it’s about a **14-minute walk**, so you could head over just before opening and be there in time. ([British Museum](https://www.britishmuseum.org/visit) · [walking estimate](https://www.thetrainline.com/via/trips/british-museum))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"British Museum official opening hours Saturday October 31 2026\"}"
+        },
+        {
+          "action": "get_directions",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null,
+          "input": "{\"origin\":\"Euston Station, London\",\"destination\":\"British Museum, London\",\"mode\":\"walking\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"walking time Euston Station to British Museum 2026\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "headline-cross-check",
+      "kind": "compare",
+      "message": "What's the top headline on BBC News right now, and is the same story on the front page of The Guardian?",
+      "ms": 7095,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The BBC News homepage’s top headline appears to be about newspaper front pages, including “Cops didn’t share letter” and “Burnham open to EU free movement.” The search result is crawled today, October 25, 2026. ([please.untaint.us](https://please.untaint.us/?url=https%3A%2F%2Fwww.bbc.co.uk%2Fnews))\n\nThe Guardian’s top story today, Sunday 25 October 2026, is: “Myanmar’s Aung San Suu Kyi ‘sounds strong’ but is isolated, son says.” ([theguardian.com](https://www.theguardian.com/world/2026/oct/25/all))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"BBC News top headline right now BBC News homepage\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"The Guardian front page top story today\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "argos-fallback",
+      "kind": "recover",
+      "message": "Find the price of the cheapest kettle at Argos. If you can't get it, find the cheapest one at John Lewis instead and tell me which you used.",
+      "ms": 27212,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "I couldn’t verify Argos’s cheapest price, so I used **John Lewis** instead: its cheapest is a **£12 travel kettle**.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:argos.co.uk kettle cheapest kettle Argos price\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com kettle cheapest electric kettle price\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"url\":\"https://www.johnlewis.com/brand/john-lewis/electric/kettles/_/N-1z141ilZ1z0oaeqZ1yzznku\",\"objective\":\"Verify the current cheapest kettle price shown at John Lewis\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "next-train",
+      "kind": "lookup",
+      "message": "What's the next train from Birmingham New Street to Manchester Piccadilly, and how long is the journey?",
+      "ms": 8940,
+      "grade": "fail",
+      "failedChecks": [
+        "answer matches /\\b\\d+\\s*(?:h|hr|hour|min)/i"
+      ],
+      "answer": "At 12:43 on Sunday 25 October 2026, the next direct train shown is the 13:01 CrossCountry service to Manchester Piccadilly, on time from platform 5B. ([myrailbuddy.com](https://myrailbuddy.com/departures/BHM))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Birmingham New Street to Manchester Piccadilly next train today live departures Sunday 25 October 2026\",\"num_results\":\"5\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "kettle-options",
+      "kind": "cards",
+      "message": "Find three kettles under £40 with at least 4 stars and show them to me side by side.",
+      "ms": 42096,
+      "grade": "fail",
+      "failedChecks": [
+        "used show_results"
+      ],
+      "answer": "I only found one possible match at Next: the Teal Blue Sleek Kettle, listed at £14 and rated 4.5/5 from four reviews. That price information dates back to September 2025, and I couldn’t verify two more kettles under £40 with four-star ratings, so I can’t reliably show three side by side. I don’t need anything from you; the listings didn’t provide enough current information.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk kettles under £40 customer reviews rating 4 stars\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": false,
+          "outcome": "failed",
+          "cause": "other",
+          "error": "Could not open that page: browser_open needs an absolute http(s) url, or a site it already knows.",
+          "input": "{\"site\":\"Next\",\"searchFor\":\"kettle\",\"objective\":\"Find kettles under £40 with ratings of at least 4 stars\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Next UK kettles under £40 customer rating reviews kettle 4 stars\",\"num_results\":\"10\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style kettle \\\"4.5\\\" Next kettle price\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style kettle \\\"4.2\\\" kettle Next UK\"}"
+        }
+      ],
+      "failures": 1,
+      "firstFailure": {
+        "action": "browser_open",
+        "ok": false,
+        "outcome": "failed",
+        "cause": "other",
+        "error": "Could not open that page: browser_open needs an absolute http(s) url, or a site it already knows.",
+        "input": "{\"site\":\"Next\",\"searchFor\":\"kettle\",\"objective\":\"Find kettles under £40 with ratings of at least 4 stars\"}"
+      }
+    },
+    {
+      "id": "cheapest-over-two-searches",
+      "kind": "compare",
+      "message": "Which is cheaper right now: a 1.7 litre Bosch kettle at John Lewis or a 1.7 litre Russell Hobbs kettle at Currys? Give both prices.",
+      "ms": 7878,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "John Lewis lists Bosch 1.7L kettles from £39.99. Other options shown include models priced at £49, £59.99 and £69.99–£100. Search results were crawled yesterday. ([johnlewis.com](https://www.johnlewis.com/browse/electricals/kettles/bosch/1.7l/_/N-ahtZ1z13z3zZ1z0ro2j))\n\nCurrys lists several 1.7L Russell Hobbs kettles. The Classics stainless-steel model is £38.99, and the Everyday Quiet Boil black model is £34.99. These search results were crawled last month, so the prices may have changed since then. ([currys.co.uk](https://www.currys.co.uk/products/russell-hobbs-classics-jug-kettle-stainless-steel-10164829.html))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com Bosch 1.7L kettle price John Lewis\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk Russell Hobbs 1.7L kettle price Currys\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    }
+  ]
+}

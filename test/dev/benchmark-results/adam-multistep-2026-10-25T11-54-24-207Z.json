@@ -1,0 +1,487 @@
+{
+  "base": "https://milgrain-live-2026.fly.dev",
+  "user": "demo-test-user",
+  "at": "2026-10-25T11:54:24.216Z",
+  "results": [
+    {
+      "id": "kettle-two-shops",
+      "kind": "compare",
+      "message": "Find a kettle under £60 with at least 4 stars at John Lewis and another at Currys, then tell me which shop is cheaper and by how much.",
+      "ms": 16586,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The cheapest qualifying one I found at **John Lewis** is the Bosch MyMoment Serene at **£39.99**, rated **4.7 stars**. At **Currys**, it’s the Russell Hobbs Brontë at **£41.99**, rated **4 stars**—so **John Lewis is £2 cheaper**. The listings were checked yesterday, so prices may have shifted. ([John Lewis](https://www.johnlewis.com/browse/electricals/kettles/price%3D0-60/4%2B/_/N-ahtZ6qpe) · [Currys](https://www.currys.co.uk/appliances/small-kitchen-appliances/kettles?searchTerm=166796))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com kettles under £60 rating 4.0 stars\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk kettle under £60 customer rating 4 stars\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "milk-times-six",
+      "kind": "lookup-then-math",
+      "message": "How much is 2 pints of semi-skimmed milk at Tesco, and what would 6 of them cost?",
+      "ms": 7874,
+      "grade": "fail",
+      "failedChecks": [
+        "answer matches /£\\s?\\d+\\.\\d{2}/g x2"
+      ],
+      "answer": "Tesco’s 2-pint semi-skimmed milk is listed at **£1.20** in a Tesco price-check document dated March 28, 2026. ([digitalcontent.api.tesco.com](https://digitalcontent.api.tesco.com/v2/media/ghs-mktg/473497a6-03b0-40c0-91d5-48513ff66706/APM%2BOnline%2BVerification%2BForm%2B28032026.pdf?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Tesco 2 pints semi skimmed milk price Tesco UK 2026\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "lisbon-budget",
+      "kind": "plan",
+      "message": "I have £400 for two nights in Lisbon from London next weekend, flights and hotel included. Is that realistic? Give me the cheapest flight, a hotel, and the total.",
+      "ms": 103544,
+      "grade": "fail",
+      "failedChecks": [
+        "answer matches /£\\s?\\d/g",
+        "answer avoids /action is incomplete/i"
+      ],
+      "answer": "The action is incomplete.",
+      "steps": [
+        {
+          "action": "search_flights",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"from\":\"London\",\"to\":\"Lisbon\",\"depart_date\":\"2026-10-30\",\"return_date\":\"2026-11-01\",\"adults\":\"1\"}"
+        },
+        {
+          "action": "search_hotels",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"location\":\"Lisbon\",\"check_in\":\"2026-10-30\",\"check_out\":\"2026-11-01\",\"guests\":\"1\",\"style\":\"budget\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Lisbon hotel 30 October 2026 1 November 2026 2 nights price budget hotel\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Lisbon hostel private room 30 Oct 2026 1 Nov 2026 price\"}"
+        },
+        {
+          "action": "calculate",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"expression\":\"400-142\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"EUR to GBP exchange rate 25 October 2026\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"\\\"30 Oct\\\" \\\"1 Nov\\\" 2026 Lisbon hostel private room price Goodmorning Solo Traveller Hostel\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Lisbon hotel 30 October 2026 1 November 2026 2 nights price booking.com Lisbon budget hotel exact dates\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Lisbon hostel 30 October 2026 1 November 2026 2 nights booking price availability\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"\\\"30 October 2026\\\" Lisbon hotel \\\"1 November 2026\\\" price\"}"
+        },
+        {
+          "action": "calculate",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"expression\":\"142 + 2*29*0.8378\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "edinburgh-trip",
+      "kind": "plan",
+      "message": "What's the weather in Edinburgh this Saturday, should I take a coat, and how long is the train from Birmingham New Street?",
+      "ms": 8307,
+      "grade": "fail",
+      "failedChecks": [
+        "answer matches /coat|jacket|layer|umbrella|waterproof/i",
+        "answer matches /\\b\\d+\\s*(?:h|hr|hour)/i"
+      ],
+      "answer": "I couldn't get a reliable transit route summary to Edinburgh Waverley right now.",
+      "steps": [
+        {
+          "action": "get_forecast",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"city\":\"Edinburgh\",\"when\":\"Saturday, 31 October 2026\"}"
+        },
+        {
+          "action": "search_trains",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null,
+          "input": "{\"origin\":\"Birmingham New Street\",\"destination\":\"Edinburgh Waverley\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "director-chain",
+      "kind": "chain",
+      "message": "Who directed Paddington 2, what is the most recent film they directed, and what year did it come out?",
+      "ms": 7680,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "Paul King’s most recent released film as director is *Wonka* (2023). His next feature is listed as an untitled film in pre-production, so there’s no newer released directing credit supported by these results. ([rottentomatoes.com](https://www.rottentomatoes.com/celebrity/paul_king_4?utm_source=openai))\n\nPaul King’s latest released film as director is *Wonka* (2023). The search results also show an untitled Paul King film in pre-production, not released. ([en.wikipedia.org](https://en.wikipedia.org/wiki/Paul_King_%28director%29?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Paddington 2 director most recent film directed 2025 2026 Paul King filmography\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Paul King latest film directed released film\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "tallest-architect",
+      "kind": "chain",
+      "message": "Find the tallest building in Birmingham, then tell me who designed it and what year it was completed.",
+      "ms": 13862,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "Birmingham’s tallest building is **One Eastside**. It was designed by **Glancy Nicholls Architects** and completed in **2026**. citeturn0search0",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"tallest building in Birmingham England tallest building architect completed year 2026\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "museum-morning",
+      "kind": "plan",
+      "message": "Plan a Saturday morning at the British Museum: what time it opens, and how long it takes to walk there from Euston station.",
+      "ms": 20742,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The British Museum opens at **10 am on Saturdays**. It’s about a **14-minute walk from Euston**, so I’d aim to leave the station around **9:40** and you’ll have a little breathing room before it opens. ([British Museum](https://www.britishmuseum.org/visit) · [walk estimate](https://www.avantiwestcoast.co.uk/where-we-go/blog/visiting-the-british-museum-by-train))",
+      "steps": [
+        {
+          "action": "get_directions",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null,
+          "input": "{\"origin\":\"Euston station, London\",\"destination\":\"British Museum, London\",\"mode\":\"walking\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"British Museum official opening hours Saturday\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"walking time Euston station to British Museum walk minutes route\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "headline-cross-check",
+      "kind": "compare",
+      "message": "What's the top headline on BBC News right now, and is the same story on the front page of The Guardian?",
+      "ms": 8454,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The search result’s top BBC News headline appears to be “Feathered fantastics or bad news: Are crows evil or genius?” The result was crawled today, October 25, 2026. ([please.untaint.us](https://please.untaint.us/?url=https%3A%2F%2Fwww.bbc.co.uk%2Fnews&utm_source=openai))\n\nThe Guardian’s UK homepage is here: ([theguardian.com](https://www.theguardian.com/uk?utm_source=openai))\n\nSearch results show headlines including “More than one million Lula supporters rally on eve of Brazilian election runoff” and “‘Bolso shows all signs of fascism’: the journalist who predicted Brazil’s future – and paid the ultimate price.” The results are marked as crawled today, October 25, 2026. ([theguardian.com](https://www.theguardian.com/uk?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"BBC News homepage top headline BBC News\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"The Guardian front page homepage latest headlines\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "argos-fallback",
+      "kind": "recover",
+      "message": "Find the price of the cheapest kettle at Argos. If you can't get it, find the cheapest one at John Lewis instead and tell me which you used.",
+      "ms": 72,
+      "grade": "fail",
+      "failedChecks": [
+        "took at least 2 steps",
+        "answer matches /£\\s?\\d/g"
+      ],
+      "answer": "I have more than one approval waiting:\n1. sign me into john lewis\n2. sign me into john lewis\nTell me which task to approve or cancel.",
+      "steps": [],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "next-train",
+      "kind": "lookup",
+      "message": "What's the next train from Birmingham New Street to Manchester Piccadilly, and how long is the journey?",
+      "ms": 7242,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "The live board for Sunday, 25 October 2026, lists the next direct train to Manchester Piccadilly at 12:01, on time from platform 5B, arriving in about 1 hour 28 minutes. ([myrailbuddy.com](https://myrailbuddy.com/departures/BHM))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"next train Birmingham New Street to Manchester Piccadilly live departures today journey time\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "kettle-options",
+      "kind": "cards",
+      "message": "Find three kettles under £40 with at least 4 stars and show them to me side by side.",
+      "ms": 58646,
+      "grade": "fail",
+      "failedChecks": [
+        "used show_results",
+        "answer avoids /action is incomplete/i"
+      ],
+      "answer": "The action is incomplete.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk kettle under £40 reviews stars kettle Next UK\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style kettle \\\"£\\\" \\\"4.5\\\" OR \\\"4.8\\\" OR \\\"4.0\\\" reviews Next kettle under £40\",\"num_results\":\"10\"}"
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"site\":\"next.co.uk\",\"searchFor\":\"kettle\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style \\\"kettle\\\" \\\"£\\\" \\\"5.0\\\" reviews Next kettle\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style \\\"kettle\\\" \\\"4.5\\\" \\\"reviews\\\"\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"Next kettles under £40 4 star rating kettle review\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style \\\"kettle\\\" \\\"Rated\\\" \\\"£\\\" \\\"4.0\\\" Next UK reviews\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk/style/ kettle \\\"4.7/5\\\" OR \\\"4.6/5\\\" OR \\\"4.8/5\\\" kettle Next\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk \\\"Daewoo\\\" kettle reviews Next kettle £\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:next.co.uk \\\"kettle\\\" \\\"5.0/5\\\" Next kettle review 1.7L\"}"
+        },
+        {
+          "action": "browser_act",
+          "ok": false,
+          "outcome": "failed",
+          "cause": "control_missing",
+          "error": "elementId ? is not on the current page (0–59). Observe again before acting.",
+          "input": "{\"action\":\"click\",\"elementId\":\"?\",\"value\":\"\"}"
+        }
+      ],
+      "failures": 1,
+      "firstFailure": {
+        "action": "browser_act",
+        "ok": false,
+        "outcome": "failed",
+        "cause": "control_missing",
+        "error": "elementId ? is not on the current page (0–59). Observe again before acting.",
+        "input": "{\"action\":\"click\",\"elementId\":\"?\",\"value\":\"\"}"
+      }
+    },
+    {
+      "id": "cheapest-over-two-searches",
+      "kind": "compare",
+      "message": "Which is cheaper right now: a 1.7 litre Bosch kettle at John Lewis or a 1.7 litre Russell Hobbs kettle at Currys? Give both prices.",
+      "ms": 8182,
+      "grade": "pass",
+      "failedChecks": [],
+      "answer": "John Lewis search results show four Bosch 1.7L kettles priced from £39.99 to £100: MyMoment Serene (£39.99), DesignLine Plus Copper (£49), DesignLine Ergo (£59.99), and Sky Variable Temperature (£69.99–£100). The results were crawled yesterday, October 24, 2026. ([johnlewis.com](https://www.johnlewis.com/browse/electricals/kettles/bosch/1.7l/_/N-ahtZ1z13z3zZ1z0ro2j?utm_source=openai))\n\nCurrys search results list the 1.7L Russell Hobbs Everyday Quiet Boil kettle at £34.99 and the Classics kettle at £38.99. The listings were crawled last month, so these prices may have changed since then. ([currys.co.uk](https://www.currys.co.uk/products/russell-hobbs-everyday-quiet-boil-28851-jug-kettle-black-10306193.html?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:johnlewis.com Bosch kettle 1.7L price John Lewis UK\"}"
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null,
+          "input": "{\"query\":\"site:currys.co.uk Russell Hobbs kettle 1.7L price Currys UK\"}"
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    }
+  ]
+}

@@ -30,7 +30,10 @@ async function calculate({ userId, action, params, enrichedParams, context, deps
 }
 
 async function showResults({ params }) {
-  const results = shapeResultCards(params?.results);
+  // The model sometimes sends the list as JSON text rather than as a list.
+  let raw = params?.results;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
+  const results = shapeResultCards(raw);
   if (results.length < MIN_RESULTS) {
     return { success: false, outcome: 'failed', error: `show_results needs at least ${MIN_RESULTS} options that each have a title.` };
   }

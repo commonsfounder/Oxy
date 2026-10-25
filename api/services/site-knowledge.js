@@ -46,8 +46,13 @@ function createSiteKnowledge({ fastpaths, learnedRecipes } = {}) {
    * @param {{ term?: string }} [opts] a search term, when asking for an entry point
    */
   function forHost(hostOrUrl, { term = '' } = {}) {
-    const host = hostOrUrl?.includes('://') ? hostFromUrl(hostOrUrl) : String(hostOrUrl || '').replace(/^www\./, '');
+    let host = hostOrUrl?.includes('://') ? hostFromUrl(hostOrUrl) : String(hostOrUrl || '').replace(/^www\./, '');
     if (!host) return emptyRecord(null);
+    // A shop given by name ("Tesco") is matched to its known host ("tesco.com").
+    if (!host.includes('.')) {
+      const label = host.toLowerCase().replace(/[^a-z0-9]/g, '');
+      host = Object.keys(retailers.RETAILERS || {}).find((key) => key.split('.')[0] === label) || host;
+    }
 
     const entry = retailers.RETAILERS?.[host] || null;
     const authoredSearch = term && entry?.searchUrl ? entry.searchUrl(term) : null;

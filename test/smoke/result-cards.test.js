@@ -1,4 +1,6 @@
 const test = require('node:test');
+process.env.SUPABASE_URL ||= 'http://127.0.0.1:1';
+process.env.SUPABASE_KEY ||= 'test-key';
 const assert = require('node:assert');
 const { shapeResultCards, MAX_RESULTS } = require('../../api/services/result-cards');
 const { ACTION_CONTRACTS } = require('../../api/action-contracts');
@@ -36,4 +38,11 @@ test('show_results is a low-risk inline capability', () => {
   const contract = ACTION_CONTRACTS.show_results;
   assert.strictEqual(contract.risk, 'low');
   assert.strictEqual(contract.confirmation, 'none');
+});
+
+test('a list sent as JSON text is still shown', async () => {
+  const { handlers } = require('../../api/actions/assistant');
+  const result = await handlers.show_results({ params: { results: JSON.stringify([{ title: 'A', price: '£1' }, { title: 'B', price: '£2' }]) } });
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(result.results.length, 2);
 });
