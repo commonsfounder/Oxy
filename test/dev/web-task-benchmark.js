@@ -4,6 +4,9 @@
 // then compared. Runs against a live deployment as a test account (it leaves chat history behind).
 //
 //   node test/dev/web-task-benchmark.js [--suite=web|multistep|hard] [--id=a,b] [--out=path]
+//                                       [--model=openai:gpt-6.1-sol] [--max-usd=0.30]
+//   --model sets the test account's model for the run and puts it back afterwards (the account's own
+//   model setting, so nothing else is touched). --max-usd stops the run once the estimated spend passes it.
 //   BASE_URL (default the Fly app)   OXY_BENCH_USER (default demo-test-user)
 //
 // Each task has an optional automatic check; tasks without one are graded by reading the answer
@@ -111,6 +114,21 @@ function report(results) {
   }
 }
 
+const DEFAULT_MODEL = 'openai:gpt-6-luna';
+
+async function setModel(token, spec) {
+  const [provider, ...rest] = String(spec).split(':');
+  const response = await fetch(`${BASE}/model-routing`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ provider, model: rest.join(':') }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Could not set model ${spec}: ${body.error || response.status}`);
+  if (body.selected && body.selected.configured === false) throw new Error(`${spec}: that provider has no key on the server yet.`);
+  return body;
+}
+
 async function main() {
   const ids = (process.argv.find((a) => a.startsWith('--id=')) || '').slice(5).split(',').filter(Boolean);
   const suiteName = (process.argv.find((a) => a.startsWith('--suite=')) || '--suite=web').slice(8);
@@ -118,19 +136,26 @@ async function main() {
   if (!suite) { console.error(`Unknown suite "${suiteName}". Use: ${Object.keys(SUITES).join(', ')}`); process.exit(2); }
   const tasks = ids.length ? suite.filter((t) => ids.includes(t.id)) : suite;
   const token = createSessionToken(USER);
-  console.log(`${tasks.length} tasks against ${BASE} as ${USER}\n`);
+  const modelSpec = (process.argv.find((a) => a.startsWith('--model=')) || '').slice(8);
+  const maxUsd = Number((process.argv.find((a) => a.startsWith('--max-usd=')) || '').slice(10)) || Infinity;
+  if (modelSpec) await setModel(token, modelSpec);
+  console.log(`${tasks.length} tasks against ${BASE} as ${USER}${modelSpec ? ` on ${modelSpec}` : ''}${Number.isFinite(maxUsd) ? `, stopping at $${maxUsd}` : ''}\n`);
   const results = [];
+  let spent = 0;
   for (const task of tasks) {
+    if (spent >= maxUsd) { console.log(`stopped: estimated spend $${spent.toFixed(4)} reached the cap`); break; }
     const result = await runTask(token, task);
+    spent += result.usage?.estimatedUsd || 0;
     results.push(result);
     console.log(`${String(result.ms).padStart(7)}ms  ${result.grade.padEnd(9)} ${result.id}`);
     await new Promise((resolve) => setTimeout(resolve, 2500));
   }
+  if (modelSpec) await setModel(token, DEFAULT_MODEL).catch((e) => console.error(`WARNING: could not restore the default model: ${e.message}`));
   report(results);
   const outDir = path.join(__dirname, 'benchmark-results');
   fs.mkdirSync(outDir, { recursive: true });
-  const out = (process.argv.find((a) => a.startsWith('--out=')) || '').slice(6) || path.join(outDir, `adam-${suiteName}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  fs.writeFileSync(out, JSON.stringify({ base: BASE, user: USER, at: new Date().toISOString(), results }, null, 2));
+  const out = (process.argv.find((a) => a.startsWith('--out=')) || '').slice(6) || path.join(outDir, `adam-${suiteName}-${(modelSpec || 'default').replace(/[^a-z0-9.]+/gi, '_')}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  fs.writeFileSync(out, JSON.stringify({ base: BASE, user: USER, model: modelSpec || 'server default', at: new Date().toISOString(), results }, null, 2));
   console.log(`\nsaved ${out}`);
 }
 
