@@ -131,6 +131,36 @@ test('the last allowed step is an answer from what was found, not a generic mess
   assert.doesNotMatch(result.spoken, /ran out of steps/i);
 });
 
+test('a final reply that only repeats a tool status line is replaced by a real answer', async (t) => {
+  const original = brainProvider.callToolsBrain;
+  t.after(() => { brainProvider.callToolsBrain = original; });
+  const STOCK = 'Walking directions to the gallery are ready.';
+  const textOnly = (text) => ({ text, candidates: [{ content: { parts: [{ text }], role: 'model' } }] });
+  let calls = 0;
+  brainProvider.callToolsBrain = async () => {
+    calls += 1;
+    if (calls <= 2) return toolResponse('calculate');
+    if (calls === 3) return textOnly(STOCK);
+    return textOnly('The 08:01 gets in at 09:29, a 1h28 journey, and the walk is about 12 minutes.');
+  };
+  const result = await runAgentLoop({
+    userId: 'user-1',
+    initialMessage: 'train and walk',
+    maxIterations: 6,
+    executeActionsFn: async (_userId, actions) => actions.map(action => ({ action: action.type, result: { success: true, outcome: 'completed', text: STOCK } }))
+  });
+  assert.match(result.spoken, /09:29/);
+  assert.doesNotMatch(result.spoken, /are ready/);
+});
+
+test('a genuine answer is never rewritten', async (t) => {
+  const { isEchoOfToolText } = require('../../api/services/agent-final-answer');
+  const actions = [{ action: 'a', result: { text: 'Walking directions to the gallery are ready.' } }, { action: 'b', result: { text: 'times' } }];
+  assert.equal(isEchoOfToolText('The walk is about 12 minutes from Piccadilly, and the 08:01 arrives at 09:29.', actions), false);
+  assert.equal(isEchoOfToolText('Walking directions to the gallery are ready.', actions), true);
+  assert.equal(isEchoOfToolText('Walking directions to the gallery are ready.', actions.slice(0, 1)), false);
+});
+
 test('reflection parse failure is unknown rather than achieved', async (t) => {
   const original = brainProvider.callToolsBrain;
   t.after(() => { brainProvider.callToolsBrain = original; });

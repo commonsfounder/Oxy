@@ -104,6 +104,9 @@ function report(results) {
   console.log(`\n${results.length} tasks, median ${times[Math.floor(times.length / 2)]}ms, slowest ${times[times.length - 1]}ms`);
   console.log('failed steps by cause:', JSON.stringify(byCause));
   const cost = results.reduce((sum, r) => sum + (r.usage?.estimatedUsd || 0), 0);
+  const inputTokens = results.reduce((sum, r) => sum + (r.usage?.inputTokens || 0), 0);
+  const cachedTokens = results.reduce((sum, r) => sum + (r.usage?.cachedTokens || 0), 0);
+  console.log(`input tokens: ${inputTokens}, of which cached: ${cachedTokens} (${inputTokens ? Math.round((cachedTokens / inputTokens) * 100) : 0}%)`);
   const reasoning = results.reduce((sum, r) => sum + (r.usage?.reasoningTokens || 0), 0);
   const output = results.reduce((sum, r) => sum + (r.usage?.outputTokens || 0), 0);
   console.log(`estimated model cost: $${cost.toFixed(4)} (about $${(cost / Math.max(1, results.length)).toFixed(4)} a task); ${reasoning} of ${output} output tokens were reasoning`);

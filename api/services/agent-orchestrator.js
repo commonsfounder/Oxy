@@ -8,6 +8,7 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 // slow model (retries, checkpointing, resume) is only testable if the brain call can be
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
+const { isEchoOfToolText, WRITE_UP_PROMPT } = require('./agent-final-answer');
 const { buildToolsForGemini, getActionContract } = require('../action-contracts');
 const { modelView, compactStaleObservations } = require('./agent-context-trim');
 
@@ -301,6 +302,18 @@ async function runAgentLoop({
     spoken = extractSpokenFromResponseSafe(resp) || spoken;
 
     if (toolCalls.length === 0) {
+      // A reply that only repeats one tool's stock line has no answer in it: write the real one.
+      if (!wrappedUp && isEchoOfToolText(spoken, executedActions)) {
+        try {
+          resumedContents.push({ role: 'model', parts: [{ text: spoken }] });
+          resumedContents.push({ role: 'user', parts: [{ text: WRITE_UP_PROMPT }] });
+          const writeUp = await callGeminiWithTools(modelName, resumedContents, { ...baseConfig, tools: [{ functionDeclarations: [] }], toolConfig: undefined }, trace, provider);
+          const better = extractSpokenFromResponseSafe(writeUp);
+          if (better && !isEchoOfToolText(better, executedActions)) spoken = better;
+        } catch (err) {
+          logAgentStep(agentTrace, { type: 'write_up_failed', error: err.message });
+        }
+      }
       // No more tools — final answer
       logAgentStep(agentTrace, { type: 'final_answer', spoken: spoken?.slice(0, 120) });
       agentTrace.status = 'completed';

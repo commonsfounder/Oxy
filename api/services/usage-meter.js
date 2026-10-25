@@ -94,6 +94,7 @@ function summarise(totals) {
   return {
     calls: totals.calls,
     inputTokens: totals.inputTokens,
+    cachedTokens: totals.cachedTokens,
     outputTokens: totals.outputTokens,
     reasoningTokens: totals.reasoningTokens,
     webSearches: totals.webSearches,
