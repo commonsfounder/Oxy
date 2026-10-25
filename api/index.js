@@ -6681,8 +6681,15 @@ function reconcileSpokenWithActions(spoken, actionResults) {
   const results = normalizeActionResultsForClient(actionResults);
   const mustShow = results.some(entry => entry?.result?.outcome === 'awaiting_user' || entry?.result?.pending || entry?.result?.outcome === 'simulated');
   const someWorked = results.some(entry => entry?.result?.outcome === 'completed');
-  const text = String(spoken || '').trim();
-  if (mustShow || !someWorked || text.length < 20) return confirmation;
+  if (mustShow || !someWorked) return confirmation;
+  // The model's own words if it wrote something substantial; otherwise what the steps that
+  // worked actually found (a search answer, a forecast), never just the canned hand-off line.
+  const found = results
+    .filter(entry => entry?.result?.outcome === 'completed' && String(entry.result?.text || '').trim().length >= 40)
+    .map(entry => String(entry.result.text).trim());
+  const own = String(spoken || '').trim();
+  const text = own.length >= 20 ? own : found.join('\n\n');
+  if (!text) return confirmation;
   const handoffs = results.filter(entry => entry?.result?.outcome === 'handoff_required').map(entry => entry.result?.text).filter(Boolean);
   return handoffs.length ? `${text}\n\n${handoffs.join('\n')}` : text;
 }

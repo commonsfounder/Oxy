@@ -47,3 +47,10 @@ test('a remember-then-ask message is not handled by the memory shortcut', () => 
   assert.equal(hasFollowOnRequest('Remember that my sister Ada birthday is on 3 March'), false);
   assert.equal(hasFollowOnRequest('Remember I prefer window seats'), false);
 });
+
+test('a short model line is replaced by what the working steps found, with the hand-off line added', () => {
+  const found = 'The 08:01 from Birmingham New Street gets into Manchester Piccadilly at 09:29, a journey of 1h28.';
+  const out = reconcileSpokenWithActions("I'll check.", [ok('web_search', found), handoff('get_directions', 'Walking directions to the gallery are ready.')]);
+  assert.ok(out.startsWith(found));
+  assert.match(out, /Walking directions to the gallery are ready\./);
+});
