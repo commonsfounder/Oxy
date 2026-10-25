@@ -1,0 +1,356 @@
+{
+  "base": "https://milgrain-live-2026.fly.dev",
+  "user": "demo-test-user",
+  "at": "2026-10-25T08:54:43.666Z",
+  "results": [
+    {
+      "id": "wiki-population",
+      "kind": "lookup",
+      "message": "What is the current population of Reykjavik according to Wikipedia?",
+      "ms": 6256,
+      "grade": "unchecked",
+      "answer": "Reykjavík’s municipality had 139,804 residents on January 1, 2026. ([en.wikipedia.org](https://en.wikipedia.org/wiki/Reykjav%C3%ADk?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "wiki-director",
+      "kind": "lookup",
+      "message": "Who directed the film Paddington 2, and what year did it come out?",
+      "ms": 8151,
+      "grade": "pass",
+      "answer": "Paddington 2 was directed by Paul King and released in 2017. ([filmsandfestivals.britishcouncil.org](https://filmsandfestivals.britishcouncil.org/projects/paddington-2?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "museum-hours",
+      "kind": "lookup",
+      "message": "What time does the British Museum open on a Saturday?",
+      "ms": 6221,
+      "grade": "unchecked",
+      "answer": "The British Museum’s official Saturday opening hours are 10:00 am–5:00 pm, with last entry at 4:45 pm. The official page was crawled five months ago. ([britishmuseum.org](https://www.britishmuseum.org/visit?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "wiki-tallest",
+      "kind": "browse",
+      "message": "On Wikipedia, find the tallest building in Birmingham, UK and tell me how tall it is.",
+      "ms": 9492,
+      "grade": "unchecked",
+      "answer": "According to Wikipedia, The Octagon and One Eastside are joint-tallest in Birmingham at 155 metres (509 feet) each. ([Wikipedia](https://en.wikipedia.org/wiki/List_of_tallest_buildings_and_structures_in_the_Birmingham_metropolitan_area))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "jl-kettle",
+      "kind": "shop",
+      "message": "How much is the Bosch Sky kettle on John Lewis?",
+      "ms": 6350,
+      "grade": "unchecked",
+      "answer": "John Lewis lists the Bosch Sky Variable Temperature Kettle, 1.7L, for £69.99–£100. The listing was crawled yesterday, October 24, 2026. ([johnlewis.com](https://www.johnlewis.com/brand/bosch/kettles/_/N-1z13z3zZ1yzznku?utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "tesco-milk",
+      "kind": "shop",
+      "message": "On Tesco's website, how much is 2 pints of semi-skimmed milk?",
+      "ms": 9870,
+      "grade": "unchecked",
+      "answer": "Tesco lists 2 pints of semi-skimmed milk for £1.20. ([Tesco](https://www.tesco.com/shop/en-GB/search?query=semi+skimmed+milk&utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "currys-cheapest-kettle",
+      "kind": "shop",
+      "message": "What's the cheapest kettle on Currys right now?",
+      "ms": 5399,
+      "grade": "unchecked",
+      "answer": "The cheapest Currys UK kettle shown in the search results is the LOGIK L17PKB26 Traditional Kettle – Black, priced at £24.99. The results were crawled three days ago, so the price may have changed since then. ([currys.co.uk](https://www.currys.co.uk/appliances/small-kitchen-appliances/kettles?searchTerm=kett&utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "argos-kettle",
+      "kind": "botwall",
+      "message": "What's the price of the cheapest kettle on Argos?",
+      "ms": 7555,
+      "grade": "unchecked",
+      "answer": "Argos currently lists the Breville VKT257 Bold Kettle in white for £22.99. The listing was crawled today, 25 October 2026. ([argos.co.uk](https://www.argos.co.uk/browse/appliances/kettles/c%3A29560/))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "kettle-cards",
+      "kind": "cards",
+      "message": "Find me three good kettles under £60 and show me the options.",
+      "ms": 40519,
+      "grade": "fail",
+      "answer": "I found three well-rated options on Argos. I’d pick the Bosch MyMoment Delight: it’s £24.99 and shares the highest rating, 4.8/5. The prices and ratings were shown in results crawled yesterday.",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "browser_open",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "show_scene",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "london-weather",
+      "kind": "live",
+      "message": "What's the weather in London tomorrow?",
+      "ms": 7364,
+      "grade": "unchecked",
+      "answer": "London forecast for Sunday, October 25, 2026 onward. The forecast’s update time is unavailable.\n\nSunday, October 25: Morning showers in places; otherwise mostly sunny and windy. High 57°F (14°C), low 46°F (8°C). Wind speed and precipitation amount unavailable.\n\nMonday, October 26: Cloudy with a little morning rain; breezy at times in the afternoon. High 61°F (16°C), low 58°F (14°C). Wind speed and precipitation amount unavailable.\n\nTuesday, October 27: A couple of morning showers, then breezy with decreasing clouds. High 62°F (16°C), low 46°F (8°C). Wind speed and precipitation amount unavailable.\n\nWednesday, October 28: Mostly sunny. High 60°F (16°C), low 47°F (8°C). Wind and precipitation details unavailable.\n\n**London, UK — forecast from Sunday, 25 October 2026**\n\n- **Sun 25 Oct:** Morning shower in places; otherwise mostly sunny and windy. **8–14°C**.\n- **Mon 26 Oct:** Cloudy with a little morning rain; breezy at times in the afternoon. **14–16°C**.\n- **Tue 27 Oct:** A couple of morning showers, then breezy with decreasing cloud. **8–16°C**.\n- **Wed 28 Oct:** Mostly sunny. **8–16°C**.\n- **Thu 29 Oct:** Partial sunshine. **8–15°C**.\n- **Fri 30 Oct:** High thin cloud in the morni",
+      "steps": [
+        {
+          "action": "get_forecast",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "get_forecast",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "bbc-headline",
+      "kind": "live",
+      "message": "What's the top headline on BBC News right now?",
+      "ms": 7658,
+      "grade": "unchecked",
+      "answer": "The search results don’t identify BBC News’s top headline for October 25, 2026, so I can’t reliably report it. The available headline results are older or don’t show the headline. ([please.untaint.us](https://please.untaint.us/?url=https%3A%2F%2Fwww.bbc.co.uk%2Fnews&utm_source=openai))",
+      "steps": [
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "prague-hotel",
+      "kind": "travel",
+      "message": "Find me a hotel in Prague for two nights next weekend under £150 a night.",
+      "ms": 85816,
+      "grade": "pass",
+      "answer": "The action is incomplete.",
+      "steps": [
+        {
+          "action": "search_hotels",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "search_hotels",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "web_search",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "calculate",
+          "ok": false,
+          "outcome": "failed",
+          "cause": "other",
+          "error": "Could not calculate \"140*0.748, 323*0.748\" safely."
+        },
+        {
+          "action": "calculate",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        },
+        {
+          "action": "calculate",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 1,
+      "firstFailure": {
+        "action": "calculate",
+        "ok": false,
+        "outcome": "failed",
+        "cause": "other",
+        "error": "Could not calculate \"140*0.748, 323*0.748\" safely."
+      }
+    },
+    {
+      "id": "lisbon-flight",
+      "kind": "travel",
+      "message": "What's the cheapest flight from London to Lisbon next Friday?",
+      "ms": 24272,
+      "grade": "pass",
+      "answer": "For London to Lisbon 2026-10-30: easyJet, direct — £52 one-way (easyJet, quoted for London Luton–Lisbon, 30 October 2026); easyJet, direct — $57 one-way (AirHint, quoted for London Luton–Lisbon, 30 October 2026); TAP Air Portugal, direct, 2h 50m — £109 return (Cheapflights, quoted for Departing 30 October 2026 and returning 4 November 2026); TAP Air Portugal, direct, 2h 50m — £110 return (Cheapflights, quoted for Departing 30 October 2026 and returning 12 November 2026); TAP Air Portugal, direct — £168 return (TAP Air Portugal, quoted for London Heathrow–Lisbon, 30 October–6 November 2026). Prices are in GBP and USD — I have not converted between them, so they are not directly comparable. These are prices observed in search results just now, not held quotes — availability and price are only confirmed on the airline or hotel's own site, and I have not checked whether any of them can actually be booked.",
+      "steps": [
+        {
+          "action": "search_flights",
+          "ok": true,
+          "outcome": "completed",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    },
+    {
+      "id": "walk-bullring",
+      "kind": "live",
+      "message": "How long does it take to walk from Birmingham New Street station to the Bullring?",
+      "ms": 3532,
+      "grade": "unchecked",
+      "answer": "Walking directions to Bullring, Birmingham are ready.",
+      "steps": [
+        {
+          "action": "get_directions",
+          "ok": true,
+          "outcome": "handoff_required",
+          "cause": null,
+          "error": null
+        }
+      ],
+      "failures": 0,
+      "firstFailure": null
+    }
+  ]
+}

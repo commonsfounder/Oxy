@@ -1,0 +1,20 @@
+{
+  "who": "Claude, by hand, 2026-10-25 morning (UK). Tools: web search, a real browser pane, no site-specific tricks.",
+  "note": "Prices and headlines move; compare within the same hour. 'seconds' is rough effort time, not a stopwatch.",
+  "answers": {
+    "wiki-population": { "answer": "About 139,000-140,000 for the city (Wikipedia: ~140,000; Statistics Iceland 1 Jan 2026 estimate 138,753). Capital Region ~252,000.", "how": "web search", "confidence": "high" },
+    "wiki-director": { "answer": "Paul King, 2017 (UK release 10 Nov 2017; US release Feb 2018).", "how": "web search", "confidence": "high" },
+    "museum-hours": { "answer": "10:00 to 17:00 or 17:30 depending on source; official Saturday page not found in results. Friday late opening until 20:30.", "how": "web search", "confidence": "medium" },
+    "wiki-tallest": { "answer": "155 m: Octagon (49 storeys, 2025) and One Eastside (51 storeys, 2026) share the top spot.", "how": "web search", "confidence": "high" },
+    "jl-kettle": { "answer": "Bosch Sky TWK7203GB Variable Temperature Kettle 1.7L: £69.99 to £100.00 depending on colour (John Lewis search page).", "how": "browser", "confidence": "high" },
+    "tesco-milk": { "answer": "Tesco British Semi Skimmed Milk 2 pints (1.13L): £1.20.", "how": "browser", "confidence": "high" },
+    "currys-cheapest-kettle": { "answer": "Could not confirm the overall cheapest: the sort control would not apply for me. Cheapest on the first page: £39.99 (Breville Cobolt VKT265 / VKT266).", "how": "browser, partial", "confidence": "low" },
+    "argos-kettle": { "answer": "Blocked: Argos showed a bot-protection page to my browser too. No price obtained.", "how": "browser", "confidence": "high that it is blocked" },
+    "kettle-cards": { "answer": "Not applicable to a human; the check is whether Adam shows cards. Real options from Currys: Breville Cobolt £39.99, Russell Hobbs Bronte £41.99, Bosch Silicone TWK7S04GB £49.99.", "how": "browser", "confidence": "medium" },
+    "london-weather": { "answer": "BBC Weather: Mon 26 Oct high 16C, low 15C (today Sun 25 Oct: high 13C, low 8C, sunny and a fresh breeze).", "how": "browser", "confidence": "high" },
+    "bbc-headline": { "answer": "Storm Boelo brings 85mph gusts and travel disruption, amber weather warnings in effect.", "how": "browser", "confidence": "high" },
+    "prague-hotel": { "answer": "No live price found for the weekend by web search; only stale or other-month listings (e.g. £33-£60 budget hotels, wrong dates).", "how": "web search", "confidence": "low" },
+    "lisbon-flight": { "answer": "No live fare found for the Friday by web search; aggregator pages suggest returns from about £91 (Lastminute, 6-9 Nov) and Eurowings from £119.99.", "how": "web search", "confidence": "low" },
+    "walk-bullring": { "answer": "About 4 minutes (Bullring's own access guide); 2-5 minutes depending on exit.", "how": "web search", "confidence": "high" }
+  }
+}

@@ -967,7 +967,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     optional: ['num_results'],
     inputExample: { query: 'best pizza near me', num_results: 5 },
-    guidance: 'For one specific thing — a tweet, TikTok, video, post, song or page — search with descriptive words plus the site name (for example the topic, "tweet", and x.com) and give the real link taken from the results. Never write a search-page or browse-page URL yourself and hand it over as the answer. If the results contain no link to the actual post, say so plainly and offer the closest real link you found.',
+    guidance: 'For one specific thing — a tweet, TikTok, video, post, song or page — search with descriptive words plus the site name (for example the topic, "tweet", and x.com) and give the real link taken from the results. Never write a search-page or browse-page URL yourself and hand it over as the answer. If the results contain no link to the actual post, say so plainly and offer the closest real link you found. A search cannot see what a page says right now: for a live headline, a current price or stock, or anything the answer says it could not find, open the real page with browser_open instead of giving up or answering from an old crawl.',
     successSummary: 'Search results',
     failureSummary: 'Search failed',
     confirmation: 'none'
@@ -979,6 +979,16 @@ const ACTION_CONTRACTS = {
     inputExample: { expression: '2 + 2 * 3 or natural math question' },
     successSummary: 'Calculated',
     failureSummary: 'Calculation failed',
+    confirmation: 'none'
+  },
+  show_results: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['results'],
+    inputExample: { results: [{ title: 'name', subtitle: 'one line of detail', price: '£49', rating: 4.5, rating_count: 120, url: 'https://…', image_url: 'https://…', source: 'site name', note: 'optional caveat' }] },
+    guidance: 'After a search found two or more real options the user will choose between (products, restaurants, services, anything with a price or rating), call this once with the best few, best first, so they appear as swipeable cards the user can compare. Only include facts the sources actually stated; leave a field out rather than guess it. Use real https links taken from the results. Not for a single answer, and never for flights, hotels or places (those have their own cards).',
+    successSummary: 'Options shown',
+    failureSummary: 'Could not show the options',
     confirmation: 'none'
   },
   // The agent's own scratch space. Without these the workspace is storage the user can

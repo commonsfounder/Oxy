@@ -70,6 +70,22 @@ async function browserOpen({ userId, params, context }) {
         url: observation.url,
       };
     }
+    if (observation.pageProblem === 'blank') {
+      return {
+        success: false,
+        outcome: 'unavailable',
+        error: `${observation.url} loaded as a blank page, which usually means the site is blocking automated access. A different site, or doing this part yourself, is the way through.`,
+        url: observation.url,
+      };
+    }
+    if (observation.pageProblem === 'error') {
+      return {
+        success: false,
+        outcome: 'failed',
+        error: `${observation.url} is the site's own error page, so that address did not work. Try the site's home page or its search box instead.`,
+        url: observation.url,
+      };
+    }
     const base = observationResult(observation, {
       usedStoredSession: observation.usedStoredSession,
       resolvedVia: observation.resolvedVia,
@@ -422,7 +438,7 @@ async function webSearchAction({ userId, action, params, enrichedParams, context
       prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`
     });
     if (!answer) return { success: false, error: `Search for "${q}" returned no results.` };
-    return { success: true, text: answer, query: q };
+    return { success: true, text: String(answer).replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, ''), query: q };
   } catch (e) {
     return { success: false, error: `Search failed: ${e.message}`, query: q };
   }

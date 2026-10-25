@@ -259,9 +259,11 @@ async function runAgentLoop({
     // A turn that has searched and browsed for a while must answer with what it has, not keep going.
     const usedBrowser = executedActions.some(a => /^browser_|^run_browser|^web_browse/.test(String(a?.type || a?.action || '')));
     const overBudget = i > startIteration && Date.now() - loopStartedAt > (usedBrowser ? TURN_WALL_BUDGET_MS * 2 : TURN_WALL_BUDGET_MS);
-    if (overBudget && !wrappedUp) {
+    // The last allowed step is always an answer: running out of steps must not throw the findings away.
+    const lastStep = i >= effectiveMaxIterations - 1 && i > startIteration;
+    if ((overBudget || lastStep) && !wrappedUp) {
       wrappedUp = true;
-      resumedContents.push({ role: 'user', parts: [{ text: 'Time is up. Answer now in a few plain sentences using what you have found. If you could not finish, say what you found and what you need from me.' }] });
+      resumedContents.push({ role: 'user', parts: [{ text: `${overBudget ? 'Time is up.' : 'That is the last step.'} Answer now in a few plain sentences using what you have found. If you could not finish, say what you found and what you need from me.` }] });
     }
 
     if (onStep) onStep({ phase: 'thinking', iteration: i + 1 });
@@ -454,7 +456,7 @@ async function runAgentLoop({
   const fallback = agentTrace.status === 'error' && !executedActions.length
     ? 'The action could not be completed.'
     : agentTrace.status === 'incomplete'
-      ? 'The action is incomplete.'
+      ? 'I ran out of steps before finishing this. Ask me to carry on and I will pick up from here.'
       : 'Done.';
   const finalSpoken = agentTrace.status === 'incomplete'
     ? fallback

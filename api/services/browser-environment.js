@@ -30,7 +30,7 @@ function safeFrameEvaluate(frame, pageFunction, arg, fallback) {
 // Anti-automation interstitials, which a datacenter IP trips on many sites. The page loads with
 // real bytes, so the empty-shell guard misses it, and the loop then spends its whole budget
 // clicking a dead page. Matching the copy lets it bail on the first step instead.
-const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|disable any browser extensions|hcaptcha|recaptcha challenge|cf-challenge/i;
+const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|disable any browser extensions|blocked by our security service|your access to this site is not possible|you have been blocked|hcaptcha|recaptcha challenge|cf-challenge/i;
 
 // Pure so it's unit-testable. A wall page is SMALL (a challenge, not a shop) AND contains the
 // copy — gating on length keeps a normal 5k-char product page that merely mentions "captcha"
@@ -277,6 +277,22 @@ function wallFrom(perceived) {
     || (wall.dialogText ? looksLikeBlockWall({ text: wall.dialogText, bodyLen: wall.dialogText.length }) : false);
 }
 
+function isStillRendering(observation) {
+  return !observation.elements.length && String(observation.text || '').trim().length < 80 && !observation.blocked;
+}
+
+const ERROR_PAGE_PATH = /^\/(?:error|errors|404|not-?found|oops|something-went-wrong)(?:[/?.]|$)/i;
+
+// A page that is empty, or that the site sent to its own error page, is a failed load, not content.
+function problemFrom(perceived, url) {
+  const empty = !perceived.elements?.length && !perceived.title && String(perceived.text || '').trim().length < 20;
+  if (empty) return 'blank';
+  try {
+    if (ERROR_PAGE_PATH.test(new URL(url).pathname)) return 'error';
+  } catch { /* an unparseable url is not an error page */ }
+  return null;
+}
+
 async function extractClickableElements(page) {
   return (await perceive(page)).elements;
 }
@@ -354,7 +370,8 @@ const CONSENT_NAMES = [
   /^accept cookies$/i, /^i accept$/i, /^accept$/i, /^agree$/i, /^got it$/i, /^continue$/i,
   // Sainsbury's cookie banner reads "Continue and accept" — start-anchored (not fully
   // anchored like the others above) since real sites glue accept-language onto "Continue".
-  /^continue\s+and\s+accept\b/i
+  /^continue\s+and\s+accept\b/i,
+  /^accept\s*(?:&|and)\s*close$/i
 ];
 
 // One in-page look for anything that could be a consent control, in every frame and open
@@ -467,6 +484,7 @@ async function observationFrom(page, perceived, { includeScreenshot = false } = 
     elementLines: elements.map(renderElementLine),
     text: String(perceived.text || '').slice(0, OBSERVATION_TEXT_LIMIT),
     blocked: wallFrom(perceived) || null,
+    pageProblem: problemFrom(perceived, page.url()),
   };
   if (includeScreenshot) {
     observation.screenshot = await captureMarkedScreenshot(page, elements).catch(() => null);
@@ -545,14 +563,26 @@ async function open(userId, { url, site = '', searchFor = '', objective = '', wo
     throw error;
   }
   await settle(page, 150);
-  await dismissConsent(page).catch(() => {});
+  const dismissedEarly = await dismissConsent(page).catch(() => false);
   await settle(page, 100);
 
   const session = createSession(userId, {
     browser, context, page, release, site: host, goal: objective, workflowId, agentTaskId,
     history: [], requestedUrl: url, usedStoredSession: Boolean(storageState),
   });
-  const observation = await observePage(page);
+  let observation = await observePage(page);
+  // A consent banner can land after the first dismissal pass; ASOS shows its banner this way.
+  const dismissedLate = await consentCandidatePresent(page).catch(() => false) && await dismissConsentOnce(page);
+  // Banners fade out after the click, so a read taken straight away still lists them.
+  if (dismissedEarly || dismissedLate) {
+    await settle(page, 400);
+    observation = await observePage(page);
+  }
+  // A blank load is often a slow render; one longer wait before calling it blank.
+  if (observation.pageProblem === 'blank') {
+    await settle(page, 1500);
+    observation = await observePage(page);
+  }
   return {
     ...observation,
     usedStoredSession: session.usedStoredSession,
@@ -641,7 +671,13 @@ async function act(userId, step = {}) {
     at: new Date().toISOString()
   };
 
-  const observation = await observePage(page);
+  let observation = await observePage(page);
+  // A step that opens a new page can return before that page has rendered anything; reading it
+  // then shows the model an empty page it may wrongly treat as the answer. Give it a few beats.
+  for (let wait = 0; wait < 4 && page.url() !== before.url && isStillRendering(observation); wait += 1) {
+    await settle(page, 700);
+    observation = await observePage(page);
+  }
   await checkpointBrowserState(session, { lastObservation: observation.url });
   return {
     ...observation,

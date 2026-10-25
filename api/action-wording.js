@@ -440,6 +440,9 @@ const ACTION_WORDING = Object.freeze({
   calculate: {
     progress: () => 'Working it out'
   },
+  show_results: {
+    progress: () => 'Lining up the options'
+  },
   search_amazon: {
     progress: (i) => pick(detail(i.query) && `Looking for ${detail(i.query)} on Amazon`, 'Looking on Amazon')
   },

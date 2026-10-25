@@ -602,7 +602,10 @@ async function getGoogleDirections(destination, place, params = {}) {
     params: requestParams,
     timeout: 10000
   }));
-  if (response.data?.status !== 'OK' || !response.data.routes?.length) return null;
+  if (response.data?.status !== 'OK' || !response.data.routes?.length) {
+    console.warn(`[maps] Google Directions gave no route: ${response.data?.status || 'no status'} ${String(response.data?.error_message || '').slice(0, 160)}`.trim());
+    return null;
+  }
   return summarizeDirectionsRoute(response.data.routes[0], mode, arrival);
 }
 

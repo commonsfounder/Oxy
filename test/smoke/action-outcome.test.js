@@ -107,8 +107,28 @@ test('max iteration exhaustion is incomplete, not completed', async (t) => {
     }))
   });
   assert.equal(result.agentTrace.status, 'incomplete');
-  assert.equal(result.spoken, 'The action is incomplete.');
+  assert.match(result.spoken, /ran out of steps/i);
   assert.doesNotMatch(result.spoken, /^done[.!]?$/i);
+});
+
+test('the last allowed step is an answer from what was found, not a generic message', async (t) => {
+  const original = brainProvider.callToolsBrain;
+  t.after(() => { brainProvider.callToolsBrain = original; });
+  let calls = 0;
+  const configs = [];
+  brainProvider.callToolsBrain = async (...args) => {
+    calls += 1;
+    configs.push(args);
+    return calls < 3 ? toolResponse('calculate') : { text: 'Here is what I found: three hotels.', candidates: [{ content: { parts: [{ text: 'Here is what I found: three hotels.' }], role: 'model' } }] };
+  };
+  const result = await runAgentLoop({
+    userId: 'user-1',
+    initialMessage: 'find hotels',
+    maxIterations: 3,
+    executeActionsFn: async (_userId, actions) => actions.map(action => ({ action: action.type, result: { success: true, text: 'performed' } }))
+  });
+  assert.match(result.spoken, /three hotels/);
+  assert.doesNotMatch(result.spoken, /ran out of steps/i);
 });
 
 test('reflection parse failure is unknown rather than achieved', async (t) => {

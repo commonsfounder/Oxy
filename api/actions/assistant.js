@@ -12,6 +12,7 @@ const taskManager = require('../services/task-manager');
 const scheduledTasks = require('../services/scheduled-tasks');
 const { availableChannels, describeUnavailable } = require('../services/notification-delivery');
 const { resolveDelegatedGuardMode } = require('../services/delegated-run-starter');
+const { shapeResultCards, MIN_RESULTS } = require('../services/result-cards');
 
 async function calculate({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, executeAction, delegatedRunLifecycle, startDelegatedTaskExecution, getPreferenceMap, setPreferenceValue } = deps;
@@ -26,6 +27,18 @@ async function calculate({ userId, action, params, enrichedParams, context, deps
   } catch {
     return { success: false, outcome: 'failed', error: `Could not calculate "${expr}" safely.` };
   }
+}
+
+async function showResults({ params }) {
+  const results = shapeResultCards(params?.results);
+  if (results.length < MIN_RESULTS) {
+    return { success: false, outcome: 'failed', error: `show_results needs at least ${MIN_RESULTS} options that each have a title.` };
+  }
+  return {
+    success: true,
+    text: `Showing ${results.length} options: ${results.map(r => r.title).join('; ')}`,
+    results
+  };
 }
 
 async function createAgentTask({ userId, action, params, enrichedParams, context, deps, helpers }) {
@@ -235,6 +248,7 @@ module.exports = {
   handlers: {
     forget_memory: forgetMemory,
     calculate: calculate,
+    show_results: showResults,
     create_agent_task: createAgentTask,
     record_watch_observation: recordWatchObservation,
     simulate_actions: simulateActions,

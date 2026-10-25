@@ -153,6 +153,7 @@ const agentRuntime = require('./services/agent-runtime');
 const agentApprovals = require('./services/agent-approval-runtime');
 const reactions = require('./services/reactions');
 const activityFeed = require('./services/activity-feed');
+const failureReport = require('./services/failure-report');
 const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
@@ -1115,6 +1116,7 @@ async function sendPushToUser(userId, briefing) {
 
   const defaultSandbox = process.env.APNS_USE_SANDBOX === 'true';
   let sent = 0;
+  const failures = [];
   await Promise.all(devices
     .filter(device => device.platform === 'ios' && device.push_token)
     .map(async device => {
@@ -1136,9 +1138,10 @@ async function sendPushToUser(userId, briefing) {
       });
       if (result.ok) { sent += 1; return; }
       console.warn('[push] APNs send failed:', result.status, result.reason);
+      failures.push(`${result.status || 'no response'} ${result.reason || ''}`.trim());
       if (apns.isDeadToken(result)) await supabase.from('devices').delete().eq('push_token', device.push_token).then(() => {}, () => {});
     }));
-  return { sent };
+  return failures.length && !sent ? { sent, error: `Apple said: ${[...new Set(failures)].join('; ')}` } : { sent };
 }
 
 async function createBriefing(userId, { kind, title, body, source = 'proactive', metadata = {}, push = true }) {
@@ -9014,6 +9017,22 @@ app.get('/agent/home', requireSessionAuth, async (req, res) => {
 
 // Adam's record of what it noticed, did, asked and scheduled. Built from where those are recorded
 // (action log, schedules, approvals, notices, finished durable work), never from the chat transcript.
+// Where Adam's steps fail, by action and plain cause, for the signed-in user.
+app.get('/agent/reports/failures', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const days = Math.min(30, Math.max(1, Number.parseInt(req.query.days, 10) || 7));
+  try {
+    const { data, error } = await supabase.from('action_log').select('action, status, error, created_at')
+      .eq('user_id', userId).gte('created_at', new Date(Date.now() - days * 86400000).toISOString())
+      .order('created_at', { ascending: false }).limit(2000);
+    if (error) throw error;
+    res.json(failureReport.buildFailureReport(data || [], { days }));
+  } catch (e) {
+    res.status(500).json({ error: 'Could not build the failure report.' });
+  }
+});
+
 app.get('/agent/activity', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
