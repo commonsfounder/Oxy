@@ -39,3 +39,13 @@ test('the report counts failures per action and cause, recent rows only', () => 
   assert.strictEqual(report.actions[0].action, 'browser_open');
   assert.strictEqual(report.actions[0].failureRate, 0.5);
 });
+
+test('a failed result gets one plain next step, a working one does not', () => {
+  const { normalizeActionOutcome } = require('../../api/services/action-outcome');
+  const failed = normalizeActionOutcome({ success: false, error: 'https://x.com is blocking automated access (bot wall).' });
+  assert.match(failed.nextStep, /another site/i);
+  const odd = normalizeActionOutcome({ success: false, error: 'something odd' });
+  assert.strictEqual(odd.nextStep, undefined);
+  const ok = normalizeActionOutcome({ success: true, text: 'done' });
+  assert.strictEqual(ok.nextStep, undefined);
+});

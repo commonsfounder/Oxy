@@ -154,6 +154,7 @@ const agentApprovals = require('./services/agent-approval-runtime');
 const reactions = require('./services/reactions');
 const activityFeed = require('./services/activity-feed');
 const failureReport = require('./services/failure-report');
+const connectorState = require('./services/connector-state');
 const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
@@ -1117,8 +1118,10 @@ async function sendPushToUser(userId, briefing) {
   const defaultSandbox = process.env.APNS_USE_SANDBOX === 'true';
   let sent = 0;
   const failures = [];
-  await Promise.all(devices
-    .filter(device => device.platform === 'ios' && device.push_token)
+  // Apple device tokens are 64 hex characters; anything much shorter is a leftover test row.
+  const phones = devices.filter(device => device.platform === 'ios' && String(device.push_token || '').length >= 32);
+  if (!phones.length) return { sent: 0, error: 'No phone is registered for notifications. Open Adam on your iPhone and allow notifications.' };
+  await Promise.all(phones
     .map(async device => {
       const host = apns.apnsHost(device.apns_environment, defaultSandbox);
       const result = await apns.sendApns({
@@ -3903,14 +3906,17 @@ async function cancelApprovalRun(userId, pendingAction) {
 async function getEnabledConnectors(userId, trace = null) {
   const fetchConnectors = () => supabase
     .from('connectors')
-    .select('connector_id')
+    .select('connector_id, tokens')
     .eq('user_id', userId)
     .eq('enabled', true);
   const { data, error } = trace
     ? await trace.run('supabase.connectors.fetch_enabled', fetchConnectors)
     : await fetchConnectors();
   if (error || !data) return [];
-  return data.map(c => c.connector_id);
+  // A switched-on account connection with no login cannot act, so it is not offered as a capability.
+  return data
+    .filter(c => !connectorState.needsLogin(CONNECTORS.find(def => def.id === c.connector_id), true, c.tokens))
+    .map(c => c.connector_id);
 }
 
 function buildAvailableActions(enabled) {
@@ -5115,8 +5121,7 @@ app.get('/connectors/:userId', async (req, res) => {
       const { connected, ...presentation } = c;
       const row = rowsById.get(c.id);
       const enabled = row?.enabled === true;
-      const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session || row?.tokens?.encrypted);
-      const needsReconnect = (c.id === 'google' || c.id === 'microsoft') && enabled && !hasRefreshToken;
+      const needsReconnect = connectorState.needsLogin(CONNECTORS.find(def => def.id === c.id), enabled, row?.tokens);
       const needsSetup = (c.id === 'maps' && !(process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY))
         || (c.id === 'microsoft' && !(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET));
       const degraded = c.id === 'trainline' && (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY);

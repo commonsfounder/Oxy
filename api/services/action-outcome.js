@@ -39,6 +39,11 @@ function normalizeActionOutcome(result = {}, overrides = {}) {
   if (outcome === 'simulated') normalized.simulated = true;
   if (outcome === 'unavailable') normalized.unavailable = true;
   if (outcome === 'incomplete') normalized.incomplete = true;
+  // A failed step says what to do next, so the reply is never just "it didn't work".
+  if ((outcome === 'failed' || outcome === 'unavailable') && !normalized.nextStep && normalized.error) {
+    const nextStep = require('./failure-report').nextStepFor(normalized.error);
+    if (nextStep) normalized.nextStep = nextStep;
+  }
   return normalized;
 }
 

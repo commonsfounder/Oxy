@@ -23,6 +23,23 @@ function causeOf(error) {
   return hit ? hit[0] : 'other';
 }
 
+// One plain sentence on what to do next, per cause. Null where there is nothing useful to say.
+const NEXT_STEPS = {
+  bot_wall: 'That site blocks automated browsing. Try another site, or open it yourself.',
+  blank_page: 'That site loaded as a blank page, which usually means it blocks automated browsing. Try another site.',
+  error_page: "That address didn't work. Try the site's home page or its search box.",
+  control_missing: 'The page changed. Look at it again and pick from the new list.',
+  timeout: 'It took too long. Try again in a moment.',
+  not_connected: 'Reconnect it in Settings, then ask me again.',
+  needs_you: 'This is waiting on you.',
+  rate_limited: 'Too many requests. Wait a minute and try again.',
+  provider_down: 'The service is having trouble. Try again shortly.',
+};
+
+function nextStepFor(error) {
+  return NEXT_STEPS[causeOf(error)] || null;
+}
+
 const FAILED_OUTCOMES = new Set(['failed', 'unavailable']);
 
 // One step from a live /chat result: { action, result: { outcome, success, error }, input }.
@@ -88,4 +105,4 @@ function buildFailureReport(rows, { days = 7, now = new Date() } = {}) {
   };
 }
 
-module.exports = { causeOf, stepFrom, summarizeTurn, buildFailureReport, CAUSES };
+module.exports = { nextStepFor, causeOf, stepFrom, summarizeTurn, buildFailureReport, CAUSES };
