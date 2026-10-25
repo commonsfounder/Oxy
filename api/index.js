@@ -156,6 +156,7 @@ const activityFeed = require('./services/activity-feed');
 const failureReport = require('./services/failure-report');
 const connectorState = require('./services/connector-state');
 const clientIp = require('./services/client-ip');
+const usageMeter = require('./services/usage-meter');
 const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
@@ -7110,7 +7111,20 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
   res.json(result);
 }
 
-app.post('/chat', chatRateLimiter, async (req, res) => {
+// Every chat turn gets its own usage meter; the JSON reply carries what the turn used and cost.
+function chatUsageMeter(req, res, next) {
+  usageMeter.runWithMeter((turn) => {
+    const json = res.json.bind(res);
+    res.json = (body) => (body && typeof body === 'object' && !Array.isArray(body) && body.error === undefined && turn.calls
+      ? json({ ...body, usage: usageMeter.summarise(turn) })
+      : json(body));
+    next();
+  });
+}
+
+app.get('/agent/reports/usage', requireSessionAuth, (req, res) => res.json(usageMeter.lifetimeReport()));
+
+app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
   const streaming = req.query.stream === 'true';
   const requestStarted = Date.now();
 

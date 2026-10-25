@@ -82,6 +82,7 @@ async function runTask(token, task) {
       ...base, ms,
       ...grade(task, body.text || '', actions),
       answer: String(body.text || '').slice(0, 1200),
+      usage: body.usage || null,
       steps: turn.steps,
       failures: turn.failures,
       firstFailure: turn.firstFailure,
@@ -99,6 +100,10 @@ function report(results) {
   const times = results.map((r) => r.ms).sort((a, b) => a - b);
   console.log(`\n${results.length} tasks, median ${times[Math.floor(times.length / 2)]}ms, slowest ${times[times.length - 1]}ms`);
   console.log('failed steps by cause:', JSON.stringify(byCause));
+  const cost = results.reduce((sum, r) => sum + (r.usage?.estimatedUsd || 0), 0);
+  const reasoning = results.reduce((sum, r) => sum + (r.usage?.reasoningTokens || 0), 0);
+  const output = results.reduce((sum, r) => sum + (r.usage?.outputTokens || 0), 0);
+  console.log(`estimated model cost: $${cost.toFixed(4)} (about $${(cost / Math.max(1, results.length)).toFixed(4)} a task); ${reasoning} of ${output} output tokens were reasoning`);
   for (const r of results) {
     const where = r.firstFailure ? ` first failure: ${r.firstFailure.action} (${r.firstFailure.cause})` : '';
     console.log(`${String(r.ms).padStart(7)}ms  ${r.grade.padEnd(9)} ${r.id.padEnd(28)} ${(r.steps || []).map((s) => s.action).join(',') || '(no actions)'}${where}`);

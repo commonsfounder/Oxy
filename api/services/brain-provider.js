@@ -4,6 +4,7 @@
 // No cross-provider fallback; unknown throws.
 
 const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
+const usageMeter = require('./usage-meter');
 
 // Minimum output cap so short-answer callers still get visible text.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
@@ -123,6 +124,14 @@ async function postOpenAIResponses(body) {
   return res;
 }
 
+// Reads a Responses API reply and records what it used.
+async function readResponses(res, model) {
+  const json = await res.json();
+  const webSearches = (json.output || []).filter((item) => item.type === 'web_search_call').length;
+  usageMeter.record(json.model || model, json.usage, { webSearches });
+  return json;
+}
+
 function responsesText(json) {
   return (json.output || [])
     .filter((item) => item.type === 'message')
@@ -189,13 +198,14 @@ async function* sseData(res) {
 }
 
 // Responses API stream -> Gemini-shaped chunks; function calls arrive whole in output_item.done.
-async function* streamResponsesSSE(res) {
+async function* streamResponsesSSE(res, model) {
   const calls = [];
   for await (const data of sseData(res)) {
     let ev;
     try { ev = JSON.parse(data); } catch { continue; }
     if (ev.type === 'response.output_text.delta' && ev.delta) yield { text: ev.delta, candidates: [] };
     else if (ev.type === 'response.output_item.done' && ev.item?.type === 'function_call') calls.push(ev.item);
+    else if (ev.type === 'response.completed' && ev.response?.usage) usageMeter.record(ev.response.model || model, ev.response.usage);
     else if (ev.type === 'response.failed' || ev.type === 'error') {
       throw new Error(`OpenAI stream failed: ${ev.response?.error?.message || ev.message || ev.type}`);
     }
@@ -312,7 +322,7 @@ async function* compatibleStream({ provider, model, contents, config }) {
   const resolvedModel = resolveBrainModel(provider, model);
   if (provider === 'openai') {
     const messages = toOpenAIMessages(contents, config?.systemInstruction);
-    yield* streamResponsesSSE(await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config, stream: true })));
+    yield* streamResponsesSSE(await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config, stream: true })), resolvedModel);
     return;
   }
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
@@ -334,7 +344,7 @@ async function compatibleGenerate({ provider, model, contents, config }) {
   if (provider === 'openai') {
     const messages = toOpenAIMessages(contents, config?.systemInstruction);
     const res = await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config }));
-    return responsesToGeminiShape(await res.json());
+    return responsesToGeminiShape(await readResponses(res, resolvedModel));
   }
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
@@ -347,6 +357,7 @@ async function compatibleGenerate({ provider, model, contents, config }) {
   });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
+  usageMeter.record(resolvedModel, json.usage);
   // Full Gemini shape, not just { text }: a reply carrying tool_calls has empty content, so
   // text-only would drop the call. `.text` still works for callers that only read it.
   return openAIResponseToGeminiShape(json);
@@ -396,7 +407,7 @@ function anthropicHeaders() {
 
 function anthropicRequestBody({ model, contents, config, stream = false, tools = [] }) {
   const body = {
-    model: model || process.env.OXY_ANTHROPIC_MODEL || 'claude-sonnet-5',
+    model: model || process.env.OXY_ANTHROPIC_MODEL || 'claude-sonnet-5-5',
     max_tokens: Math.max(config?.maxOutputTokens || 0, 768),
     messages: toAnthropicMessages(contents),
     stream
@@ -455,7 +466,9 @@ async function anthropicGenerate({ model, contents, config, tools = [] }) {
     body: JSON.stringify(anthropicRequestBody({ model, contents, config, tools }))
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  return anthropicResponseToGeminiShape(await res.json());
+  const json = await res.json();
+  usageMeter.record(model, json.usage);
+  return anthropicResponseToGeminiShape(json);
 }
 
 // Async iterable of { text, candidates } chunks. Awaitable for every provider; the Groq
@@ -489,7 +502,7 @@ async function webSearchBrain({ model, prompt, provider }) {
       tools: [{ type: 'web_search' }],
       reasoning: { effort: searchEffort() }
     });
-    const text = responsesText(await res.json()).trim();
+    const text = responsesText(await readResponses(res, model)).trim();
     return text;
   }
   return '';
@@ -623,7 +636,7 @@ async function callToolsBrain({ provider, model, contents, config }) {
   if (p === 'openai') {
     const messages = toOpenAIToolMessages(contents, config?.systemInstruction);
     const res = await postOpenAIResponses(openAIResponsesBody({ model: resolvedModel, messages, config }));
-    return responsesToGeminiShape(await res.json());
+    return responsesToGeminiShape(await readResponses(res, resolvedModel));
   }
   const tools = geminiToolsToOpenAI(config?.tools);
   const body = {
@@ -641,7 +654,9 @@ async function callToolsBrain({ provider, model, contents, config }) {
     body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(`${p} ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  return openAIResponseToGeminiShape(await res.json());
+  const chatJson = await res.json();
+  usageMeter.record(resolvedModel, chatJson.usage);
+  return openAIResponseToGeminiShape(chatJson);
 }
 
 module.exports = {

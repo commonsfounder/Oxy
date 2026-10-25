@@ -93,7 +93,7 @@ function defaultModelForProvider(provider, role = 'reasoning', env = process.env
 
   switch (normalised) {
     case 'openai': return 'gpt-6-luna';
-    case 'anthropic': return 'claude-sonnet-5';
+    case 'anthropic': return role === 'fast' ? 'claude-haiku-5-5' : 'claude-sonnet-5-5';
     case 'groq': return 'llama-3.3-70b-versatile';
     case 'local': return 'llama3.2';
     default: return 'gpt-6-luna';
