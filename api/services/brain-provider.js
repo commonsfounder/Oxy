@@ -94,7 +94,15 @@ function chatMessagesToResponsesInput(messages) {
       input.push({ type: 'function_call', call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments });
     }
   }
-  if (turnContext.length) input.unshift({ role: 'developer', content: `Context for this turn:\n${turnContext.join('\n\n')}` });
+  // Anything that changes at the front of a request invalidates the whole cached prefix, so this
+  // turn's context sits just before the current user message, after the fixed prompt, the tools
+  // and the earlier conversation, all of which stay the same from call to call.
+  if (turnContext.length) {
+    let lastUser = -1;
+    input.forEach((item, index) => { if (item.role === 'user') lastUser = index; });
+    const note = { role: 'developer', content: `Context for this turn:\n${turnContext.join('\n\n')}` };
+    if (lastUser === -1) input.push(note); else input.splice(lastUser, 0, note);
+  }
   return { instructions: instructions.join('\n\n'), input };
 }
 

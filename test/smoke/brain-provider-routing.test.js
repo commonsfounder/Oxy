@@ -137,12 +137,15 @@ test('the fixed prompt and tools come first; this turn\'s context follows them i
   const { buildSystemPrompt } = require('../../api/prompts');
   const turnA = buildSystemPrompt({ surface: 'chat', context: { now: 'Monday 09:00', memory: 'likes tea' } });
   const turnB = buildSystemPrompt({ surface: 'chat', context: { now: 'Monday 09:05', memory: 'likes coffee' } });
-  const a = chatMessagesToResponsesInput([{ role: 'system', content: turnA }, { role: 'user', content: 'hi' }]);
-  const b = chatMessagesToResponsesInput([{ role: 'system', content: turnB }, { role: 'user', content: 'hi' }]);
+  const a = chatMessagesToResponsesInput([{ role: 'system', content: turnA }, { role: 'user', content: 'earlier question' }, { role: 'assistant', content: 'earlier answer' }, { role: 'user', content: 'hi' }]);
+  const b = chatMessagesToResponsesInput([{ role: 'system', content: turnB }, { role: 'user', content: 'earlier question' }, { role: 'assistant', content: 'earlier answer' }, { role: 'user', content: 'hi' }]);
   assert.strictEqual(a.instructions, b.instructions, 'the instructions are the same on every turn');
   assert.ok(a.instructions.length > 5000);
-  assert.strictEqual(a.input[0].role, 'developer');
-  assert.match(a.input[0].content, /Context for this turn/);
+  // the context sits just before the current user message, never at the front
+  assert.strictEqual(a.input[0].role, 'user');
+  assert.strictEqual(a.input[0].content, 'earlier question');
+  assert.strictEqual(a.input[a.input.length - 2].role, 'developer');
+  assert.match(a.input[a.input.length - 2].content, /Context for this turn/);
   assert.strictEqual(a.input[a.input.length - 1].content, 'hi');
 });
 
