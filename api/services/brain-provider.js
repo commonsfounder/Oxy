@@ -5,6 +5,7 @@
 
 const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
 const usageMeter = require('./usage-meter');
+const { splitSystemPrompt } = require('../prompts');
 
 // Minimum output cap so short-answer callers still get visible text.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
@@ -64,9 +65,17 @@ function searchEffort() {
 // chat-style messages -> Responses API instructions + input items.
 function chatMessagesToResponsesInput(messages) {
   const instructions = [];
+  const turnContext = [];
   const input = [];
   for (const m of messages || []) {
-    if (m.role === 'system') { instructions.push(m.content); continue; }
+    if (m.role === 'system') {
+      // The fixed opening goes in `instructions`; this turn's own context goes after the tools,
+      // in the input, so the long fixed prefix stays identical between turns and caches.
+      const { stable, dynamic } = splitSystemPrompt(typeof m.content === 'string' ? m.content : '');
+      if (stable) instructions.push(stable);
+      if (dynamic) turnContext.push(dynamic);
+      continue;
+    }
     if (m.role === 'tool') {
       input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: m.content });
       continue;
@@ -85,6 +94,7 @@ function chatMessagesToResponsesInput(messages) {
       input.push({ type: 'function_call', call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments });
     }
   }
+  if (turnContext.length) input.unshift({ role: 'developer', content: `Context for this turn:\n${turnContext.join('\n\n')}` });
   return { instructions: instructions.join('\n\n'), input };
 }
 
@@ -102,6 +112,8 @@ function openAIResponsesBody({ model, messages, config = {}, stream = false }) {
       + (REASONING_HEADROOM[effort] ?? REASONING_HEADROOM.xhigh)
   };
   if (instructions) body.instructions = instructions;
+  // Same key for every user: the fixed prompt and tools are shared, so requests land on one cache.
+  if (process.env.OXY_PROMPT_CACHE_KEY !== 'off') body.prompt_cache_key = 'adam-chat-v1';
   if (stream) body.stream = true;
   const tools = geminiToolsToOpenAI(config.tools);
   if (tools.length) {

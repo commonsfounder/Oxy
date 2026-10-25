@@ -131,3 +131,24 @@ test('only OpenAI grounds; other providers return empty without calling anything
     assert.equal(seen.url, undefined, 'no request should be attempted for a provider that cannot ground');
   });
 });
+
+test('the fixed prompt and tools come first; this turn\'s context follows them in the input', () => {
+  const { chatMessagesToResponsesInput } = require('../../api/services/brain-provider');
+  const { buildSystemPrompt } = require('../../api/prompts');
+  const turnA = buildSystemPrompt({ surface: 'chat', context: { now: 'Monday 09:00', memory: 'likes tea' } });
+  const turnB = buildSystemPrompt({ surface: 'chat', context: { now: 'Monday 09:05', memory: 'likes coffee' } });
+  const a = chatMessagesToResponsesInput([{ role: 'system', content: turnA }, { role: 'user', content: 'hi' }]);
+  const b = chatMessagesToResponsesInput([{ role: 'system', content: turnB }, { role: 'user', content: 'hi' }]);
+  assert.strictEqual(a.instructions, b.instructions, 'the instructions are the same on every turn');
+  assert.ok(a.instructions.length > 5000);
+  assert.strictEqual(a.input[0].role, 'developer');
+  assert.match(a.input[0].content, /Context for this turn/);
+  assert.strictEqual(a.input[a.input.length - 1].content, 'hi');
+});
+
+test('a system text that is not one of the fixed prompts is left whole', () => {
+  const { chatMessagesToResponsesInput } = require('../../api/services/brain-provider');
+  const out = chatMessagesToResponsesInput([{ role: 'system', content: 'You are a test.' }, { role: 'user', content: 'x' }]);
+  assert.strictEqual(out.instructions, 'You are a test.');
+  assert.strictEqual(out.input.length, 1);
+});

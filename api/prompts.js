@@ -514,6 +514,17 @@ BRIEFING RULES:
  * Build a complete system prompt for one of Adam's surfaces.
  * @param {{surface?: 'chat'|'quick'|'background'|'briefing', context?: object}} args
  */
+// Every system prompt opens with one of these fixed texts, then adds what is true for this turn
+// only (time, the person's context). The provider layer sends the fixed part first, so it and the
+// tool list after it are identical from turn to turn and can be cached.
+function splitSystemPrompt(text) {
+  const value = String(text || '');
+  for (const stable of [CHAT_STATIC_PROMPT, BACKGROUND_STATIC_PROMPT, BRIEFING_STATIC_PROMPT]) {
+    if (value.startsWith(stable)) return { stable, dynamic: value.slice(stable.length).trim() };
+  }
+  return { stable: value, dynamic: '' };
+}
+
 function buildSystemPrompt({ surface = 'chat', context = {} } = {}) {
   switch (surface) {
     case 'quick':
@@ -533,5 +544,6 @@ module.exports = {
   CORE_SYSTEM_PROMPT: CHAT_STATIC_PROMPT,
   BACKGROUND_STATIC_PROMPT,
   BRIEFING_STATIC_PROMPT,
-  buildSystemPrompt
+  buildSystemPrompt,
+  splitSystemPrompt
 };
