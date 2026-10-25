@@ -155,6 +155,7 @@ const reactions = require('./services/reactions');
 const activityFeed = require('./services/activity-feed');
 const failureReport = require('./services/failure-report');
 const connectorState = require('./services/connector-state');
+const clientIp = require('./services/client-ip');
 const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
@@ -898,7 +899,7 @@ const audioRateLimit = new Map();
 
 function requestIp(req) {
   // Fly sets this itself; a caller cannot choose it. The last forwarded hop is the proxy's own entry.
-  return String(req.headers['fly-client-ip'] || '').trim()
+  return clientIp.resolveClientIp(req.headers, { trustCloudflare: process.env.OXY_TRUST_CLOUDFLARE === 'on' })
     || String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()
     || req.ip
     || req.socket?.remoteAddress
