@@ -1,4 +1,13 @@
 const { TelegramClient } = require('telegram');
+
+// disconnect() leaves gramJS's update loop running, which then logs TIMEOUT every few seconds
+// and piles up with each use; destroy() stops it for good.
+async function closeClient(client) {
+  try {
+    if (typeof client.destroy === 'function') await client.destroy();
+    else await client.disconnect();
+  } catch { /* already closed */ }
+}
 const { StringSession } = require('telegram/sessions');
 const { Api } = require('telegram');
 const { computeCheck } = require('telegram/Password');
@@ -76,7 +85,7 @@ async function startAuth(userId, phone) {
     });
     return { success: true, message: 'Code sent to your Telegram' };
   } finally {
-    await client.disconnect().catch(() => {});
+    await closeClient(client);
   }
 }
 
@@ -101,7 +110,7 @@ async function verifyCode(userId, code) {
     }
     throw err;
   } finally {
-    await client.disconnect().catch(() => {});
+    await closeClient(client);
   }
 }
 
@@ -119,7 +128,7 @@ async function verify2FA(userId, password) {
     await saveStoredTokens(userId, { session });
     return { success: true };
   } finally {
-    await client.disconnect().catch(() => {});
+    await closeClient(client);
   }
 }
 
@@ -146,7 +155,7 @@ async function getSelfDestination(userId) {
   } catch {
     return null;
   } finally {
-    if (client) await client.disconnect().catch(() => {});
+    if (client) await closeClient(client);
   }
 }
 
@@ -206,7 +215,7 @@ async function execute(userId, action, params) {
   } catch (err) {
     return { success: false, error: `Telegram error: ${err.message}`, ...classifyTelegramError(err) };
   } finally {
-    if (client) await client.disconnect().catch(() => {});
+    if (client) await closeClient(client);
   }
 }
 

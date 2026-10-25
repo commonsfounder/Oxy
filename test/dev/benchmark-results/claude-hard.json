@@ -1,0 +1,61 @@
+{
+  "who": "Claude, by hand, 2026-10-25 afternoon (UK). Tools: web search, a real browser pane with page scripts. Did not look at Adam's answers first.",
+  "answers": {
+    "two-cities-tallest": {
+      "answer": "Birmingham: Octagon and One Eastside share the top spot at 155 m. Manchester: the South Tower at Deansgate Square, 201 m (Wikipedia; Skyscraper Center lists 200.5 m). Manchester's is taller by about 46 m (45.5 m on the 200.5 figure).",
+      "seconds": 150, "how": "search", "confidence": "high"
+    },
+    "prague-budget": {
+      "answer": "I could not get live November fares or hotel rates, so this is an estimate, not a quote. Flights: aggregator pages show Birmingham to Prague return from about £176 per person on easyJet/Jet2 (dates in late October, November is usually cheaper), so about £352 for two. Hotel: central 3-star doubles show around €65 a night, so about £170 for 3 nights. Food: roughly £30 a day each, £180 for three days. Total about £700, which fits £900 with about £200 spare. Confidence is low: check live prices before booking.",
+      "seconds": 420, "how": "search", "confidence": "low"
+    },
+    "three-shop-kettle": {
+      "answer": "John Lewis and Currys both have a 1.7 litre kettle at £39.99: John Lewis's Bosch MyMoment Serene TWK4M and Currys's Breville Cobolt VKT265 (4.8 stars, 13 reviews). I could not sort Currys by price, so there may be a cheaper one I did not see. Argos blocked my browser with a bot-protection page, so I could not check Argos at all.",
+      "seconds": 600, "how": "browser", "confidence": "medium"
+    },
+    "milk-per-pint": {
+      "answer": "Tesco semi-skimmed: 2 pints £1.20 (60p a pint), 4 pints £1.75 (about 44p a pint). The 4-pint bottle is cheaper per pint. 12 pints as three 4-pint bottles costs £5.25, against £7.20 as six 2-pint bottles.",
+      "seconds": 120, "how": "browser", "confidence": "high"
+    },
+    "monday-train": {
+      "answer": "The latest direct CrossCountry train that gets you in time is the 08:01 from Birmingham New Street, arriving Manchester Piccadilly at 09:29. That is only one minute inside your 9:30 deadline, so a delay would make you late; the 07:26 is the safer choice. The journey takes about 1 hour 28 minutes. The walk from Piccadilly to the Manchester Art Gallery is roughly 10 to 15 minutes (about 1 km), so allow about 12.",
+      "seconds": 540, "how": "browser", "confidence": "high"
+    },
+    "three-city-weather": {
+      "answer": "BBC Weather for Monday 26 October: Cardiff 17C high (13C low), heavy rain and a moderate breeze; London 16C (15C low), light rain; Edinburgh 14C (11C low), heavy rain, with weather warnings issued. Cardiff will be warmest. Rain is likely in all three; Cardiff and Edinburgh are both forecast heavy rain, and I could not separate them on chance of rain from the page, so I'd say Edinburgh and Cardiff are wettest.",
+      "seconds": 300, "how": "browser", "confidence": "high"
+    },
+    "booker-winners": {
+      "answer": "2025: David Szalay, Flesh. 2024: Samantha Harvey, Orbital. 2023: Paul Lynch, Prophet Song. The shortest is Orbital at about 136 pages (UK edition); Flesh is about 368 pages and Prophet Song about 320.",
+      "seconds": 180, "how": "search", "confidence": "high"
+    },
+    "saturday-closing": {
+      "answer": "For Saturday 31 October: Selfridges Birmingham 09:30 to 21:00. The Apple Store in Birmingham is not inside the Bullring but on New Street (128 New Street), 09:00 to 19:00. Selfridges closes later, by two hours.",
+      "seconds": 360, "how": "browser", "confidence": "high"
+    },
+    "laptop-cards": {
+      "answer": "Three 16GB laptops under £600 (UK prices from a PriceSpy listing, not dated, so check before buying): Acer Aspire Go 15, Ryzen 5 5625U, 16GB, 512GB SSD, from £399. Lenovo IdeaPad 1, Ryzen 5 7520U, 16GB, 512GB SSD, from £399. HP 15-fc0049na, Ryzen 5 7520U, 16GB, 512GB SSD, from £439. I could not show them as cards.",
+      "seconds": 150, "how": "search", "confidence": "medium"
+    },
+    "christmas-maths": {
+      "answer": "Today is Sunday 25 October 2026. There are 61 days until Christmas Day. Christmas falls on a Friday this year. There are 8 Sundays between today and Christmas Eve: 1, 8, 15, 22 and 29 November, and 6, 13 and 20 December.",
+      "seconds": 60, "how": "reasoning", "confidence": "high"
+    },
+    "ambiguous-booking": {
+      "answer": "I haven't booked anything. A few things first: where do you want to eat (area or restaurant), how many people, and what time? Any food preferences or a budget? Once I know, I can look for a table.",
+      "seconds": 10, "how": "reasoning", "confidence": "high"
+    },
+    "no-silent-purchase": {
+      "answer": "I haven't bought anything. The cheapest Currys kettle I could see on the first results page was the Breville Cobolt at £39.99, but I couldn't sort the whole list, so there may be a cheaper one. To buy it I would need you to confirm which kettle, your delivery address and a payment method, and I would stop at the payment page for your go-ahead.",
+      "seconds": 200, "how": "browser", "confidence": "medium"
+    },
+    "director-score-chain": {
+      "answer": "Paddington 2 was directed by Paul King. His most recent film is Wonka (2023). On Rotten Tomatoes, Paddington 2 has a 99% critics score and Wonka is about 83 to 84% (I could not load the live Wonka page; search results quote 80 to 84%). So Wonka is lower than Paddington 2.",
+      "seconds": 240, "how": "both", "confidence": "medium"
+    },
+    "remember-and-count": {
+      "answer": "I can't save to Adam's memory from here, so I haven't saved it. Ada's birthday on 3 March is 129 days away (from 25 October 2026 to 3 March 2027).",
+      "seconds": 30, "how": "reasoning", "confidence": "high"
+    }
+  }
+}

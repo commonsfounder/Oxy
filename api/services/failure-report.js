@@ -11,6 +11,7 @@ const CAUSES = [
   ['timeout', /timed? ?out|timeout|took too long|aborted/i],
   ['not_connected', /not connected|connect (?:it|your|the)|reconnect|sign in again|no connector|not configured|isn'?t set up/i],
   ['needs_you', /need(?:s)? your|enable location|waiting for (?:your )?approval|needs? (?:a )?review/i],
+  ['out_of_credit', /insufficient_quota|exceeded your current quota|out of credit/i],
   ['rate_limited', /rate limit|too many requests|\b429\b/i],
   ['provider_down', /\b5\d\d\b|upstream|provider|overloaded|service unavailable/i],
   ['bad_input', /requires|missing|invalid|needs? at least/i],
@@ -32,6 +33,7 @@ const NEXT_STEPS = {
   timeout: 'It took too long. Try again in a moment.',
   not_connected: 'Reconnect it in Settings, then ask me again.',
   needs_you: 'This is waiting on you.',
+  out_of_credit: 'The AI provider account is out of credit. Top it up, then try again.',
   rate_limited: 'Too many requests. Wait a minute and try again.',
   provider_down: 'The service is having trouble. Try again shortly.',
 };

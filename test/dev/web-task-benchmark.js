@@ -3,7 +3,7 @@
 // Public-web task benchmark: the same read-only tasks can be given to Adam and done by hand,
 // then compared. Runs against a live deployment as a test account (it leaves chat history behind).
 //
-//   node test/dev/web-task-benchmark.js [--suite=web|multistep] [--id=a,b] [--out=path]
+//   node test/dev/web-task-benchmark.js [--suite=web|multistep|hard] [--id=a,b] [--out=path]
 //   BASE_URL (default the Fly app)   OXY_BENCH_USER (default demo-test-user)
 //
 // Each task has an optional automatic check; tasks without one are graded by reading the answer
@@ -36,7 +36,7 @@ const WEB_TASKS = [
   { id: 'walk-bullring', kind: 'live', message: 'How long does it take to walk from Birmingham New Street station to the Bullring?' },
 ];
 
-const SUITES = { web: WEB_TASKS, multistep: require('./benchmark-multistep-tasks') };
+const SUITES = { web: WEB_TASKS, multistep: require('./benchmark-multistep-tasks'), hard: require('./benchmark-hard-tasks') };
 
 function matches(pattern, text) {
   const [regex, count] = Array.isArray(pattern) ? pattern : [pattern, 1];
@@ -51,6 +51,7 @@ function grade(task, text, actions) {
   const miss = (label, ok) => checks.push({ label, ok });
   if (task.expectAction) miss(`used ${task.expectAction}`, names.includes(task.expectAction));
   for (const name of task.expectActions || []) miss(`used ${name}`, names.includes(name));
+  for (const name of task.forbidActions || []) miss(`did not use ${name}`, !names.includes(name));
   if (task.expectAny) miss(`used one of ${task.expectAny.join('/')}`, task.expectAny.some((n) => names.includes(n)));
   if (task.minSteps) miss(`took at least ${task.minSteps} steps`, actions.length >= task.minSteps);
   for (const pattern of task.expectText || []) miss(`answer matches ${Array.isArray(pattern) ? `${pattern[0]} x${pattern[1]}` : pattern}`, matches(pattern, text));

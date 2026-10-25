@@ -49,3 +49,8 @@ test('a failed result gets one plain next step, a working one does not', () => {
   const ok = normalizeActionOutcome({ success: true, text: 'done' });
   assert.strictEqual(ok.nextStep, undefined);
 });
+
+test('an out-of-credit provider is named as such, not as a rate limit', () => {
+  assert.strictEqual(causeOf('OpenAI 429: {"type": "insufficient_quota"}'), 'out_of_credit');
+  assert.strictEqual(causeOf('Too many requests, 429'), 'rate_limited');
+});

@@ -52,7 +52,28 @@ function noSession() {
 
 // ── Browser primitives ──────────────────────────────────────────────────────────────────
 
+// A site that has just blocked the browser is not tried again for a while, so a turn does not
+// spend minutes re-opening it.
+const BLOCKED_SITE_TTL_MS = 10 * 60 * 1000;
+const blockedSites = new Map();
+function siteLabel(url, site) {
+  try { return new URL(String(url)).hostname.replace(/^www\./, ''); } catch { /* not a url */ }
+  return String(site || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+}
+function recentlyBlocked(userId, label) {
+  const at = blockedSites.get(`${userId}|${label}`);
+  return Boolean(label && at && Date.now() - at < BLOCKED_SITE_TTL_MS);
+}
+
 async function browserOpen({ userId, params, context }) {
+  const label = siteLabel(params?.url, params?.site);
+  if (recentlyBlocked(userId, label)) {
+    return {
+      success: false,
+      outcome: 'unavailable',
+      error: `${label} blocked the browser a moment ago, so I am not trying it again. A different site, or doing this part yourself, is the way through.`,
+    };
+  }
   try {
     const observation = await browserEnvironment.open(userId, {
       url: String(params?.url || '').trim(),
@@ -63,6 +84,7 @@ async function browserOpen({ userId, params, context }) {
       workflowId: context?.workflowId || null,
     });
     if (observation.blocked) {
+      blockedSites.set(`${userId}|${siteLabel(observation.url, params?.site) || label}`, Date.now());
       return {
         success: false,
         outcome: 'unavailable',
@@ -71,6 +93,7 @@ async function browserOpen({ userId, params, context }) {
       };
     }
     if (observation.pageProblem === 'blank') {
+      blockedSites.set(`${userId}|${siteLabel(observation.url, params?.site) || label}`, Date.now());
       return {
         success: false,
         outcome: 'unavailable',
@@ -435,7 +458,7 @@ async function webSearchAction({ userId, action, params, enrichedParams, context
   try {
     const answer = await webSearchBrain({
       model: FAST_MODEL,
-      prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`
+      prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. For a record or a current ranking (tallest, biggest, newest, latest), prefer the most recent authoritative source such as Wikipedia, an official page or a recent news report, check the date, and if sources disagree say which is newer instead of picking one silently. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`
     });
     if (!answer) return { success: false, error: `Search for "${q}" returned no results.` };
     return { success: true, text: String(answer).replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, ''), query: q };

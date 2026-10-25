@@ -786,6 +786,10 @@ app.use((req, res, next) => {
         return json({ ...body, error: 'That id is not valid.' });
       }
       console.error('route 500:', raw.slice(0, 300));
+      if (/insufficient_quota|exceeded your current quota/i.test(raw)) {
+        res.status(503);
+        return json({ ...body, error: "Adam can't think right now: the AI provider account is out of credit.", code: 'ai_out_of_credit' });
+      }
       return json({ ...body, error: 'Something went wrong.' });
     }
     return json(body);
