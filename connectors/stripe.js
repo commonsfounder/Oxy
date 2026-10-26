@@ -52,7 +52,8 @@ async function execute(userId, action, params) {
   // the model and of whether the review gate was bypassed.
   if (SPEND_ACTIONS.has(action)) {
     const dollars = Number(params?.amount || 0);
-    const verdict = await guardConciergeSpend(supabase, userId, dollars);
+    // Checked in the currency the charge will be made in, not assumed to be the cap's.
+    const verdict = await guardConciergeSpend(supabase, userId, dollars, resolveCurrencyForLocation(params?.location));
     if (!verdict.ok) return { success: false, error: verdict.error };
   }
 
