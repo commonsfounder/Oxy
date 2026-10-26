@@ -289,3 +289,19 @@ test('in production the shared Gmail token only serves the named owner', async (
   assert.equal(result.success, false);
   assert.match(result.error, /not configured/);
 });
+
+test('an old approval cannot be confirmed by a stray "yes"', async () => {
+  const { createApprovalRuntime } = require('../../api/services/agent-approval-runtime');
+  const now = new Date('2026-10-26T12:00:00Z');
+  const row = (id, hoursAgo) => ({ id, user_id: 'u', task_id: 't' + id, action_payload: { action: { type: 'send_email', input: { to: 'a@b.com', body: 'hi' } } }, created_at: new Date(now.getTime() - hoursAgo * 3600000).toISOString(), status: 'pending' });
+  let rows = [];
+  const supabase = { from: () => { const chain = { select: () => chain, eq: () => chain, order: () => chain, limit: () => Promise.resolve({ data: rows, error: null }) }; return chain; } };
+  const runtime = createApprovalRuntime(supabase, { now: () => now });
+  rows = [row('1', 2)];
+  assert.equal((await runtime.pending('u', 'yes')).approvalId, '1');
+  rows = [row('1', 30)];
+  assert.equal(await runtime.pending('u', 'yes'), null);
+  assert.equal((await runtime.pending('u', 'yes', { approvalId: '1', taskId: 't1' })).approvalId, '1');
+  rows = [row('1', 24 * 8)];
+  assert.equal(await runtime.pending('u', 'yes', { approvalId: '1', taskId: 't1' }), null);
+});

@@ -6,6 +6,10 @@ const APPROVAL_STATES = new Set(['pending', 'claimed', 'approved', 'cancelled', 
 const MAX_TEXT = 1200;
 const MAX_GOAL = 240;
 const MAX_ACTION_BYTES = 32000;
+// A bare "yes" in chat only reaches an approval raised in the last day, and a review tapped on its
+// own card only one raised in the last week. Older ones stay listed but can no longer be said yes to by accident.
+const TEXT_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CARD_DECISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'approve', 'approved', 'are', 'can', 'confirm', 'confirmed',
@@ -282,11 +286,16 @@ function createApprovalRuntime(supabase, { now = () => new Date() } = {}) {
     park,
     async pending(userId, message = '', selection = null) {
       const approvals = await list(userId);
+      const within = (approval, windowMs) => {
+        const created = Date.parse(approval.createdAt || '');
+        return !Number.isFinite(created) || now().getTime() - created <= windowMs;
+      };
       if (selection) {
         return approvals.find(approval => approval.approvalId === selection.approvalId
-          && approval.taskId === selection.taskId) || null;
+          && approval.taskId === selection.taskId
+          && within(approval, CARD_DECISION_WINDOW_MS)) || null;
       }
-      return selectPendingApproval(approvals, message);
+      return selectPendingApproval(approvals.filter(approval => within(approval, TEXT_REPLY_WINDOW_MS)), message);
     },
     async claim(userId, pending) {
       return claimApproval(supabase, userId, pending?.approvalId);
