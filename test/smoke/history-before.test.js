@@ -34,6 +34,10 @@ test('/history/:userId passes `before` to the conversations query', async () => 
   const seen = [];
   global.fetch = async (input, init) => {
     const url = String(input?.url || input);
+    if (url.startsWith(process.env.SUPABASE_URL) && url.includes('/rest/v1/users')) {
+      // The signed-in account exists; a session whose account is gone is refused.
+      return new Response('{"token_version":0}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.startsWith(process.env.SUPABASE_URL)) {
       seen.push(url);
       return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -63,6 +67,10 @@ test('/history/:userId ignores an unparseable `before` instead of failing', asyn
   const seen = [];
   global.fetch = async (input, init) => {
     const url = String(input?.url || input);
+    if (url.startsWith(process.env.SUPABASE_URL) && url.includes('/rest/v1/users')) {
+      // The signed-in account exists; a session whose account is gone is refused.
+      return new Response('{"token_version":0}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.startsWith(process.env.SUPABASE_URL)) {
       seen.push(url);
       return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });

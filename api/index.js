@@ -883,13 +883,15 @@ app.use((req, res, next) => {
     // Only check token_version if it's present in the token (backwards compat)
     if (tokenVersion !== undefined && tokenVersion !== null) {
       try {
-        const { data: userRow } = await supabase
+        const { data: userRow, error: lookupError } = await supabase
           .from('users')
           .select('token_version')
           .eq('user_id', userId)
           .maybeSingle();
-        if (userRow && userRow.token_version !== tokenVersion) {
-          log('warn', 'auth.middleware.rejected', { reason: 'token_version_mismatch', userId });
+        if (lookupError) throw lookupError;
+        // A deleted account has no row, and its old tokens must stop working with it.
+        if (!userRow || userRow.token_version !== tokenVersion) {
+          log('warn', 'auth.middleware.rejected', { reason: userRow ? 'token_version_mismatch' : 'account_missing', userId });
           return res.status(401).json({ error: 'Session expired' });
         }
       } catch (e) {
@@ -3982,15 +3984,17 @@ async function getUserAccount(userId) {
   return data;
 }
 
+// Email addresses match regardless of case; an exact match wins if two accounts differ only by case.
 async function getUserAccountByEmail(email) {
   const { data, error } = await supabase
     .from('users')
     .select('user_id, password_hash, token_version, email')
-    .eq('email', email)
-    .maybeSingle();
+    .ilike('email', escapeIlikePattern(email))
+    .limit(5);
 
   if (error) throw error;
-  return data;
+  const rows = data || [];
+  return rows.find(row => row.email === email) || (rows.length === 1 ? rows[0] : null);
 }
 
 async function getUserContext(userId, trace = null) {
@@ -4113,6 +4117,9 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
     const existing = await getUserAccount(userId);
     if (existing) {
       return res.status(409).json({ error: 'That user ID is already taken.' });
+    }
+    if (email && await getUserAccountByEmail(email)) {
+      return res.status(409).json({ error: 'That email is already registered.' });
     }
 
     const passwordHash = hashPassword(password);

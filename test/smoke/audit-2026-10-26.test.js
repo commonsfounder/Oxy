@@ -437,3 +437,42 @@ test('no query asks the live scheduled_tasks table for a column it does not have
   const src = require('node:fs').readFileSync(require.resolve('../../api/index'), 'utf8');
   assert.doesNotMatch(src, /from\('scheduled_tasks'\)\.select\('[^']*context_event/);
 });
+
+test('a deleted account loses its old session, and an email already in use is a clear 409', async (t) => {
+  const runtime = require('../../runtime');
+  process.env.OXY_SESSION_SECRET ||= 'test-session-secret';
+  process.env.SUPABASE_URL ||= 'https://example.supabase.co';
+  process.env.SUPABASE_KEY ||= 'test-key';
+  process.env.OPENAI_API_KEY ||= 'test-openai-key';
+  const users = [{ user_id: 'ann', token_version: 1, email: 'Ann@Example.com', password_hash: 'x' }];
+  const realFactory = runtime.createSupabaseServiceClient;
+  runtime.createSupabaseServiceClient = () => ({
+    from(table) {
+      const filters = [];
+      const rows = () => (table === 'users' ? users : []).filter((r) => filters.every((f) => f(r)));
+      const chain = {
+        select: () => chain, limit: () => chain,
+        eq: (c, v) => { filters.push((r) => r[c] === v); return chain; },
+        ilike: (c, p) => { filters.push((r) => String(r[c]).toLowerCase() === p.toLowerCase()); return chain; },
+        maybeSingle: () => Promise.resolve({ data: rows()[0] || null, error: null }),
+        insert: () => Promise.resolve({ error: null }),
+        then: (resolve) => resolve({ data: rows(), error: null })
+      };
+      return chain;
+    },
+    storage: {}
+  });
+  t.after(() => { runtime.createSupabaseServiceClient = realFactory; });
+  delete require.cache[require.resolve('../../api/index')];
+  const app = require('../../api/index');
+  const server = require('node:http').createServer(app);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const { createSessionToken } = require('../../auth');
+  const call = (token) => fetch(`${base}/memory/ann`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.notEqual((await call(createSessionToken('ann', 1))).status, 401);
+  assert.equal((await call(createSessionToken('gone', 1))).status, 401);
+  const dup = await fetch(`${base}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'ann2', password: 'longenough1', email: 'ann@example.com' }) });
+  assert.equal(dup.status, 409);
+});
