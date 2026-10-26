@@ -437,16 +437,18 @@ function anthropicRequestBody({ model, contents, config, stream = false, tools =
   return body;
 }
 
-async function* anthropicStream({ model, contents, config }) {
+async function* anthropicStream({ model, contents, config, tools = [] }) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: anthropicHeaders(),
-    body: JSON.stringify(anthropicRequestBody({ model, contents, config, stream: true }))
+    body: JSON.stringify(anthropicRequestBody({ model, contents, config, stream: true, tools }))
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  // Tool calls arrive in pieces: a start event naming the tool, then JSON fragments of its input.
+  const toolSlots = new Map();
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -458,10 +460,23 @@ async function* anthropicStream({ model, contents, config }) {
       if (!line.startsWith('data:')) continue;
       try {
         const event = JSON.parse(line.slice(5).trim());
+        if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+          toolSlots.set(event.index, { id: event.content_block.id, name: event.content_block.name, json: '' });
+        } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && toolSlots.has(event.index)) {
+          toolSlots.get(event.index).json += event.delta.partial_json || '';
+        }
         const text = event.delta?.type === 'text_delta' ? event.delta.text : '';
         if (text) yield { text, candidates: [] };
       } catch { /* ignore keepalive and partial frames */ }
     }
+  }
+  if (toolSlots.size) {
+    const functionCalls = [...toolSlots.values()].map((slot) => {
+      let args = {};
+      try { args = JSON.parse(slot.json || '{}'); } catch { console.warn(`[brain] Claude tool call ${slot.name} had unparseable input; passing {}`); }
+      return { id: slot.id, name: slot.name, args };
+    });
+    yield { text: '', functionCalls, candidates: [{ content: { parts: functionCalls.map((functionCall) => ({ functionCall })), role: 'model' } }] };
   }
 }
 
@@ -498,7 +513,7 @@ function streamBrain({ provider, model, contents, config }) {
   const resolvedModel = resolveBrainModel(p, model);
   if (p === 'groq') return groqStream({ model: resolvedModel, contents, config });
   if (p === 'openai' || p === 'local') return compatibleStream({ provider: p, model: resolvedModel, contents, config });
-  if (p === 'anthropic') return anthropicStream({ model: resolvedModel, contents, config });
+  if (p === 'anthropic') return anthropicStream({ model: resolvedModel, contents, config, tools: geminiToolsToAnthropic(config?.tools) });
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
@@ -507,7 +522,7 @@ async function generateBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
   const resolvedModel = resolveBrainModel(p, model);
   if (OPENAI_COMPATIBLE.has(p)) return compatibleGenerate({ provider: p, model: resolvedModel, contents, config });
-  if (p === 'anthropic') return anthropicGenerate({ model: resolvedModel, contents, config });
+  if (p === 'anthropic') return anthropicGenerate({ model: resolvedModel, contents, config, tools: geminiToolsToAnthropic(config?.tools) });
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
