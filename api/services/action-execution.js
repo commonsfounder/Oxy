@@ -40,6 +40,9 @@ function normalizeAuthorizationWords(value) {
     .filter(Boolean);
 }
 
+// Words that appear in almost any message, so matching one proves nothing about the recipient.
+const FILLER_WORDS = new Set(['my', 'me', 'the', 'and', 'of', 'to', 'at', 'in', 'on', 'for', 'an', 'or', 'is', 'it', 'we', 'us', 'he', 'she', 'you', 'your', 'our']);
+
 function hasExplicitUserAuthorization(action, userMessage) {
   const text = String(userMessage || '').trim();
   if (!text) return false;
@@ -50,7 +53,7 @@ function hasExplicitUserAuthorization(action, userMessage) {
   if (!explicitSend.test(text)) return false;
 
   const targetWords = normalizeAuthorizationWords(action?.input?.contact || action?.input?.to)
-    .filter(word => word.length >= 2 || /^\+?\d{4,}$/.test(word));
+    .filter(word => (word.length >= 2 && !FILLER_WORDS.has(word)) || /^\+?\d{4,}$/.test(word));
   if (!targetWords.length) return false;
   const messageWords = new Set(normalizeAuthorizationWords(text));
   return targetWords.some(word => messageWords.has(word));
