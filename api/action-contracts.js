@@ -918,7 +918,7 @@ const ACTION_CONTRACTS = {
     required: ['scope'],
     inputExample: { scope: 'recent|all', query: 'optional memory topic to forget' },
     paramHints: { scope: 'recent|all' },
-    guidance: 'Use whenever the user asks to forget, delete, wipe, or remove something from memory — never just say you will do it without calling this. To forget one named thing, pass query with a few words of it (for example query "silver"); a query always wins over scope, so only that topic goes. For "forget that" or "delete that from memory", use scope "recent" with no query unless they clearly mean all memory.',
+    guidance: 'Use whenever the user asks to forget, delete, wipe, or remove something from memory — never just say you will do it without calling this. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory. To forget one named thing instead, pass query with a few words of it (for example query "silver"); a query always wins over scope, so only that topic goes.',
     successSummary: 'Memory updated',
     failureSummary: 'Memory update failed',
     confirmation: 'none',
