@@ -332,3 +332,11 @@ test('delegated runs started from the Work screen also honour the saved guard mo
   await starter.start({ userId: 'u', task, awaitLoop: true });
   assert.equal(seen, true);
 });
+
+test('a calendar event from a background run or an approving "yes" is not turned into a calendar read', () => {
+  const { prepareActionForExecution } = require('../../api/services/action-preparation');
+  const create = () => ({ type: 'create_calendar_event', input: { title: 'Dentist', start_date: '2026-09-04T10:00:00Z', end_date: '2026-09-04T11:00:00Z' } });
+  assert.equal(prepareActionForExecution(create(), {}).type, 'create_calendar_event');
+  assert.equal(prepareActionForExecution(create(), { userMessage: 'yes' }).type, 'create_calendar_event');
+  assert.equal(prepareActionForExecution(create(), { userMessage: "What's on my calendar tomorrow?" }).type, 'get_calendar_events');
+});
