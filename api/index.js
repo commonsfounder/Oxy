@@ -2410,25 +2410,6 @@ async function recoverEmptyModelResponse({ provider = null, model, initialReques
   }
 }
 
-async function runActions(userId, actions) {
-  const results = [];
-  for (const action of actions) {
-    console.log('[action] executing:', action.type, action.input);
-    const result = await dispatch(userId, action.type, action.input || {});
-    console.log('[action] result:', action.type, JSON.stringify(result));
-    results.push({ action: action.type, result });
-    await supabase.from('action_log').insert({
-      user_id: userId,
-      action: serializeLoggedAction(action, result),
-      status: result.success ? 'executed' : 'failed',
-      error: result.success ? null : (result.error || null),
-      created_at: new Date().toISOString()
-    });
-  }
-  invalidateUserContextCache(userId);
-  return results;
-}
-
 function buildVoiceExcerpt(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return '';
