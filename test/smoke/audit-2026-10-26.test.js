@@ -305,3 +305,12 @@ test('an old approval cannot be confirmed by a stray "yes"', async () => {
   rows = [row('1', 24 * 8)];
   assert.equal(await runtime.pending('u', 'yes', { approvalId: '1', taskId: 't1' }), null);
 });
+
+test('the saved card is typed into a page only after the payment is approved, never while preparing', () => {
+  const source = require('node:fs').readFileSync(require.resolve('../../api/services/transaction.js'), 'utf8');
+  const prepare = source.slice(source.indexOf('async function prepare('), source.indexOf('async function pendingSummary('));
+  assert.doesNotMatch(prepare, /fillPaymentCard\(/);
+  const commit = source.slice(source.indexOf('async function commit('), source.indexOf('async function watch('));
+  assert.ok(commit.indexOf('authorize(money)') > -1 && commit.indexOf('fillPaymentCard(') > commit.indexOf('authorize(money)'), 'the fill must come after the amount is authorised');
+  assert.ok(commit.indexOf('fillPaymentCard(') < commit.indexOf('findAndClickPayButton('), 'and before the pay button is pressed');
+});

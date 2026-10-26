@@ -377,9 +377,9 @@ async function readAmount(page) {
 }
 
 /**
- * PHASE 1. Get the page ready to be authorised, and report what it will cost. Fills stored
- * card details if the form is showing, picks the saved card option if there is one, and
- * finds the control that would commit. NEVER presses it.
+ * PHASE 1. Get the page ready to be authorised, and report what it will cost. Picks the saved
+ * card option if there is one and finds the control that would commit. NEVER presses it and
+ * never types card details (commit() does that, after approval).
  */
 async function prepare(userId, { card = null, profile = null } = {}) {
   const session = getSession(userId);
@@ -389,11 +389,10 @@ async function prepare(userId, { card = null, profile = null } = {}) {
 
   if (card?.last4) await selectPaymentOptionRadio(page, card.last4).catch(() => {});
 
-  let filledCard = 0;
-  if (card && await paymentCardFieldsPresent(page)) {
-    filledCard = await fillPaymentCard({ ...session, checkoutProfile: profile }, card).catch(() => 0);
-    await settle(page, 800);
-  }
+  // Card details are typed only in commit(), after the person has approved this page's amount:
+  // a page the agent merely landed on must never receive them. The profile is kept for that step.
+  session.checkoutProfile = profile;
+  const filledCard = 0;
 
   const elements = await extractClickableElements(page).catch(() => []);
   const commit = elements.find((el) => isPaymentCommit(el.text));
@@ -460,6 +459,12 @@ async function commit(userId, { authorize = null, card = null, onProgress = () =
     }
   }
   session.committedTotal = money.raw || session.pendingPaymentTotal || null;
+
+  // Approved: now, and only now, the saved card goes into this page's form.
+  if (card && await paymentCardFieldsPresent(page)) {
+    await fillPaymentCard(session, card, onProgress).catch(() => 0);
+    await settle(page, 800);
+  }
 
   const clicked = await findAndClickPayButton(page, session.pendingPaymentLabel);
   if (!clicked) {

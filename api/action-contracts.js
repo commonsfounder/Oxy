@@ -1498,7 +1498,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Could not prepare the payment',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Call this when the page you are on is asking for money. It fills the saved card if the form is showing, finds the control that would charge, and READS the amount off the page with a parser. It never charges anything. Use the amount it returns when you tell the person what they are approving — never a figure you inferred yourself. If it comes back not ready, the page is still a step short: keep going with browser_act and try again.'
+    guidance: 'Call this when the page you are on is asking for money. It finds the control that would charge and READS the amount off the page with a parser. It never charges anything and never types card details; the saved card is entered only after the person approves. Use the amount it returns when you tell the person what they are approving — never a figure you inferred yourself. If it comes back not ready, the page is still a step short: keep going with browser_act and try again.'
   },
   transaction_authorize: {
     adapter: { kind: 'inline' },
