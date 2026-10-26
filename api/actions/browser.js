@@ -451,17 +451,34 @@ async function webBrowse({ userId, action, params, enrichedParams, context, deps
   }
 }
 
+const { createSearchBudget } = require('../services/search-budget');
+const searchBudget = createSearchBudget();
+
 async function webSearchAction({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
   const q = String(params?.query || '').trim();
   if (!q) return { success: false, error: 'web_search requires query' };
+  // The question being answered, so one question cannot search without limit.
+  const question = String(context?.userMessage || context?.taskGoal || '').slice(0, 300) || q;
+  const repeated = searchBudget.cached(userId, q);
+  if (repeated) return { success: true, text: repeated, query: q, cached: true };
+  if (!searchBudget.allow(userId, question)) {
+    return {
+      success: false,
+      outcome: 'unavailable',
+      error: 'That is enough searching for this question. Answer from what you have already found, and say plainly what is still unconfirmed.',
+      query: q,
+    };
+  }
   try {
     const answer = await webSearchBrain({
       model: FAST_MODEL,
       prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. For a record or a current ranking (tallest, biggest, newest, latest), prefer the most recent authoritative source such as Wikipedia, an official page or a recent news report, check the date, and if sources disagree say which is newer instead of picking one silently. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`
     });
     if (!answer) return { success: false, error: `Search for "${q}" returned no results.` };
-    return { success: true, text: String(answer).replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, ''), query: q };
+    const cleaned = String(answer).replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, '');
+    searchBudget.record(userId, question, q, cleaned);
+    return { success: true, text: cleaned, query: q };
   } catch (e) {
     return { success: false, error: `Search failed: ${e.message}`, query: q };
   }
