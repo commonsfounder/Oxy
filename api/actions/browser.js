@@ -452,6 +452,7 @@ async function webBrowse({ userId, action, params, enrichedParams, context, deps
 }
 
 const { createSearchBudget } = require('../services/search-budget');
+const searchProvider = require('../services/search-provider');
 const searchBudget = createSearchBudget();
 
 async function webSearchAction({ userId, action, params, enrichedParams, context, deps, helpers }) {
@@ -471,6 +472,27 @@ async function webSearchAction({ userId, action, params, enrichedParams, context
     };
   }
   try {
+    // Exa, when chosen: cheap search results written up by the cheap model. Any failure falls
+    // through to the OpenAI search below.
+    if (searchProvider.exaEnabled()) {
+      try {
+        const results = await searchProvider.exaSearch(q);
+        if (results.length) {
+          const response = await generateBrain({
+            model: FAST_MODEL,
+            contents: [{ role: 'user', parts: [{ text: searchProvider.answerPrompt({ question: q, today: getLocalDateKey(), results }) }] }],
+            config: { reasoningEffort: 'low' }
+          });
+          const written = String(response?.text || '').trim().replace(/[?&]utm_[a-z_]+=[^\s)&\]]*/gi, '');
+          if (written.length >= 20) {
+            searchBudget.record(userId, question, q, written);
+            return { success: true, text: written, query: q, provider: 'exa' };
+          }
+        }
+      } catch (error) {
+        console.warn('[search] Exa failed, using the OpenAI search:', error.message);
+      }
+    }
     const answer = await webSearchBrain({
       model: FAST_MODEL,
       prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Answer the question that was actually asked: a question about "who" someone is wants the person, and a short name or acronym should be read as a person, company or product before a dictionary meaning. Mention prices or options only when the question is about buying something. Only report what the search results support, and say so if results look older than today instead of guessing. For a record or a current ranking (tallest, biggest, newest, latest), prefer the most recent authoritative source such as Wikipedia, an official page or a recent news report, check the date, and if sources disagree say which is newer instead of picking one silently. Do not comment on what the results did or did not contain. Plain prose, no markdown headings or asterisks.`

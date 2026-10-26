@@ -84,6 +84,16 @@ function record(model, rawUsage, { webSearches = 0 } = {}) {
   }
 }
 
+// A cost that is not a model call (a search service's own fee), added to the dollar total.
+function recordCost(label, usd) {
+  const amount = Number(usd) || 0;
+  lifetime.estimatedUsd += amount;
+  lifetime.externalUsd = (lifetime.externalUsd || 0) + amount;
+  const turn = als.getStore();
+  if (turn) { turn.estimatedUsd += amount; turn.externalUsd = (turn.externalUsd || 0) + amount; }
+  if (process.env.OXY_USAGE_LOG !== 'off') console.log(`[usage] ${label} ~$${amount.toFixed(5)}`);
+}
+
 // Runs `fn` with a fresh per-turn meter; everything recorded inside lands in it.
 function runWithMeter(fn) {
   const turn = emptyTotals();
@@ -108,4 +118,4 @@ function lifetimeReport() {
   return { since: startedAt, ...summarise(lifetime), byModel: lifetime.byModel };
 }
 
-module.exports = { record, runWithMeter, summarise, lifetimeReport, normaliseUsage, costOf, prices, DEFAULT_PRICES };
+module.exports = { record, recordCost, runWithMeter, summarise, lifetimeReport, normaliseUsage, costOf, prices, DEFAULT_PRICES };
