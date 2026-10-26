@@ -724,7 +724,9 @@ const ACTION_CONTRACTS = {
     successSummary: 'Setting changed',
     failureSummary: 'Could not change that setting',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    // Turning an approval setting off lowers the user's own safeguards, so that one waits for a yes.
+    reviewWhen: input => ['ask_before_acting', 'ask_before_private_apps'].includes(String(input?.setting || '').toLowerCase()) && String(input?.value || '').toLowerCase() === 'off'
   },
   search_photos: {
     adapter: { kind: 'inline' },
@@ -1297,6 +1299,7 @@ const ACTION_CONTRACTS = {
     required: ['amount', 'description'],
     optional: ['merchant'],
     inputExample: { amount: 25.5, description: 'book table at restaurant', merchant: 'OpenTable' },
+    paramHints: { amount: 'in pounds/dollars, so 25.5 means 25.50 (not pence)' },
     successSummary: 'Charged through a real payment rail',
     failureSummary: 'Spend failed',
     confirmation: 'review'
@@ -1334,7 +1337,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'review'
   },
   // New integrations
-  stripe_charge: { adapter: { kind: 'inline' },risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
+  stripe_charge: { adapter: { kind: 'inline' },risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, paramHints: { amount: 'whole number of pence/cents, so 1000 means 10.00' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
   // These move (or purport to move) real money and previously had NO contract at all, so the
   // runner treated them as direct-execute. Register them high-risk + review so they can't.
   stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review', adapter: { kind: 'connector', id: 'stripe' } },

@@ -19,20 +19,29 @@ async function checkConciergeBalance({ userId, action, params, enrichedParams, c
   return { success: false, outcome: 'unavailable', unavailable: true, error: 'No real concierge balance is connected.' };
 }
 
+function formatMoney(amount, currency) {
+  try {
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: String(currency || 'usd').toUpperCase() }).format(amount);
+  } catch {
+    return `${Number(amount).toFixed(2)} ${String(currency || '').toUpperCase()}`.trim();
+  }
+}
+
 async function spendFromConciergeAccount({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, dispatch, stripeClient, guardConciergeSpend } = deps;
   const amount = Number(params?.amount || 0);
   const description = params?.description || 'purchase';
   const merchant = params?.merchant || 'unknown';
   if (amount <= 0) return { success: false, error: 'Invalid amount' };
-  const spendGuard = await guardConciergeSpend(userId, amount);
+  // The cap is checked in the currency the card will actually be charged in.
+  const currency = resolveCurrencyForLocation(context.location);
+  const spendGuard = await guardConciergeSpend(userId, amount, currency);
   if (!spendGuard.ok) return { success: false, error: spendGuard.error };
   if (!stripeClient) {
     return { success: false, outcome: 'unavailable', unavailable: true, error: 'Real concierge spending is unavailable until a payment rail is configured. No money moved.' };
   }
 
   const idempotencyKey = crypto.randomUUID();
-  const currency = resolveCurrencyForLocation(context.location);
   const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
     amountCents: Math.round(amount * 100), currency, description: `${description} at ${merchant}`, idempotencyKey
   });
@@ -58,7 +67,7 @@ async function spendFromConciergeAccount({ userId, action, params, enrichedParam
     };
   }
 
-  return { success: true, text: `Charged $${amount.toFixed(2)} on ${description} at ${merchant} to your linked card.`, paymentIntentId: outcome.paymentIntentId };
+  return { success: true, text: `Charged ${formatMoney(amount, currency)} on ${description} at ${merchant} to your linked card.`, paymentIntentId: outcome.paymentIntentId };
 }
 
 async function topUpConciergeAccount({ userId, action, params, enrichedParams, context, deps, helpers }) {
@@ -88,17 +97,17 @@ async function fundOpportunity({ userId, action, params, enrichedParams, context
 
 async function stripeCharge({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, dispatch, stripeClient, guardConciergeSpend } = deps;
-  const amountCents = Number(params?.amount || 1000);
+  const amountCents = Math.round(Number(params?.amount || 1000));
   const desc = params?.description || 'Concierge spend';
   const amount = amountCents / 100;
-  const chargeGuard = await guardConciergeSpend(userId, amount);
+  const currency = resolveCurrencyForLocation(context.location);
+  const chargeGuard = await guardConciergeSpend(userId, amount, currency);
   if (!chargeGuard.ok) return { success: false, error: chargeGuard.error };
   if (!stripeClient) {
     return { success: false, outcome: 'unavailable', unavailable: true, error: `Stripe is not configured, so no charge was attempted for ${desc}.`, amount };
   }
 
   const idempotencyKey = crypto.randomUUID();
-  const currency = resolveCurrencyForLocation(context.location);
   const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
     amountCents, currency, description: desc, idempotencyKey
   });
@@ -123,7 +132,7 @@ async function stripeCharge({ userId, action, params, enrichedParams, context, d
     };
   }
 
-  return { success: true, text: `Stripe charged $${amount.toFixed(2)} (${desc}) to your linked card.`, amount, paymentIntentId: outcome.paymentIntentId };
+  return { success: true, text: `Stripe charged ${formatMoney(amount, currency)} (${desc}) to your linked card.`, amount, paymentIntentId: outcome.paymentIntentId };
 }
 
 // Spend and receipts. Two real sources only — receipts in the connected mailbox, and

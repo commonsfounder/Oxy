@@ -148,3 +148,26 @@ test('Slack sends and wiping all memory wait for approval; forgetting one thing 
   await exec('u', [{ type: 'forget_memory', input: { scope: 'recent' } }], {});
   assert.deepEqual(ran, ['forget_memory']);
 });
+
+test('card charges are checked against the spend cap in the currency actually charged', async () => {
+  const money = require('../../api/actions/money').handlers;
+  const seen = [];
+  const deps = { supabase: {}, stripeClient: null, guardConciergeSpend: async (_u, amount, currency) => { seen.push([amount, currency]); return { ok: false, error: 'blocked' }; } };
+  const uk = { latitude: 52.4, longitude: -1.9 };
+  await money.stripe_charge({ userId: 'u', params: { amount: 2550 }, context: { location: uk }, deps });
+  await money.spend_from_concierge_account({ userId: 'u', params: { amount: 25.5 }, context: { location: uk }, deps });
+  assert.deepEqual(seen, [[25.5, 'gbp'], [25.5, 'gbp']]);
+});
+
+test('turning off an approval setting waits for a yes, other settings do not', async () => {
+  const { createActionExecution } = require('../../api/services/action-execution');
+  const parked = [];
+  const exec = createActionExecution({
+    invokeAdapter: async () => ({ success: true, outcome: 'completed' }),
+    setPendingAction: async (_u, action) => { parked.push(action.input.setting); }
+  });
+  await exec('u', [{ type: 'change_setting', input: { setting: 'ask_before_acting', value: 'off' } }], {});
+  await exec('u', [{ type: 'change_setting', input: { setting: 'ask_before_acting', value: 'on' } }], {});
+  await exec('u', [{ type: 'change_setting', input: { setting: 'appearance', value: 'night' } }], {});
+  assert.deepEqual(parked, ['ask_before_acting']);
+});

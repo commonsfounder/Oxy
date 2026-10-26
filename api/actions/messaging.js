@@ -54,7 +54,7 @@ async function sendAdamEmail({ userId, action, params, enrichedParams, context, 
   const to = String(params?.to || '').trim();
   const body = String(params?.body || '').trim();
   if (!to || !body) return { success: false, error: 'send_adam_email requires a recipient and a message' };
-  if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(to)) {
+  if (!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(to)) {
     return { success: false, error: `I need ${to}'s email address — that doesn't look like one.` };
   }
 
