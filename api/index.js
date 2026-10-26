@@ -141,7 +141,6 @@ const {
 const {
   runAgentLoop: runAgenticLoopCore,
   generatePlan,
-  reflectOnResults,
   replacePendingToolResult
 } = require('./services/agent-orchestrator');
 const taskManager = require('./services/task-manager');
@@ -6484,7 +6483,7 @@ function normalizeActionResultsForClient(actionResults) {
     const normalizedEntry = { ...entry, result };
     const error = result.error || '';
     const text = result.text || '';
-    const key = `${entry?.action || ''}:${result.success === false ? error : text}`;
+    const key = `${entry?.action || ''}:${JSON.stringify(entry?.input ?? null)}:${result.success === false ? error : text}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(normalizedEntry);
@@ -7205,8 +7204,11 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
   const requestStarted = Date.now();
 
   try {
-    const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null, channel = null } = req.body;
+    const { message, userId, settings: rawSettings, location = null, nativeHints = null, chatStartedAt = null, channel = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
+    const settings = rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) ? { ...rawSettings } : {};
+    // The saved guard mode applies even when this client did not send it.
+    if ((await getChatSettings(supabase, userId)).guardMode === true) settings.guardMode = true;
     const wantsTTS = req.query.tts === 'true';
     // Real saved home address (set in iOS Settings), not device GPS — "book a ride home"
     // needs the actual address, since the user isn't necessarily home when they ask.
@@ -7798,6 +7800,7 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
               nativeHints,
               channel,
               autonomy: autonomyLevel,
+              guardMode: settings.guardMode === true,
               modelRoute: { provider: chatProvider, model: chatModel },
               useSearch: isBroadMoneyGoal || useSearch,
               runtimeSessionId,
@@ -7853,19 +7856,6 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
             // lifecycle owns the complete durable result set.
           } catch (planErr) {}
         }
-
-        // Fire-and-forget: this only feeds a trace line, so the response never waits on an
-        // extra model call for it.
-        reflectOnResults(message, actionResults, actionResults, chatModel, chatProvider)
-          .then((reflection) => {
-            if (reflection && !reflection.achieved && reflection.nextAction) {
-              trace && trace.log && trace.log('agent.reflection.next_action', JSON.stringify({
-                summary: String(reflection.summary || '').slice(0, 240),
-                nextAction: reflection.nextAction
-              }));
-            }
-          })
-          .catch(() => {});
 
         if (streaming) {
           // Headers were already sent (and any onStep progress already streamed) before

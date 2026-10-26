@@ -89,3 +89,14 @@ test('background saved goals, voice and image turns all pass the stored guard mo
   assert.match(body("app.post('/process-audio'") + src.slice(src.indexOf("app.post('/process-audio'"), src.indexOf("app.post('/pendant/transcribe'")), /guardMode: guardMode === true/);
   assert.match(src.slice(src.indexOf("app.post('/chat-with-image'"), src.indexOf("app.post('/memory'")), /guardMode: guardMode === true/);
 });
+
+test('the main chat loop is given the guard mode, and sending the same text twice is not collapsed into one receipt', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../../api/index'), 'utf8');
+  const loopCall = src.slice(src.indexOf('const agentTurn = await runAgenticTurn('), src.indexOf('executeActionsFn: executeActions,', src.indexOf('const agentTurn = await runAgenticTurn(')));
+  assert.match(loopCall, /guardMode: settings\.guardMode === true/);
+  const { normalizeActionResultsForClient } = require('../../api/index');
+  const sent = (to) => ({ action: 'send_telegram', input: { contact: to }, result: { success: true, text: 'Telegram sent' } });
+  assert.equal(normalizeActionResultsForClient([sent('Ann'), sent('Bob')]).length, 2);
+  assert.equal(normalizeActionResultsForClient([sent('Ann'), sent('Ann')]).length, 1);
+});
