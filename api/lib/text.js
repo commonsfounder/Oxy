@@ -44,8 +44,15 @@ function isValidUserId(id) {
   return typeof id === 'string' && USER_ID_RE.test(id);
 }
 
+// A public domain name only: no credentials, port, path, or IP address.
+function isPlainHostname(value) {
+  const host = String(value || '');
+  return host.length <= 253 && /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(host);
+}
+
 module.exports = {
   USER_ID_RE,
+  isPlainHostname,
   base64UrlJson,
   escapeHtml,
   escapeIlikePattern,

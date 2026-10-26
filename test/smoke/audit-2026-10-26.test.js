@@ -100,3 +100,9 @@ test('the main chat loop is given the guard mode, and sending the same text twic
   assert.equal(normalizeActionResultsForClient([sent('Ann'), sent('Bob')]).length, 2);
   assert.equal(normalizeActionResultsForClient([sent('Ann'), sent('Ann')]).length, 1);
 });
+
+test('only plain public domain names may be opened by the session check', () => {
+  const { isPlainHostname } = require('../../api/lib/text');
+  for (const ok of ['example.com', 'accounts.google.co.uk', 'john-lewis.com']) assert.equal(isPlainHostname(ok), true, ok);
+  for (const bad of ['', 'localhost', 'x@internal.example', '169.254.169.254', 'a.com:8080', 'a.com/..', 'a.com#', '[::1]', 'bad host.com']) assert.equal(isPlainHostname(bad), false, bad);
+});

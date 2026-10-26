@@ -60,6 +60,7 @@ const {
   escapeHtml,
   escapeIlikePattern,
   isValidUserId,
+  isPlainHostname,
   parseJsonObject,
   parseLooseJson,
   safeParseJSON
@@ -9806,6 +9807,8 @@ app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, re
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const site = String(req.params.site || '').trim().toLowerCase();
+    // The server's browser opens this host, so it must be a plain public name (no user@host, port or IP).
+    if (!isPlainHostname(site)) return res.status(400).json({ error: 'A site like example.com is required.' });
     const path = typeof req.query?.path === 'string' && req.query.path.startsWith('/') ? req.query.path : '/';
     // ?control=1 opens the same page with no session, so the two can be compared.
     const useStoredSession = req.query?.control !== '1';
@@ -9899,7 +9902,10 @@ app.put('/chat-settings', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const { effort, guardMode } = req.body || {};
+  if (guardMode !== undefined && typeof guardMode !== 'boolean') return res.status(400).json({ error: 'guardMode must be true or false.' });
+  if (effort !== undefined && !['low', 'medium', 'high'].includes(effort)) return res.status(400).json({ error: 'effort must be low, medium or high.' });
   const result = await saveChatSettings(supabase, userId, { effort, guardMode });
+  if (result.error) return res.status(500).json({ error: 'Could not save that setting.' });
   res.json(result);
 });
 
