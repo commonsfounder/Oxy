@@ -3403,6 +3403,10 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
     return { success: true, text: "You don't have any saved checkout details — nothing to clear." };
   }
 
+  if (normalizedQuery.length === 1) {
+    return { success: false, error: 'forget_memory needs a longer topic than one character.' };
+  }
+
   if (normalizedQuery) {
     const { data, error } = await supabase
       .from('memories')

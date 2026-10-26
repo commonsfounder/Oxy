@@ -9,7 +9,8 @@ async function getSlackToken(userId) {
     const { data } = await supabase.from('connectors').select('tokens').eq('user_id', userId).eq('connector_id', 'slack').eq('enabled', true).limit(1);
     if (data?.length > 0 && data[0].tokens) return decryptTokens(data[0].tokens).access_token;
   } catch (e) {}
-  return process.env.SLACK_BOT_TOKEN || null;
+  // The server's own bot token is a development shortcut; in production it would let any user post as it.
+  return process.env.NODE_ENV === 'production' ? null : (process.env.SLACK_BOT_TOKEN || null);
 }
 
 async function execute(userId, action, params) {

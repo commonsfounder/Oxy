@@ -19,6 +19,9 @@ function chunk(list, size) {
 }
 
 function normalizeMessageIds(value) {
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try { value = JSON.parse(value); } catch { /* a single id that happens to start with [ */ }
+  }
   const list = Array.isArray(value) ? value : (value ? [value] : []);
   return list.map(id => String(id || '').trim()).filter(Boolean);
 }

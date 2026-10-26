@@ -919,7 +919,9 @@ const ACTION_CONTRACTS = {
     guidance: 'Use whenever the user asks to forget, delete, wipe, or remove something from memory — never just say you will do it without calling this. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.',
     successSummary: 'Memory updated',
     failureSummary: 'Memory update failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    // Wiping everything (and the saved card) is not undoable, so only that scope waits for a yes.
+    reviewWhen: input => String(input?.scope || '').toLowerCase() === 'all'
   },
   generate_visual: {
     adapter: { kind: 'inline' },
@@ -1340,7 +1342,7 @@ const ACTION_CONTRACTS = {
   get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' }, guidance: 'Use for current conditions. For a future period or weekend forecast, use get_forecast.' },
   get_forecast: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, optional: ['when'], successSummary: 'Forecast', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' }, guidance: 'Use for a future weather forecast, including tomorrow or a weekend. Keep the requested city and time period in the call.' },
   search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'amazon' } },
-  send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'slack' } },
+  send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'review_required', executionMode: 'review', adapter: { kind: 'connector', id: 'slack' } },
   book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'lyft' } },
   get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'strava' } },
   get_oura_sleep: { risk: 'low', required: [], optional: ['start_date'], inputExample: { start_date: '2026-08-16' }, successSummary: 'Oura sleep', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'oura' } },
@@ -1720,6 +1722,15 @@ function actionPromptBlock() {
   return `<action>\n${JSON.stringify({ actions: actionPromptList() }, null, 2)}\n</action>`;
 }
 
+// Lists and objects must be declared as such: a "string" list reaches the handler as JSON text.
+function parameterSchema(key, example) {
+  if (Array.isArray(example)) {
+    return { type: 'ARRAY', items: { type: example.some(item => item && typeof item === 'object') ? 'OBJECT' : 'STRING' } };
+  }
+  if ((example && typeof example === 'object') || key === 'scene') return { type: 'OBJECT' };
+  return { type: 'STRING' };
+}
+
 function actionToFunctionDeclaration(type, contract) {
   const properties = {};
   const inputEx = contract.inputExample || {};
@@ -1732,7 +1743,7 @@ function actionToFunctionDeclaration(type, contract) {
     const isRequired = required.has(key);
     const hint = hints[key];
     properties[key] = {
-      type: 'string',
+      ...parameterSchema(key, inputEx[key]),
       description: `${key}${isRequired ? ' (required)' : ' (optional)'}${hint ? ` — ${hint}` : ''}`
     };
   }

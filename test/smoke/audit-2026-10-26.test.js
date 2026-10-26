@@ -106,3 +106,45 @@ test('only plain public domain names may be opened by the session check', () => 
   for (const ok of ['example.com', 'accounts.google.co.uk', 'john-lewis.com']) assert.equal(isPlainHostname(ok), true, ok);
   for (const bad of ['', 'localhost', 'x@internal.example', '169.254.169.254', 'a.com:8080', 'a.com/..', 'a.com#', '[::1]', 'bad host.com']) assert.equal(isPlainHostname(bad), false, bad);
 });
+
+test('list and object parameters are declared as lists and objects, not strings', () => {
+  const { actionToFunctionDeclaration, ACTION_CONTRACTS } = require('../../api/action-contracts');
+  const archive = actionToFunctionDeclaration('archive_emails', ACTION_CONTRACTS.archive_emails);
+  assert.equal(archive.parameters.properties.message_ids.type, 'ARRAY');
+  assert.equal(archive.parameters.properties.message_ids.items.type, 'STRING');
+  const results = actionToFunctionDeclaration('show_results', ACTION_CONTRACTS.show_results);
+  assert.equal(results.parameters.properties.results.items.type, 'OBJECT');
+  const query = actionToFunctionDeclaration('search_emails', ACTION_CONTRACTS.search_emails);
+  assert.equal(query.parameters.properties.query.type, 'STRING');
+  // Lowercased for OpenAI by the provider seam, with items kept.
+  const { geminiToolsToOpenAI } = require('../../api/services/brain-provider');
+  const [tool] = geminiToolsToOpenAI([{ functionDeclarations: [archive] }]);
+  assert.deepEqual(tool.function.parameters.properties.message_ids, { type: 'array', items: { type: 'string' }, description: tool.function.parameters.properties.message_ids.description });
+});
+
+test('Gmail ids sent as JSON text are still read as a list', () => {
+  const { normalizeMessageIds } = (() => {
+    const src = require('node:fs').readFileSync(require.resolve('../../connectors/google'), 'utf8');
+    const fn = src.slice(src.indexOf('function normalizeMessageIds'), src.indexOf('// Gmail\'s built-in labels'));
+    return { normalizeMessageIds: new Function(`${fn}; return normalizeMessageIds;`)() };
+  })();
+  assert.deepEqual(normalizeMessageIds('["a","b"]'), ['a', 'b']);
+  assert.deepEqual(normalizeMessageIds(['a']), ['a']);
+  assert.deepEqual(normalizeMessageIds('abc'), ['abc']);
+});
+
+test('Slack sends and wiping all memory wait for approval; forgetting one thing does not', async () => {
+  const { getActionContract } = require('../../api/action-contracts');
+  assert.equal(getActionContract('send_slack_message').executionMode, 'review');
+  const { createActionExecution } = require('../../api/services/action-execution');
+  const parked = [];
+  const ran = [];
+  const exec = createActionExecution({
+    invokeAdapter: async ({ type }) => { ran.push(type); return { success: true, outcome: 'completed', text: 'ok' }; },
+    setPendingAction: async (_u, action) => { parked.push(action.type); }
+  });
+  await exec('u', [{ type: 'forget_memory', input: { scope: 'all' } }], {});
+  assert.deepEqual([parked, ran], [['forget_memory'], []]);
+  await exec('u', [{ type: 'forget_memory', input: { scope: 'recent' } }], {});
+  assert.deepEqual(ran, ['forget_memory']);
+});

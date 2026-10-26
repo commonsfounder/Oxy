@@ -98,7 +98,7 @@ function createActionExecution({
         result = simulatedActionResult(action);
       } else if ((
         context.guardMode ||
-        (contract?.executionMode === 'review' && !(
+        ((contract?.executionMode === 'review' || contract?.reviewWhen?.(action.input || {})) && !(
           contract.explicitRequestAuthorizes && hasExplicitUserAuthorization(action, context.userMessage)
         ))
       ) && !context.bypassReview) {
