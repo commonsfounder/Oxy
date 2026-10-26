@@ -11,6 +11,7 @@ const browserAccess = require('../services/browser-access');
 const transaction = require('../services/transaction');
 const { loadCheckoutProfile } = require('../services/checkout-profile');
 const { getAgentCard } = require('../services/agent-card');
+const { assertPublicHttpUrl, assertPublicHostName } = require('../lib/safe-url');
 
 // A result's SUBJECT: the thing this step is about, whatever kind of thing it is. An order, a
 // booking, a form, a downloaded statement and a cancelled subscription all populate the same
@@ -429,7 +430,14 @@ async function webBrowse({ userId, action, params, enrichedParams, context, deps
   if (!url) return { success: false, error: 'web_browse requires url' };
   try {
     const axios = require('axios');
-    const res = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'AssistantBot/1.0 (concierge)' } });
+    await assertPublicHttpUrl(url);
+    const res = await axios.get(url, {
+      timeout: 10000,
+      maxRedirects: 3,
+      // A public page may redirect somewhere private; each hop is checked.
+      beforeRedirect: options => assertPublicHostName(`${options.protocol || 'https:'}//${options.hostname}`),
+      headers: { 'User-Agent': 'AssistantBot/1.0 (concierge)' }
+    });
     let text = String(res.data || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 6000);
     
     // Concierge-grade: if query, use fast model to extract/answer specifically (makes it useful for real tasks)

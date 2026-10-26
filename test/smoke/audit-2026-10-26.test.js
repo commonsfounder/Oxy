@@ -171,3 +171,30 @@ test('turning off an approval setting waits for a yes, other settings do not', a
   await exec('u', [{ type: 'change_setting', input: { setting: 'appearance', value: 'night' } }], {});
   assert.deepEqual(parked, ['ask_before_acting']);
 });
+
+test('private addresses are refused in production and allowed for local tests', async () => {
+  const { assertPublicHttpUrl, isPrivateAddress, hostLooksPrivate } = require('../../api/lib/safe-url');
+  const prod = { NODE_ENV: 'production' };
+  for (const bad of ['http://localhost:8080/', 'http://127.0.0.1/', 'http://169.254.169.254/latest', 'http://10.0.0.5/', 'http://[::1]/', 'http://[::ffff:192.168.1.1]/', 'https://db.internal/', 'http://myserver/', 'ftp://example.com/', 'file:///etc/passwd']) {
+    await assert.rejects(assertPublicHttpUrl(bad, prod), undefined, bad);
+  }
+  await assertPublicHttpUrl('http://127.0.0.1:9000/', {});
+  assert.equal(isPrivateAddress('172.16.0.1'), true);
+  assert.equal(isPrivateAddress('172.32.0.1'), false);
+  assert.equal(isPrivateAddress('8.8.8.8'), false);
+  assert.equal(hostLooksPrivate('www.example.com'), false);
+  await assertPublicHttpUrl('https://93.184.216.34/', prod);
+});
+
+test('the browser will not navigate to a private address when blocking is on', async (t) => {
+  const { gotoBrowserPage } = require('../../api/services/browser-session');
+  process.env.OXY_BLOCK_PRIVATE_URLS = 'on';
+  t.after(() => { delete process.env.OXY_BLOCK_PRIVATE_URLS; });
+  let visited = 0;
+  const page = { goto: async () => { visited += 1; }, url: () => 'http://localhost:8080/', evaluate: async () => 0 };
+  await assert.rejects(gotoBrowserPage(page, 'http://localhost:8080/'), /private network/);
+  assert.equal(visited, 0);
+  // A redirect that lands on a private address is caught after the fact and the page is blanked.
+  const redirected = { goto: async () => { visited += 1; }, url: () => 'http://169.254.169.254/', evaluate: async () => 0 };
+  await assert.rejects(gotoBrowserPage(redirected, 'https://example.com/'), /private network/);
+});

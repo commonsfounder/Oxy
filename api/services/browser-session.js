@@ -6,6 +6,7 @@
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { randomUUID } = require('node:crypto');
+const { assertPublicHttpUrl, assertPublicHostName } = require('../lib/safe-url');
 
 chromium.use(stealth);
 
@@ -281,9 +282,16 @@ function siteKeyFromUrl(url) {
 // but throwing it away loses the exact cart/page we just checkpointed. Continue only when a
 // real document arrived; a genuine blank navigation still fails normally.
 async function gotoBrowserPage(page, openUrl) {
+  await assertPublicHttpUrl(openUrl);
   try {
     await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
+    // A public page can redirect to a private address; the final stop is checked too.
+    assertPublicHostName(page.url());
   } catch (error) {
+    if (/private network/.test(String(error?.message))) {
+      await page.goto('about:blank').catch(() => {});
+      throw error;
+    }
     if (!/timeout/i.test(String(error?.message || ''))) throw error;
     const currentUrl = page.url();
     const bodyLength = await page.evaluate(() => (document.body?.innerText || '').trim().length).catch(() => 0);
