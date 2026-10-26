@@ -432,8 +432,19 @@ function anthropicRequestBody({ model, contents, config, stream = false, tools =
     messages: toAnthropicMessages(contents),
     stream
   };
-  if (config?.systemInstruction) body.system = config.systemInstruction;
-  if (tools.length) body.tools = tools;
+  if (config?.systemInstruction) {
+    // The fixed prompt gets its own cached block; this turn's context follows it, uncached.
+    const { stable, dynamic } = splitSystemPrompt(config.systemInstruction);
+    body.system = [
+      { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
+      ...(dynamic ? [{ type: 'text', text: dynamic }] : [])
+    ];
+  }
+  if (tools.length) body.tools = tools.map((t, i) => (i === tools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t));
+  // Caches the whole conversation so far, so each step of a tool loop re-reads the last one.
+  const last = body.messages[body.messages.length - 1];
+  const lastBlock = last?.content[last.content.length - 1];
+  if (lastBlock) lastBlock.cache_control = { type: 'ephemeral' };
   return body;
 }
 
@@ -449,6 +460,7 @@ async function* anthropicStream({ model, contents, config, tools = [] }) {
   let buffer = '';
   // Tool calls arrive in pieces: a start event naming the tool, then JSON fragments of its input.
   const toolSlots = new Map();
+  const usage = {};
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -460,6 +472,9 @@ async function* anthropicStream({ model, contents, config, tools = [] }) {
       if (!line.startsWith('data:')) continue;
       try {
         const event = JSON.parse(line.slice(5).trim());
+        if (event.type === 'error') throw Object.assign(new Error(`Anthropic stream failed: ${event.error?.message || 'error'}`), { fatal: true });
+        if (event.type === 'message_start') Object.assign(usage, event.message?.usage);
+        else if (event.type === 'message_delta' && event.usage) Object.assign(usage, event.usage);
         if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
           toolSlots.set(event.index, { id: event.content_block.id, name: event.content_block.name, json: '' });
         } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && toolSlots.has(event.index)) {
@@ -467,9 +482,10 @@ async function* anthropicStream({ model, contents, config, tools = [] }) {
         }
         const text = event.delta?.type === 'text_delta' ? event.delta.text : '';
         if (text) yield { text, candidates: [] };
-      } catch { /* ignore keepalive and partial frames */ }
+      } catch (err) { if (err.fatal) throw err; /* ignore keepalive and partial frames */ }
     }
   }
+  usageMeter.record(model, usage);
   if (toolSlots.size) {
     const functionCalls = [...toolSlots.values()].map((slot) => {
       let args = {};

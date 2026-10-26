@@ -11,6 +11,7 @@ test('prices a call from its tokens, with cached input cheaper', () => {
 
 test('reads both OpenAI shapes and Anthropic usage', () => {
   assert.deepStrictEqual(meter.normaliseUsage({ input_tokens: 10, output_tokens: 5, output_tokens_details: { reasoning_tokens: 3 }, input_tokens_details: { cached_tokens: 4 } }), { input: 10, output: 5, cached: 4, reasoning: 3 });
+  assert.deepStrictEqual(meter.normaliseUsage({ input_tokens: 5, output_tokens: 2, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 }), { input: 125, output: 2, cached: 100, reasoning: 0 });
   assert.deepStrictEqual(meter.normaliseUsage({ prompt_tokens: 7, completion_tokens: 2 }), { input: 7, output: 2, cached: 0, reasoning: 0 });
 });
 

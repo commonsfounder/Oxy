@@ -59,3 +59,35 @@ test('streamed tool calls are assembled from their pieces', async (t) => {
   assert.strictEqual(last.functionCalls[0].name, 'web_search');
   assert.deepStrictEqual(last.functionCalls[0].args, { query: 'tallest building' });
 });
+
+test('Claude requests carry prompt-caching markers on tools, fixed prompt and conversation', async (t) => {
+  const saved = global.fetch;
+  t.after(() => { global.fetch = saved; });
+  const { CORE_SYSTEM_PROMPT } = require('../../api/prompts');
+  let body;
+  global.fetch = async (url, init) => { body = JSON.parse(init.body); return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'ok' }], usage: {} }) }; };
+  await generateBrain({ provider: 'anthropic', model: 'claude-haiku-5-5', contents: CONTENTS, config: { tools: TOOLS, systemInstruction: `${CORE_SYSTEM_PROMPT}\n\nToday is Monday.` } });
+  assert.strictEqual(body.tools[0].cache_control, undefined);
+  assert.deepStrictEqual(body.tools[1].cache_control, { type: 'ephemeral' });
+  assert.strictEqual(body.system[0].text, CORE_SYSTEM_PROMPT);
+  assert.deepStrictEqual(body.system[0].cache_control, { type: 'ephemeral' });
+  assert.strictEqual(body.system[1].text, 'Today is Monday.');
+  assert.strictEqual(body.system[1].cache_control, undefined);
+  assert.deepStrictEqual(body.messages[0].content.at(-1).cache_control, { type: 'ephemeral' });
+});
+
+test('a streamed Claude reply is metered and a stream error is thrown', async (t) => {
+  const saved = global.fetch;
+  t.after(() => { global.fetch = saved; });
+  const meter = require('../../api/services/usage-meter');
+  const run = async (events) => {
+    global.fetch = async () => ({ ok: true, body: new Response(events.map((e) => `data: ${JSON.stringify(e)}\n`).join('')).body });
+    const out = [];
+    for await (const c of streamBrain({ provider: 'anthropic', model: 'claude-haiku-5-5', contents: CONTENTS, config: {} })) out.push(c);
+    return out;
+  };
+  const before = meter.lifetimeReport().calls;
+  await run([{ type: 'message_start', message: { usage: { input_tokens: 5, cache_read_input_tokens: 100 } } }, { type: 'message_delta', usage: { output_tokens: 7 } }]);
+  assert.strictEqual(meter.lifetimeReport().calls, before + 1);
+  await assert.rejects(run([{ type: 'error', error: { message: 'overloaded' } }]), /overloaded/);
+});

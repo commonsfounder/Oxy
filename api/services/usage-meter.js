@@ -38,7 +38,11 @@ function emptyTotals() {
 }
 
 function normaliseUsage(raw = {}) {
-  const input = Number(raw.input_tokens ?? raw.prompt_tokens ?? 0) || 0;
+  let input = Number(raw.input_tokens ?? raw.prompt_tokens ?? 0) || 0;
+  // Anthropic reports cache reads and writes outside input_tokens.
+  if ('cache_read_input_tokens' in raw || 'cache_creation_input_tokens' in raw) {
+    input += (Number(raw.cache_read_input_tokens) || 0) + (Number(raw.cache_creation_input_tokens) || 0);
+  }
   const output = Number(raw.output_tokens ?? raw.completion_tokens ?? 0) || 0;
   const cached = Number(raw.input_tokens_details?.cached_tokens ?? raw.prompt_tokens_details?.cached_tokens ?? raw.cache_read_input_tokens ?? 0) || 0;
   const reasoning = Number(raw.output_tokens_details?.reasoning_tokens ?? raw.completion_tokens_details?.reasoning_tokens ?? 0) || 0;
