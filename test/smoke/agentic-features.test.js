@@ -340,7 +340,7 @@ test('persistent task controls route carries guard mode into the agent loop', ()
   assert.match(route, /updates\.metadata\s*=\s*\{\s*guardMode\s*\}/);
   assert.match(route, /delegatedRunLifecycle\.updateControls\s*\(/);
   const starter = fs.readFileSync(path.join(__dirname, '../../api/services/delegated-run-starter.js'), 'utf8');
-  assert.match(starter, /autonomy: claimedTask\.autonomy,\s*guardMode: claimedTask\.metadata\?\.guardMode === true,\s*modelRoute: route,\s*runtimeSessionId: runtimeSession\.id/s);
+  assert.match(starter, /autonomy: claimedTask\.autonomy,\s*guardMode: claimedTask\.metadata\?\.guardMode === true \|\| savedGuardMode === true,\s*modelRoute: route,\s*runtimeSessionId: runtimeSession\.id/s);
 });
 
 test('action contracts now include new agentic tools', () => {
