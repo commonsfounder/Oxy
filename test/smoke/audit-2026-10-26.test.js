@@ -203,3 +203,59 @@ test('project checks (which run code the model may have written) wait for approv
   const { getActionContract } = require('../../api/action-contracts');
   assert.equal(getActionContract('project_check').executionMode, 'review');
 });
+
+test('forgetting a named topic deletes only that topic, whatever scope word came with it', async (t) => {
+  const runtime = require('../../runtime');
+  process.env.OXY_SESSION_SECRET ||= 'test-session-secret';
+  process.env.SUPABASE_URL ||= 'https://example.supabase.co';
+  process.env.SUPABASE_KEY ||= 'test-key';
+  process.env.OPENAI_API_KEY ||= 'test-openai-key';
+  let rows = [
+    { id: 1, user_id: 'u', content: 'Ada prefers silver', created_at: '2026-01-01' },
+    { id: 2, user_id: 'u', content: 'Works at Acme', created_at: '2026-02-01' },
+    { id: 3, user_id: 'u', content: 'Lives in Bath', created_at: '2026-03-01' }
+  ];
+  const realFactory = runtime.createSupabaseServiceClient;
+  runtime.createSupabaseServiceClient = () => ({
+    from() {
+      const st = { op: 'select', filters: [], order: null, limit: null };
+      const run = () => {
+        let out = rows.filter((r) => st.filters.every((f) => f(r)));
+        if (st.order) out = [...out].sort((a, b) => (a[st.order] < b[st.order] ? 1 : -1));
+        if (st.limit) out = out.slice(0, st.limit);
+        return out;
+      };
+      const chain = {
+        select: () => chain, delete: () => { st.op = 'delete'; return chain; },
+        eq: (c, v) => { st.filters.push((r) => r[c] === v); return chain; },
+        ilike: (c, p) => { const needle = p.replace(/%/g, '').toLowerCase(); st.filters.push((r) => String(r[c]).toLowerCase().includes(needle)); return chain; },
+        in: (c, vs) => { st.filters.push((r) => vs.includes(r[c])); return chain; },
+        order: (c) => { st.order = c; return chain; }, limit: (n) => { st.limit = n; return chain; },
+        then: (resolve) => {
+          const hit = run();
+          if (st.op === 'delete') { rows = rows.filter((r) => !hit.includes(r)); return resolve({ error: null }); }
+          return resolve({ data: hit, error: null });
+        }
+      };
+      return chain;
+    },
+    storage: {}
+  });
+  t.after(() => { runtime.createSupabaseServiceClient = realFactory; });
+  delete require.cache[require.resolve('../../api/index')];
+  const { forgetMemory } = require('../../api/index');
+  await forgetMemory('u', { scope: 'all', query: 'silver' });
+  assert.deepEqual(rows.map((r) => r.id), [2, 3]);
+  await forgetMemory('u', { scope: 'recent', query: 'Acme' });
+  assert.deepEqual(rows.map((r) => r.id), [3]);
+  await forgetMemory('u', { scope: 'recent' });
+  assert.deepEqual(rows, []);
+});
+
+test('only a no-topic "all" counts as wiping everything for approval', () => {
+  const { getActionContract } = require('../../api/action-contracts');
+  const { reviewWhen } = getActionContract('forget_memory');
+  assert.equal(reviewWhen({ scope: 'all' }), true);
+  assert.equal(reviewWhen({ scope: 'all', query: 'silver' }), false);
+  assert.equal(reviewWhen({ scope: 'recent' }), false);
+});

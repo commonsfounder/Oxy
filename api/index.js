@@ -3364,7 +3364,8 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
   const normalizedScope = String(scope || '').toLowerCase();
   const normalizedQuery = String(query || '').trim();
 
-  if (normalizedScope === 'all') {
+  // A named topic always wins over the scope word: "forget that I like silver" must never wipe everything.
+  if (!normalizedQuery && normalizedScope === 'all') {
     const { error } = await supabase.from('memories').delete().eq('user_id', userId);
     if (error) throw error;
     await clearCheckoutProfile(supabase, userId).catch(() => {});
@@ -3372,7 +3373,7 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
     return { success: true, text: 'I cleared what I had in memory, including any saved checkout details and payment card.' };
   }
 
-  if (normalizedScope === 'recent') {
+  if (!normalizedQuery && normalizedScope === 'recent') {
     const { data, error } = await supabase
       .from('memories')
       .select('id, content')
@@ -10252,6 +10253,7 @@ module.exports.buildChatContext = buildChatContext;
 module.exports.buildMorningBriefing = buildMorningBriefing;
 module.exports.checkAdamSendCap = checkAdamSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
+module.exports.forgetMemory = forgetMemory;
 module.exports.delegatedRunLifecycle = delegatedRunLifecycle;
 module.exports.delegatedRunRouteHandlers = delegatedRunRouteHandlers;
 module.exports.startChatExecutionIdentity = startChatExecutionIdentity;
