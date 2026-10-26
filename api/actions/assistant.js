@@ -19,10 +19,11 @@ async function calculate({ userId, action, params, enrichedParams, context, deps
   const expr = String(params?.expression || params?.query || '').trim();
   if (!expr) return { success: false, error: 'calculate requires expression' };
   try {
-    // Safe-ish math eval (limited)
-    const safe = expr.replace(/[^0-9+\-*/().%\s^]/g, '');
+    // Digits and arithmetic signs only. "^" means power here; in JavaScript it would be XOR (2^10 is 8).
+    const safe = expr.replace(/[^0-9+\-*/().%\s^]/g, '').replace(/\^/g, '**');
     // eslint-disable-next-line no-eval
     const val = (0, eval)(safe || '0');
+    if (typeof val !== 'number' || !Number.isFinite(val)) throw new Error('not a finite number');
     return { success: true, text: `${expr} = ${val}`, result: val };
   } catch {
     return { success: false, outcome: 'failed', error: `Could not calculate "${expr}" safely.` };

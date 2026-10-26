@@ -402,3 +402,10 @@ test('times like "7pm" are understood instead of silently becoming 09:00', () =>
   for (const [input, expected] of Object.entries(cases)) assert.equal(normalizeTimeOfDay(input), expected, input);
   for (const bad of ['evening', '25:00', '13pm', '7:99', '']) assert.equal(normalizeTimeOfDay(bad), null, bad);
 });
+
+test('calculate treats ^ as a power and refuses results that are not numbers', async () => {
+  const { handlers } = require('../../api/actions/assistant');
+  assert.equal((await handlers.calculate({ params: { expression: '2 ^ 10' }, deps: {} })).result, 1024);
+  assert.equal((await handlers.calculate({ params: { expression: '(3 + 4) * 2' }, deps: {} })).result, 14);
+  assert.equal((await handlers.calculate({ params: { expression: '1 / 0' }, deps: {} })).success, false);
+});
