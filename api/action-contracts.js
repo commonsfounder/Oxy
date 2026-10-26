@@ -986,7 +986,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['results'],
     inputExample: { results: [{ title: 'name', subtitle: 'one line of detail', price: '£49', rating: 4.5, rating_count: 120, url: 'https://…', image_url: 'https://…', source: 'site name', note: 'optional caveat' }] },
-    guidance: 'After a search found two or more real options the user will choose between (products, restaurants, services, anything with a price or rating), call this once with the best few, best first, so they appear as swipeable cards the user can compare. Only include facts the sources actually stated; leave a field out rather than guess it. Use real https links taken from the results. Not for a single answer, and never for flights, hotels or places (those have their own cards).',
+    guidance: 'After a search found two or more real options the user will choose between (products, restaurants, services, anything with a price or rating), call this once with the best few, best first, so they appear as swipeable cards the user can compare. Only include facts the sources actually stated; leave a field out rather than guess it. Do not browse many pages to fill it: call it as soon as you have two or more real options from the search results. Use real https links taken from the results. Not for a single answer, and never for flights, hotels or places (those have their own cards).',
     successSummary: 'Options shown',
     failureSummary: 'Could not show the options',
     confirmation: 'none'
