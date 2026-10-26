@@ -850,7 +850,8 @@ app.use((req, res, next) => {
     '/auth/dev/demo-login',
     '/proactive/sweep',
     '/auth/forgot-password',
-    '/auth/reset-password'
+    '/auth/reset-password',
+    '/auth/verify-email/confirm'
   ]);
 
   if (publicPaths.has(req.path)) return next();
@@ -4316,8 +4317,8 @@ app.post('/auth/change-password', async (req, res) => {
     if (typeof currentPassword !== 'string' || !currentPassword) {
       return res.status(400).json({ error: 'currentPassword is required.' });
     }
-    if (typeof newPassword !== 'string' || newPassword.length < 8) {
-      return res.status(400).json({ error: 'newPassword must be at least 8 characters.' });
+    if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `newPassword must be between 8 and ${MAX_PASSWORD_LENGTH} characters.` });
     }
     if (currentPassword === newPassword) {
       return res.status(400).json({ error: 'New password must be different from current password.' });
@@ -4328,7 +4329,8 @@ app.post('/auth/change-password', async (req, res) => {
     }
     const newHash = hashPassword(newPassword);
     const newVersion = (account.token_version || 1) + 1;
-    await supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', userId);
+    const { error: updateError } = await supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', userId);
+    if (updateError) throw updateError;
     log('info', 'auth.change_password', { userId });
     res.json({ success: true });
   } catch (err) {
@@ -4392,6 +4394,9 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
     if (typeof newPassword !== 'string' || newPassword.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
     }
+    if (typeof token !== 'string' || token.startsWith(EMAIL_VERIFY_TOKEN_PREFIX) || newPassword.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: 'Invalid or expired reset token.' });
+    }
     const { data: tokenRow } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', token).maybeSingle();
     if (!tokenRow || tokenRow.used || new Date(tokenRow.expires_at) < new Date()) {
       return res.status(400).json({ error: 'Invalid or expired reset token.' });
@@ -4399,10 +4404,10 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
     const newHash = hashPassword(newPassword);
     const account = await getUserAccount(tokenRow.user_id);
     const newVersion = (account?.token_version || 1) + 1;
-    await Promise.all([
-      supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', tokenRow.user_id),
-      supabase.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id)
-    ]);
+    // The token is spent only once the password has actually changed.
+    const { error: passwordError } = await supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', tokenRow.user_id);
+    if (passwordError) throw passwordError;
+    await supabase.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id);
     log('info', 'auth.password_reset.completed', { userId: tokenRow.user_id });
     res.json({ success: true });
   } catch (err) {
@@ -4411,14 +4416,35 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
   }
 });
 
+const EMAIL_VERIFY_TOKEN_PREFIX = 'verify_';
+
+app.get('/auth/verify-email/confirm', async (req, res) => {
+  const page = (message) => res.type('html').send(`<!DOCTYPE html><html><head><title>Adam</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px"><p>${escapeHtml(message)}</p></body></html>`);
+  try {
+    const token = String(req.query.token || '');
+    if (!token.startsWith(EMAIL_VERIFY_TOKEN_PREFIX)) return page('That link is not valid.');
+    const { data: row } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', token).maybeSingle();
+    if (!row || row.used || new Date(row.expires_at) < new Date()) return page('That link has expired.');
+    const { error } = await supabase.from('users').update({ email_verified: true }).eq('user_id', row.user_id);
+    if (error) throw error;
+    await supabase.from('password_reset_tokens').update({ used: true }).eq('id', row.id);
+    return page('Your email is verified.');
+  } catch (err) {
+    log('error', 'auth.verify_email.confirm.error', { error: err.message });
+    return page('Something went wrong. Try the link again.');
+  }
+});
+
 app.post('/auth/verify-email', async (req, res) => {
   try {
     const userId = getAuthenticatedUserId(req);
     const account = await getUserAccount(userId);
     if (!account || !account.email) return res.status(400).json({ error: 'No email address on this account.' });
-    const token = crypto.randomBytes(32).toString('hex');
+    // Same table as reset tokens, so the prefix keeps one kind from working as the other.
+    const token = `${EMAIL_VERIFY_TOKEN_PREFIX}${crypto.randomBytes(32).toString('hex')}`;
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from('password_reset_tokens').insert({ user_id: userId, token, expires_at: expiresAt });
+    const { error: tokenError } = await supabase.from('password_reset_tokens').insert({ user_id: userId, token, expires_at: expiresAt });
+    if (tokenError) throw tokenError;
     const verifyUrl = `${process.env.APP_URL || ''}/auth/verify-email/confirm?token=${token}`;
     try {
       const { sendVerificationEmail } = require('./services/email');
@@ -4524,7 +4550,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     let ttsError = '';
     let dataResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { userMessage: userText });
+      const { guardMode } = await getChatSettings(supabase, userId);
+      actionResults = await executeActions(userId, actions, { userMessage: userText, guardMode: guardMode === true });
       dataResults = getStructuredDataResults(actionResults, userText);
       actionResults = normalizeActionResultsForClient(actionResults).map(enrichActionForBrowser);
     }
@@ -4689,7 +4716,8 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     let actionResults = [];
     let dataResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message });
+      const { guardMode } = await getChatSettings(supabase, userId);
+      actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message, guardMode: guardMode === true });
       dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
