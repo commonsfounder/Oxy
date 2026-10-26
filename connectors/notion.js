@@ -18,8 +18,8 @@ async function getNotionToken(userId) {
       return tokens.access_token || tokens.token;
     }
   } catch (e) {}
-  // Fallback to env for dev
-  return process.env.NOTION_TOKEN || null;
+  // A process-wide token is for local development only; in production it would let any user write to the operator's Notion.
+  return process.env.NODE_ENV === 'production' ? null : (process.env.NOTION_TOKEN || null);
 }
 
 async function execute(userId, action, params) {

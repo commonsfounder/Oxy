@@ -259,3 +259,33 @@ test('only a no-topic "all" counts as wiping everything for approval', () => {
   assert.equal(reviewWhen({ scope: 'all', query: 'silver' }), false);
   assert.equal(reviewWhen({ scope: 'recent' }), false);
 });
+
+test('an email address with a line break cannot add hidden headers', () => {
+  process.env.OXY_SESSION_SECRET ||= 'test-session-secret';
+  process.env.SUPABASE_URL ||= 'https://example.supabase.co';
+  process.env.SUPABASE_KEY ||= 'test-key';
+  const { _private } = require('../../connectors/google');
+  const decode = (raw) => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  assert.match(decode(_private.buildMime('a@b.com', 'Hi', 'Body')), /^To: a@b\.com\r\n/);
+  assert.throws(() => _private.buildMime('a@b.com\r\nBcc: x@y.com', 'Hi', 'Body'), /line breaks/);
+  assert.throws(() => _private.buildMime('a@b.com', 'Hi', 'Body', { inReplyTo: '<1@x>\nBcc: x@y.com' }), /line breaks/);
+});
+
+test('in production the shared Gmail token only serves the named owner', async (t) => {
+  process.env.OXY_SESSION_SECRET ||= 'test-session-secret';
+  process.env.SUPABASE_URL ||= 'https://example.supabase.co';
+  process.env.SUPABASE_KEY ||= 'test-key';
+  const saved = { env: process.env.NODE_ENV, token: process.env.GMAIL_REFRESH_TOKEN, owner: process.env.OXY_GMAIL_ENV_USER_ID, fetch: global.fetch };
+  t.after(() => {
+    for (const [key, value] of [['NODE_ENV', saved.env], ['GMAIL_REFRESH_TOKEN', saved.token], ['OXY_GMAIL_ENV_USER_ID', saved.owner]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  process.env.NODE_ENV = 'production';
+  process.env.GMAIL_REFRESH_TOKEN = 'operator-refresh-token';
+  delete process.env.OXY_GMAIL_ENV_USER_ID;
+  const google = require('../../connectors/google');
+  const result = await google.execute('some-other-user', 'get_emails', {});
+  assert.equal(result.success, false);
+  assert.match(result.error, /not configured/);
+});

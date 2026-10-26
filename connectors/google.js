@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 const { decryptTokens, encryptTokens } = require('../api/services/token-crypto');
+const { assertPublicHttpUrl } = require('../api/lib/safe-url');
 
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
@@ -154,7 +155,10 @@ async function getTokens(userId) {
   // here — a bad value would mark the account connected forever. getAccessToken persists these
   // only after a refresh has actually succeeded.
   const envToken = String(process.env.GMAIL_REFRESH_TOKEN || '').replace(/^﻿/, '').trim();
-  if (envToken && !disconnectedOnPurpose) {
+  // The shared token is the operator's own mailbox: in production only the named owner may use it,
+  // otherwise every user without a Google connection would read and send through that inbox.
+  const envFallbackAllowed = process.env.NODE_ENV !== 'production' || process.env.OXY_GMAIL_ENV_USER_ID === userId;
+  if (envToken && !disconnectedOnPurpose && envFallbackAllowed) {
     return {
       refresh_token: envToken,
       client_id: process.env.GMAIL_CLIENT_ID,
@@ -267,14 +271,22 @@ function encodeMimeHeader(value) {
     .join('\r\n ');
 }
 
+// A line break inside a header value would let a model-written address add its own headers (a hidden Bcc).
+function singleLine(value) {
+  const text = String(value ?? '');
+  if (/[\r\n]/.test(text)) throw new Error('Email headers cannot contain line breaks.');
+  return text;
+}
+
 function buildMime(to, subject, body, options = {}) {
+  to = singleLine(to);
   const headers = [
     `To: ${to}`,
     `Subject: ${encodeMimeHeader(subject)}`,
     'MIME-Version: 1.0'
   ];
-  if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
-  if (options.references) headers.push(`References: ${options.references}`);
+  if (options.inReplyTo) headers.push(`In-Reply-To: ${singleLine(options.inReplyTo)}`);
+  if (options.references) headers.push(`References: ${singleLine(options.references)}`);
   const msg = [
     ...headers,
     'Content-Type: text/plain; charset=utf-8',
@@ -881,6 +893,8 @@ async function execute(userId, action, params) {
 
         if (urlMatch && supportsOneClick) {
           try {
+            // The address comes from the email itself, so it must not point at a private network.
+            await assertPublicHttpUrl(urlMatch[1]);
             const resp = await axios.post(urlMatch[1], 'List-Unsubscribe=One-Click', {
               headers: { 'Content-Type': 'text/plain' },
               timeout: 15000,
