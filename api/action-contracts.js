@@ -537,7 +537,7 @@ const ACTION_CONTRACTS = {
       body: 'one plain sentence saying what the page shows',
       scene: SCENE_HINT + ' ' + INTERFACE_HINT
     },
-    guidance: 'Choose a useful interface inside the conversation whenever looking, comparing, choosing, tracking steps or supplying several details is easier than reading prose. Use mode interface for those interactive tasks; choose and combine panel blocks based on what the person needs to do now. Use the original narrated scene format for visual explanations. A simple answer stays text. Interfaces cannot execute or approve actions; a tap or form submission only continues the same chat, through the existing execution and review boundary. Gather real results first when needed, then present those facts; never invent options. If they explicitly ask for a home screen, use render_to_display.',
+    guidance: 'To compare products, restaurants or services that have prices or ratings, use show_results instead of this. Choose a useful interface inside the conversation whenever looking, comparing, choosing, tracking steps or supplying several details is easier than reading prose. Use mode interface for those interactive tasks; choose and combine panel blocks based on what the person needs to do now. Use the original narrated scene format for visual explanations. A simple answer stays text. Interfaces cannot execute or approve actions; a tap or form submission only continues the same chat, through the existing execution and review boundary. Gather real results first when needed, then present those facts; never invent options. If they explicitly ask for a home screen, use render_to_display.',
     successSummary: 'Made a page',
     failureSummary: 'Could not make that page',
     confirmation: 'none',
@@ -986,7 +986,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['results'],
     inputExample: { results: [{ title: 'name', subtitle: 'one line of detail', price: '£49', rating: 4.5, rating_count: 120, url: 'https://…', image_url: 'https://…', source: 'site name', note: 'optional caveat' }] },
-    guidance: 'After a search found two or more real options the user will choose between (products, restaurants, services, anything with a price or rating), call this once with the best few, best first, so they appear as swipeable cards the user can compare. Only include facts the sources actually stated; leave a field out rather than guess it. Do not browse many pages to fill it: call it as soon as you have two or more real options from the search results. Use real https links taken from the results. Not for a single answer, and never for flights, hotels or places (those have their own cards).',
+    guidance: 'After a search found two or more real options the user will choose between (products, restaurants, services, anything with a price or rating), call this once with the best few, best first, so they appear as swipeable cards the user can compare. Only include facts the sources actually stated; leave a field out rather than guess it. Do not browse many pages to fill it: call it as soon as you have two or more real options from the search results. Use real https links taken from the results. Two real options is enough; do not search on for a third and do not build a scene instead. Not for a single answer, and never for flights, hotels or places (those have their own cards).',
     successSummary: 'Options shown',
     failureSummary: 'Could not show the options',
     confirmation: 'none'
