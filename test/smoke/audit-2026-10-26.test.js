@@ -476,3 +476,13 @@ test('a deleted account loses its old session, and an email already in use is a 
   const dup = await fetch(`${base}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'ann2', password: 'longenough1', email: 'ann@example.com' }) });
   assert.equal(dup.status, 409);
 });
+
+test('searches that run side by side cannot slip past the per-question cap', async () => {
+  const { createSearchBudget } = require('../../api/services/search-budget');
+  const budget = createSearchBudget({ cap: 6 });
+  const granted = await Promise.all(Array.from({ length: 9 }, async () => budget.reserve('u', 'find laptops')));
+  assert.equal(granted.filter(Boolean).length, 6);
+  budget.record('u', 'find laptops', 'q', 'answer', { reserved: true });
+  assert.equal(budget.reserve('u', 'find laptops'), false);
+  assert.equal(budget.cached('u', 'q'), 'answer');
+});

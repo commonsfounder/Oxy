@@ -35,12 +35,22 @@ function createSearchBudget({ now = () => Date.now(), cap = Number(process.env.O
       const entry = questions.get(`${userId}|${normaliseQuery(question)}`);
       return !entry || entry.count < cap;
     },
-    // Counts one real search and keeps its answer.
-    record(userId, question, query, text) {
+    // Checks the limit and takes a slot in one step. Searches run side by side, so checking first
+    // and counting afterwards let a whole batch past the cap.
+    reserve(userId, question) {
+      sweep();
+      const key = `${userId}|${normaliseQuery(question)}`;
+      const entry = questions.get(key) || { count: 0, at: now() };
+      if (entry.count >= cap) return false;
+      questions.set(key, { count: entry.count + 1, at: now() });
+      return true;
+    },
+    // Keeps a search's answer. Counts it too unless a slot was already reserved.
+    record(userId, question, query, text, { reserved = false } = {}) {
       const at = now();
       const key = `${userId}|${normaliseQuery(question)}`;
       const entry = questions.get(key) || { count: 0, at };
-      questions.set(key, { count: entry.count + 1, at });
+      questions.set(key, { count: entry.count + (reserved ? 0 : 1), at });
       if (text) answers.set(`${userId}|${normaliseQuery(query)}`, { text, at });
     },
     cap,
