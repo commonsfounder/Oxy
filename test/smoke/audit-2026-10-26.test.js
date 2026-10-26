@@ -341,3 +341,57 @@ test('a calendar event from a background run or an approving "yes" is not turned
   assert.equal(prepareActionForExecution(create(), { userMessage: 'yes' }).type, 'create_calendar_event');
   assert.equal(prepareActionForExecution(create(), { userMessage: "What's on my calendar tomorrow?" }).type, 'get_calendar_events');
 });
+
+test('a review the action runner parks reports its approval id so a button can name it', async () => {
+  const { createActionExecution } = require('../../api/services/action-execution');
+  const exec = createActionExecution({
+    invokeAdapter: async () => ({ success: true }),
+    setPendingAction: async () => ({ approvalId: 'appr-1' })
+  });
+  const [entry] = await exec('u', [{ type: 'send_telegram', input: { contact: 'Ann', message: 'hi' } }], { userMessage: 'hello' });
+  assert.equal(entry.result.pending, true);
+  assert.equal(entry.result.approvalId, 'appr-1');
+});
+
+test('an old Telegram button cannot approve a newer request', async (t) => {
+  const runtime = require('../../runtime');
+  process.env.OXY_SESSION_SECRET ||= 'test-session-secret';
+  process.env.SUPABASE_URL ||= 'https://example.supabase.co';
+  process.env.SUPABASE_KEY ||= 'test-key';
+  process.env.OPENAI_API_KEY ||= 'test-openai-key';
+  const rows = [{ id: 'new-approval', user_id: 'u', task_id: null, status: 'pending', created_at: new Date().toISOString(), action_payload: { action: { type: 'send_email', input: { to: 'a@b.com', body: 'hi' } } } }];
+  const realFactory = runtime.createSupabaseServiceClient;
+  runtime.createSupabaseServiceClient = () => ({
+    from() { const chain = { select: () => chain, eq: () => chain, order: () => chain, limit: () => Promise.resolve({ data: rows, error: null }), maybeSingle: () => Promise.resolve({ data: null, error: null }) }; return chain; },
+    storage: {}
+  });
+  const realFetch = global.fetch;
+  t.after(() => { runtime.createSupabaseServiceClient = realFactory; global.fetch = realFetch; });
+  delete require.cache[require.resolve('../../api/index')];
+  delete process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
+  const telegramBot = require('../../connectors/telegram-bot');
+  const sent = [];
+  const saved = { find: telegramBot.findUserIdByChatId, answer: telegramBot.answerCallbackQuery, clear: telegramBot.clearInlineKeyboard, send: telegramBot.sendMessage };
+  t.after(() => { Object.assign(telegramBot, { findUserIdByChatId: saved.find, answerCallbackQuery: saved.answer, clearInlineKeyboard: saved.clear, sendMessage: saved.send }); });
+  telegramBot.findUserIdByChatId = async () => 'u';
+  telegramBot.answerCallbackQuery = async () => {};
+  telegramBot.clearInlineKeyboard = async () => {};
+  telegramBot.sendMessage = async (_chat, text) => { sent.push(text); };
+  let chatCalls = 0;
+  const app = require('../../api/index');
+  const server = require('node:http').createServer(app);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => server.close());
+  global.fetch = async (url, init) => {
+    if (String(url).includes('/chat')) { chatCalls += 1; return { ok: true, json: async () => ({ text: 'done', actions: [] }) }; }
+    return realFetch(url, init);
+  };
+  const post = (data) => realFetch(`http://127.0.0.1:${server.address().port}/webhooks/telegram-bot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query: { id: 'c1', data, message: { chat: { id: 5 }, message_id: 9 } } }) });
+  await post('confirm:old-approval');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(chatCalls, 0);
+  assert.match(sent.join(' '), /out of date/);
+  await post('confirm:new-approval');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(chatCalls, 1);
+});

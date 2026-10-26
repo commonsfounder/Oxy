@@ -702,11 +702,13 @@ async function sendChatResultToTelegram(chatId, result) {
   const pendingEntry = telegramBot.findPendingAction(result?.actions || []);
   if (pendingEntry) {
     const replyText = telegramBot.describePendingAction(pendingEntry).slice(0, 4096);
+    // The buttons name the approval they answer; a tap on an older button is refused below.
+    const suffix = pendingEntry.result?.approvalId ? `:${pendingEntry.result.approvalId}` : '';
     await telegramBot.sendMessage(chatId, replyText, {
       replyMarkup: {
         inline_keyboard: [[
-          { text: 'Yes, do it ✅', callback_data: 'confirm' },
-          { text: 'Not yet', callback_data: 'cancel' }
+          { text: 'Yes, do it ✅', callback_data: `confirm${suffix}` },
+          { text: 'Not yet', callback_data: `cancel${suffix}` }
         ]]
       }
     });
@@ -765,7 +767,15 @@ async function handleTelegramBotCallback(callbackQuery, req) {
   await telegramBot.answerCallbackQuery(callbackQuery.id);
   if (messageId != null) await telegramBot.clearInlineKeyboard(chatId, messageId);
 
-  const synthesized = callbackQuery.data === 'cancel' ? 'cancel' : 'confirm';
+  const [verb, approvalId] = String(callbackQuery.data || '').split(':');
+  if (approvalId) {
+    const waiting = await approvalRuntime.list(userId).catch(() => []);
+    if (!waiting.some(entry => entry.approvalId === approvalId)) {
+      await telegramBot.sendMessage(chatId, 'That one is out of date. Ask me again and I will check with you.');
+      return;
+    }
+  }
+  const synthesized = verb === 'cancel' ? 'cancel' : 'confirm';
   const result = await bridgeToChatPipeline(userId, synthesized, req);
   await sendChatResultToTelegram(chatId, result);
 }

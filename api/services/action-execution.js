@@ -102,12 +102,14 @@ function createActionExecution({
           contract.explicitRequestAuthorizes && hasExplicitUserAuthorization(action, context.userMessage)
         ))
       ) && !context.bypassReview) {
-        await setPendingAction(userId, action, context);
+        const parked = await setPendingAction(userId, action, context);
         const cardInfo = MONEY_ACTION_TYPES.has(type) ? await getLinkedCardInfo(userId) : null;
         // A purchase is approved against what the page and saved card state, so look both up;
         // a failed lookup must never stop the approval from being asked.
         const details = type === 'transaction_authorize' ? await getReviewDetails(userId, action).catch(() => null) : null;
         result = buildPendingReviewResult(action, cardInfo, details);
+        // Lets a button name the exact approval it answers, so an old button cannot approve a newer one.
+        if (parked?.approvalId) result.approvalId = parked.approvalId;
       } else {
         const execContext = previousResults.length ? { ...context, previousResults } : context;
         try {
