@@ -270,25 +270,21 @@ async function runAgentLoop({
     if (onStep) onStep({ phase: 'thinking', iteration: i + 1 });
 
     let resp;
+    // A wrap-up turn must stay tool-free on the retry too.
+    const turnConfig = wrappedUp ? { ...baseConfig, tools: [{ functionDeclarations: [] }], toolConfig: undefined } : baseConfig;
     try {
-      resp = await callGeminiWithTools(modelName, resumedContents, wrappedUp ? { ...baseConfig, tools: [{ functionDeclarations: [] }], toolConfig: undefined } : baseConfig, trace, provider);
+      resp = await callGeminiWithTools(modelName, resumedContents, turnConfig, trace, provider);
     } catch (err) {
       logAgentStep(agentTrace, { type: 'error', error: err.message });
-      // Retry once on transient error for cream-of-crop reliability
-      if (i < maxIterations - 1) {
-        await new Promise(r => setTimeout(r, 500));
-        try {
-          resp = await callGeminiWithTools(modelName, resumedContents, baseConfig, trace, provider);
-        } catch (e2) {
-          logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
-          agentTrace.status = 'error';
-          // Recorded on the task so a paused run explains itself instead of just stopping.
-          agentTrace.lastError = e2.message;
-          break;
-        }
-      } else {
+      // One retry for a transient error, including on the final answer step.
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        resp = await callGeminiWithTools(modelName, resumedContents, turnConfig, trace, provider);
+      } catch (e2) {
+        logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
         agentTrace.status = 'error';
-        agentTrace.lastError = err.message;
+        // Recorded on the task so a paused run explains itself instead of just stopping.
+        agentTrace.lastError = e2.message;
         break;
       }
     }
@@ -473,7 +469,7 @@ async function runAgentLoop({
       : 'Done.';
   const finalSpoken = agentTrace.status === 'incomplete'
     ? fallback
-    : (spoken || lastToolResultsText || fallback);
+    : (spoken || (agentTrace.status === 'error' ? 'I hit a problem before I could finish this. Ask me to try again.' : lastToolResultsText) || fallback);
   return {
     spoken: finalSpoken,
     actions: executedActions,
@@ -539,7 +535,8 @@ async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY
     provider,
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: prompt + '\n\n' + summary }] }],
-    config: {}
+    // Only logged, never acted on, so it does not get the full reasoning effort.
+    config: { reasoningEffort: 'low', maxOutputTokens: 300 }
   });
   const t = extractSpokenFromResponseSafe(resp);
   try { return JSON.parse(t.replace(/```/g,'').trim()); } catch {

@@ -85,3 +85,39 @@ test('a browser that keeps making progress keeps the run going, up to a ceiling;
   await runAgentLoop({ userId: 'u', initialMessage: 'weather again', maxIterations: 2, executeActionsFn: exec });
   assert.equal(calls, 2, 'a non-browser tool keeps the normal cap');
 });
+
+test('a failed model call after tools ran tells the user so instead of dumping tool JSON', async (t) => {
+  const brainProvider = require('../../api/services/brain-provider');
+  const { runAgentLoop } = require('../../api/services/agent-orchestrator');
+  const real = brainProvider.callToolsBrain;
+  t.after(() => { brainProvider.callToolsBrain = real; });
+  let n = 0;
+  brainProvider.callToolsBrain = async () => {
+    n += 1;
+    if (n === 1) return { text: '', functionCalls: [{ id: 'c', name: 'get_weather', args: {} }], candidates: [{ content: { role: 'model', parts: [{ functionCall: { id: 'c', name: 'get_weather', args: {} } }] } }] };
+    throw new Error('provider down');
+  };
+  const exec = async (_u, actions) => actions.map((a) => ({ action: a.type, result: { success: true, text: 'sunny' } }));
+  const out = await runAgentLoop({ userId: 'u', initialMessage: 'weather', maxIterations: 4, executeActionsFn: exec });
+  assert.match(out.spoken, /problem/);
+  assert.doesNotMatch(out.spoken, /result\]|sunny/);
+});
+
+test('the retry after a failed wrap-up call is still tool-free', async (t) => {
+  const brainProvider = require('../../api/services/brain-provider');
+  const { runAgentLoop } = require('../../api/services/agent-orchestrator');
+  const real = brainProvider.callToolsBrain;
+  t.after(() => { brainProvider.callToolsBrain = real; });
+  const toolCounts = [];
+  brainProvider.callToolsBrain = async ({ config }) => {
+    const count = (config.tools || []).flatMap((x) => x.functionDeclarations || []).length;
+    toolCounts.push(count);
+    if (count > 0) return { text: '', functionCalls: [{ id: 'c', name: 'get_weather', args: {} }], candidates: [{ content: { role: 'model', parts: [{ functionCall: { id: 'c', name: 'get_weather', args: {} } }] } }] };
+    if (toolCounts.filter((c) => c === 0).length === 1) throw new Error('blip');
+    return { text: 'Sunny.', functionCalls: [], candidates: [{ content: { role: 'model', parts: [{ text: 'Sunny.' }] } }] };
+  };
+  const exec = async (_u, actions) => actions.map((a) => ({ action: a.type, result: { success: true } }));
+  await runAgentLoop({ userId: 'u', initialMessage: 'weather', maxIterations: 3, executeActionsFn: exec });
+  const wrapUpCalls = toolCounts.slice(toolCounts.indexOf(0));
+  assert.ok(wrapUpCalls.length >= 1 && wrapUpCalls.every((c) => c === 0), JSON.stringify(toolCounts));
+});
