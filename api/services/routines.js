@@ -43,20 +43,33 @@ async function listDueRoutines(supabase, now) {
 // risk), the routine just tries again at its next normal scheduled time.
 async function markRoutineRun(supabase, routineId, now, outcome = { success: true }) {
   try {
-    const { data: routine, error: fetchError } = await supabase.from('routines')
-      .select('interval_minutes, consecutive_failures')
-      .eq('id', routineId)
-      .single();
-    if (fetchError || !routine) return { ok: false, error: fetchError?.message || 'routine not found' };
+    // The status columns come from a later migration. If it has not been applied, the routine must
+    // still move on to its next run: failing to record a run once made every sweep re-run it.
+    let routine = null;
+    let hasStatusColumns = true;
+    const full = await supabase.from('routines').select('interval_minutes, consecutive_failures').eq('id', routineId).single();
+    if (full.error || !full.data) {
+      hasStatusColumns = false;
+      const basic = await supabase.from('routines').select('interval_minutes').eq('id', routineId).single();
+      if (basic.error || !basic.data) return { ok: false, error: basic.error?.message || full.error?.message || 'routine not found' };
+      routine = basic.data;
+    } else {
+      routine = full.data;
+    }
     const nextRunAt = new Date(now.getTime() + routine.interval_minutes * 60000).toISOString();
     const success = outcome?.success !== false;
-    const { error } = await supabase.from('routines').update({
-      last_run_at: now.toISOString(),
-      next_run_at: nextRunAt,
-      last_run_status: success ? 'success' : 'failed',
-      last_run_error: success ? null : String(outcome?.error || 'Routine did not complete.').slice(0, 500),
-      consecutive_failures: success ? 0 : (routine.consecutive_failures || 0) + 1
-    }).eq('id', routineId);
+    const patch = { last_run_at: now.toISOString(), next_run_at: nextRunAt };
+    if (hasStatusColumns) {
+      Object.assign(patch, {
+        last_run_status: success ? 'success' : 'failed',
+        last_run_error: success ? null : String(outcome?.error || 'Routine did not complete.').slice(0, 500),
+        consecutive_failures: success ? 0 : (routine.consecutive_failures || 0) + 1
+      });
+    }
+    let { error } = await supabase.from('routines').update(patch).eq('id', routineId);
+    if (error && hasStatusColumns) {
+      ({ error } = await supabase.from('routines').update({ last_run_at: patch.last_run_at, next_run_at: patch.next_run_at }).eq('id', routineId));
+    }
     if (error) return { ok: false, error };
     return { ok: true };
   } catch (err) {

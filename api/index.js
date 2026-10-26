@@ -4016,7 +4016,7 @@ async function getUserContext(userId, trace = null) {
       trace.run('supabase.user_context.participants', loadKnownPeople),
       trace.run('supabase.user_context.native_context', () => supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle()),
       trace.run('supabase.user_context.commitments', () => supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId).eq('status', 'open').order('due_at', { ascending: true }).limit(12)),
-      trace.run('supabase.user_context.scheduled_tasks', () => supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12))
+      trace.run('supabase.user_context.scheduled_tasks', () => supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12))
     ])
     : await Promise.all([
       supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
@@ -4026,7 +4026,7 @@ async function getUserContext(userId, trace = null) {
       loadKnownPeople(),
       supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle(),
       supabase.from('commitments').select('what, person_name, due_at, status').eq('user_id', userId).eq('status', 'open').order('due_at', { ascending: true }).limit(12),
-      supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state, context_event').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12)
+      supabase.from('scheduled_tasks').select('title, recurrence, next_run_at, active, watch_state').eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(12)
     ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
@@ -9119,7 +9119,7 @@ app.get('/agent/home', requireSessionAuth, async (req, res) => {
     const [nativeContext, displays, schedules] = await Promise.all([
       supabase.from('native_context').select('location, settings, updated_at').eq('user_id', userId).maybeSingle(),
       pairedDisplays.listDisplays(supabase, userId),
-      supabase.from('scheduled_tasks').select('id, title, recurrence, next_run_at, condition, active, watch_state, context_event')
+      supabase.from('scheduled_tasks').select('id, title, recurrence, next_run_at, condition, active, watch_state')
         .eq('user_id', userId).eq('active', true).order('next_run_at', { ascending: true }).limit(24)
     ]);
     const now = new Date();

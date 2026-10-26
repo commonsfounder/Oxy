@@ -409,3 +409,31 @@ test('calculate treats ^ as a power and refuses results that are not numbers', a
   assert.equal((await handlers.calculate({ params: { expression: '(3 + 4) * 2' }, deps: {} })).result, 14);
   assert.equal((await handlers.calculate({ params: { expression: '1 / 0' }, deps: {} })).success, false);
 });
+
+test('a routine still moves to its next run when the live table lacks the run-status columns', async () => {
+  const { markRoutineRun } = require('../../api/services/routines');
+  const updates = [];
+  const supabase = {
+    from() {
+      let selected = '';
+      const chain = {
+        select: (cols) => { selected = cols; return chain; },
+        eq: () => chain,
+        single: () => Promise.resolve(selected.includes('consecutive_failures')
+          ? { data: null, error: { message: 'column routines.consecutive_failures does not exist' } }
+          : { data: { interval_minutes: 60 }, error: null }),
+        update: (patch) => { updates.push(patch); return { eq: () => Promise.resolve({ error: Object.keys(patch).includes('last_run_status') ? { message: 'no column' } : null }) }; }
+      };
+      return chain;
+    }
+  };
+  const now = new Date('2026-10-26T10:00:00Z');
+  const result = await markRoutineRun(supabase, 'r1', now, { success: false, error: 'x' });
+  assert.equal(result.ok, true);
+  assert.equal(updates.at(-1).next_run_at, '2026-10-26T11:00:00.000Z');
+});
+
+test('no query asks the live scheduled_tasks table for a column it does not have', () => {
+  const src = require('node:fs').readFileSync(require.resolve('../../api/index'), 'utf8');
+  assert.doesNotMatch(src, /from\('scheduled_tasks'\)\.select\('[^']*context_event/);
+});
