@@ -47,6 +47,29 @@ final class EnvironmentMonitor {
     }
 
     func refreshFrame(taskID: String?) async {
+        #if DEBUG
+        if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_WORKSPACE"] == "cached" {
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900))
+            image = renderer.image { context in
+                UIColor.systemBackground.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 600, height: 900))
+                let style: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 32, weight: .semibold),
+                    .foregroundColor: UIColor.label
+                ]
+                ("Sample browser capture\n\nSaved screen for UI review" as NSString)
+                    .draw(in: CGRect(x: 40, y: 60, width: 520, height: 780), withAttributes: style)
+            }
+            snapshot = AgentEnvironmentSnapshot(kind: "browser", state: "paused", taskId: taskID,
+                capturedAt: ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-600)),
+                address: nil, title: "Sample work screen", frame: nil,
+                lastAction: EnvironmentAction(label: "Saved sample screen", at: ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-600))))
+            receivedAt = .distantPast
+            loading = false
+            error = nil
+            return
+        }
+        #endif
         guard !refreshing else { return }
         refreshing = true
         defer { loading = false; refreshing = false }
@@ -85,6 +108,7 @@ final class EnvironmentMonitor {
 // The active task carries its own window, so the person never has to hunt for it.
 struct LiveWorkPreview: View {
     let taskID: String
+    var compact = false
     @State private var monitor = EnvironmentMonitor()
     @State private var open = false
     @Environment(\.scenePhase) private var scenePhase
@@ -92,7 +116,7 @@ struct LiveWorkPreview: View {
     var body: some View {
         Button { open = true } label: {
             VStack(alignment: .leading, spacing: 0) {
-                if let image = monitor.image {
+                if !compact, let image = monitor.image {
                     GeometryReader { geometry in
                         Image(uiImage: image).resizable().scaledToFill()
                             .frame(width: geometry.size.width, height: 160, alignment: .top).clipped()
@@ -101,15 +125,17 @@ struct LiveWorkPreview: View {
                 HStack(spacing: 10) {
                     AdamDot(solid: monitor.isLive, size: 8)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(monitor.pageTitle).font(.rowTitle).foregroundStyle(Color.appInk).lineLimit(1)
+                        Text(compact ? "Workspace" : monitor.pageTitle).font(compact ? .appBody(14, weight: .medium) : .rowTitle).foregroundStyle(Color.appInk)
+                            .lineLimit(compact ? nil : 1)
                         Text(monitor.previewStatus).font(.fineprint).foregroundStyle(Color.appMuted)
                     }
                     Spacer(minLength: 8)
                     AppIcon("arrow-up-right", size: 16).foregroundStyle(Color.appInk)
                 }
-                .padding(14).frame(minHeight: 52)
+                .padding(compact ? 0 : 14).frame(minHeight: compact ? 44 : 52)
             }
-            .settingsSurface(radius: 16)
+            .background(compact ? Color.clear : Color.appSurface,
+                        in: RoundedRectangle(cornerRadius: 16))
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.appScale(0.98))
@@ -118,6 +144,13 @@ struct LiveWorkPreview: View {
             if scenePhase != .background { monitor.clock = date }
         }
         .fullScreenCover(isPresented: $open) { AgentEnvironmentView(taskID: taskID, monitor: monitor) }
+        #if DEBUG
+        .task {
+            if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_WORKSPACE"] != nil {
+                open = true
+            }
+        }
+        #endif
         .task {
             await monitor.refreshFrame(taskID: taskID)
             while !Task.isCancelled {

@@ -117,3 +117,14 @@ Shared memory lives at `~/.claude/projects/-Users-chizigamonyewuchi-Documents-Ox
 ## UI work
 
 UI changes follow the loop in [docs/UI_LOOP.md](docs/UI_LOOP.md): look at real screenshots, critique hard, fix in small commits, look again, then swap roles. Check `docs/ui-loop/BATON.md` for whose turn it is.
+
+### Reference-led UI craft
+
+Use [the screenshot-derived UI playbook](docs/ui-loop/UI_CRAFT_PLAYBOOK_2026-10-26.md) alongside the existing visual references and DESIGN.md.
+
+- Inspect actual reference screens. State which layout, hierarchy, spacing, type, control or interaction quality is being adapted; a product name or a vague mood is insufficient.
+- Establish palette, typography, spacing, hierarchy and reusable component rules before implementation. Build one coherent component or flow at a time within the whole-app design.
+- Never add gratuitous text or eyebrow labels. Keep labels short; remove subtitles that repeat the label, design commentary, dotted status strings and parenthetical explanations. Necessary help belongs in accessible contextual disclosure; essential amounts, risks, errors and approval facts stay visible.
+- Avoid arbitrary gradients, emoji navigation icons and repeated generic cards. Use the existing native component system and bundled assets; add a reusable primitive only when needed.
+- Compare real before/after captures and critique the result against named references. Check populated, empty, loading, error, large-text and dark states. A successful build is not visual acceptance; a generated comp is not runtime proof.
+- Use purposeful, interruptible motion and respect Reduce Motion. Award-site polish is an aspiration, never a reason to sacrifice native usability or invent a completion claim.

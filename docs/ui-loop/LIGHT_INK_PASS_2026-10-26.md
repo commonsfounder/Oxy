@@ -1,0 +1,9 @@
+# Light Ink — 26 October 2026
+
+Chizi rejected the previous colour direction, reviewed three generated studies, chose A, and singled out the decision-question type and cohesive brand quality. The complete generated comparison is at `shots/light-ink-2026-10-26/colour-options-reference.png`. It is a concept; its exact typeface cannot be identified. User selection of the concept does not constitute acceptance of the implementation.
+
+Implemented a warm off-white, warm-stone and forest-green palette using shared AppTheme tokens. Dark appearance uses dark green-grey surfaces and a pale green action. Semantic success, warning and danger remain distinct and are not conveyed only by colour. Decision headings use native Dynamic Type title styling with slight tightening. The decision button uses the action/on-action pair. Existing appearance overrides and the spinning navigation remain. Shared tokens affect other screens, not just the two screens inspected in depth.
+
+Debug build `/tmp/adam-ui-20261026-ink-build.log`: `BUILD_EXIT 0`, `** BUILD SUCCEEDED **`. Scoped Swift parse and diff check exit0. Contrast calculations for action foreground/background: light 12.92:1, dark 11.57:1; decision text/background: light 16.12:1, dark 11.34:1. These are calculated token-pair values, not a whole-app accessibility audit.
+
+Six actual iPhone 17e Simulator captures were opened: Now populated in light/dark; quiet Now; Conversation; Activity; Apps (the helper's default debug destination under settings). All use isolated sample data; the quiet fixture contains a historical date. The generated reference and current light render align on warm neutrals and forest-green controls. Largest-text scrolling/VoiceOver, actual wheel motion, real interactions and other screens remain unverified. Shared colours have broad effect and require continued review throughout the app. No full npm run, commit, push or deploy. This is a local design candidate, not whole-app acceptance.

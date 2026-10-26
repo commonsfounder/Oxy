@@ -71,7 +71,8 @@ struct PairedDisplaysView: View {
     @State private var notice: String?
     @State private var pendingRevoke: PairedDisplay?
     @State private var showRevokeConfirmation = false
-    @State private var isLoading = false
+    @State private var isLoading = true
+    @State private var hasLoaded = false
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -86,38 +87,16 @@ struct PairedDisplaysView: View {
                     .padding(.horizontal, 4)
             }
 
-            SettingsGroup(title: "Add a screen") {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("On the screen, open \(displayAddress). It shows 4 digits. Type them here.")
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
-                    AppLineField(placeholder: "Name, like Kitchen (optional)", text: $pairingName)
-                    AppLineField(placeholder: "4 digits", text: $code)
-                        .keyboardType(.numberPad)
-                        .disabled(isWorking)
-                    if isWorking {
-                        Text("Adding…")
-                            .font(.appBody(14))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .settingsSurface()
-            }
-            .onChange(of: code) { _, newValue in
-                let digits = String(newValue.filter(\.isNumber).prefix(4))
-                if digits != newValue { code = digits }
-                if digits.count == 4 { Task { await addScreen(digits) } }
-            }
-
-            SettingsGroup(title: "Paired") {
+            if isLoading || hasLoaded || !displays.isEmpty {
+              SettingsGroup(title: "Paired screens") {
                 if isLoading {
-                    OxySkeletonCard(height: 60, cornerRadius: 16)
-                } else if displays.isEmpty {
-                    SettingsStatement(text: "No displays paired", solid: false)
-                        .padding(.horizontal, 4)
-                } else {
+                    OxySkeletonCard(height: 88, cornerRadius: 16)
+                } else if hasLoaded && displays.isEmpty {
+                    Text("No displays paired")
+                        .font(.appBody(16))
+                        .foregroundStyle(Color.appMuted)
+                        .padding(.vertical, 8)
+                } else if !displays.isEmpty {
                     SettingsList {
                         ForEach(Array(displays.enumerated()), id: \.element.id) { index, display in
                             if index > 0 { SettingsRule() }
@@ -131,12 +110,61 @@ struct PairedDisplaysView: View {
                                         .foregroundStyle(Color.appDestructive)
                                         .frame(minWidth: 44, minHeight: 44)
                                 }
+                                .disabled(isWorking)
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Forget \(display.name)")
                             }
                         }
                     }
                 }
+              }
             }
+
+            SettingsGroup(title: "Add a screen") {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Open this address on the screen")
+                            .font(.appBody(16, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                        Text(displayAddress)
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.appAccent)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Enter the 4 digits shown there")
+                            .font(.appBody(16, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                        AppLineField(placeholder: "4 digits", text: $code)
+                            .keyboardType(.numberPad)
+                            .accessibilityLabel("Pairing code")
+                        AppLineField(placeholder: "Screen name (optional)", text: $pairingName)
+                            .accessibilityLabel("Screen name, optional")
+                    }
+                    .disabled(isWorking)
+                    Button { Task { await addScreen(code) } } label: {
+                        HStack(spacing: 8) {
+                            if isWorking { ProgressView().tint(Color.appOnAction) }
+                            Text(isWorking ? "Pairing…" : "Pair screen")
+                                .font(.appBody(16, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.appOnAction)
+                        .padding(.horizontal, 20)
+                        .frame(minHeight: 48)
+                        .background(Color.appAction, in: Capsule())
+                    }
+                    .buttonStyle(.appScale)
+                    .disabled(code.count != 4 || isWorking)
+                    .opacity(code.count != 4 || isWorking ? 0.5 : 1)
+                }
+                .padding(.vertical, 8)
+            }
+            .onChange(of: code) { _, newValue in
+                let digits = String(newValue.filter(\.isNumber).prefix(4))
+                if digits != newValue { code = digits }
+            }
+
         }
         .task { await loadDisplays() }
         .refreshable { await loadDisplays() }
@@ -159,6 +187,7 @@ struct PairedDisplaysView: View {
         errorMessage = nil
         do {
             displays = try await PairedDisplaysService.fetchDisplays()
+            hasLoaded = true
         } catch {
             errorMessage = "Couldn’t load paired displays."
         }
@@ -173,7 +202,7 @@ struct PairedDisplaysView: View {
     }
 
     private func addScreen(_ digits: String) async {
-        guard !isWorking else { return }
+        guard digits.count == 4, !isWorking else { return }
         isWorking = true
         errorMessage = nil
         notice = nil

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PaymentsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var systemDismiss
     @Environment(\.revealClose) private var revealClose
     private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
@@ -11,6 +12,8 @@ struct PaymentsView: View {
     @State private var agentCard: AgentCardSummary?
     @State private var showAgentCardSheet = false
     @State private var isLoading = true
+    @State private var isRefreshing = false
+    @State private var agentCardLoaded = false
     @State private var errorMessage: String?
     @State private var confirmRemove = false
 
@@ -34,10 +37,12 @@ struct PaymentsView: View {
                             VStack(alignment: .leading, spacing: 28) {
                                 if let errorMessage {
                                     ErrorBanner(message: errorMessage, onRetry: { Task { await loadPayments() } })
+                                        .disabled(isRefreshing)
                                 }
-                                agentCardSection
+                                if agentCardLoaded || agentCard != nil { agentCardSection }
                                 if card != nil || balance != nil { otherSection }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, AppSpacing.margin)
                             .padding(.vertical, 16)
                         }
@@ -46,7 +51,15 @@ struct PaymentsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .task { await loadPayments() }
+            .task {
+                await loadPayments()
+                #if DEBUG
+                if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_PAYMENT_FORM"] == "1" {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    showAgentCardSheet = true
+                }
+                #endif
+            }
             .refreshable { await loadPayments() }
             .confirmationDialog("Remove this card?", isPresented: $confirmRemove, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { Task { await removeAgentCard() } }
@@ -57,6 +70,7 @@ struct PaymentsView: View {
             .sheet(isPresented: $showAgentCardSheet) {
                 AgentCardEntrySheet { saved in
                     agentCard = saved
+                    agentCardLoaded = true
                 }
             }
         }
@@ -65,16 +79,52 @@ struct PaymentsView: View {
     // MARK: - Sections
 
     private var agentCardSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SettingsGroup(title: "Card for checkout") {
-                SettingsList {
-                    SettingsRow(title: agentCardTitle, subtitle: agentCardSubtitle) {
-                        cardButton
+        VStack(alignment: .leading, spacing: 16) {
+            if let agentCard {
+                if !agentCardLoaded {
+                    Text("Last loaded card").font(.appBody(14)).foregroundStyle(Color.appMuted)
+                }
+                VStack(alignment: .leading, spacing: 28) {
+                    let layout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                        : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                    layout {
+                        Text("Card for checkout")
+                            .font(.appBody(14, weight: .medium))
+                        if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                        Text(agentCard.brand.capitalized)
+                            .font(.appBody(17, weight: .semibold))
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Ending in").font(.appBody(14)).foregroundStyle(Color.appMuted)
+                        Text(agentCard.last4)
+                            .font(.title.monospaced().weight(.medium))
+                            .accessibilityLabel("Card ending in \(agentCard.last4)")
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(agentCard.name).font(.appBody(16, weight: .medium))
+                        Text(agentCardSubtitle).font(.appBody(14))
+                            .foregroundStyle(Color.appMuted)
                     }
                 }
+                .foregroundStyle(Color.appInk)
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 16))
+                cardButton
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("No checkout card")
+                        .font(.appBody(20, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text("Add a card for checkouts you approve.")
+                        .font(.appBody(15))
+                        .foregroundStyle(Color.appMuted)
+                    cardButton
+                }
+                .padding(.vertical, 8)
             }
             SettingsStatement(text: "Adam asks before every payment.", solid: false, icon: "shield-check")
-                .padding(.horizontal, 4)
         }
     }
 
@@ -83,7 +133,7 @@ struct PaymentsView: View {
             HapticManager.shared.impact(.light)
             if agentCard == nil { showAgentCardSheet = true } else { confirmRemove = true }
         } label: {
-            Text(agentCard == nil ? "Add" : "Remove")
+            Text(agentCard == nil ? "Add a card" : "Remove card")
                 .font(.appBody(14, weight: .medium))
                 .foregroundStyle(agentCard == nil ? Color.appOnAction : Color.appDestructive)
                 .padding(.horizontal, agentCard == nil ? 16 : 8)
@@ -91,6 +141,7 @@ struct PaymentsView: View {
                 .background { if agentCard == nil { Capsule().fill(Color.appAction) } }
         }
         .buttonStyle(.appScale(0.96))
+        .disabled(!agentCardLoaded || isRefreshing)
         .accessibilityLabel(agentCard == nil ? "Add a checkout card" : "Remove checkout card")
     }
 
@@ -106,11 +157,6 @@ struct PaymentsView: View {
                 }
             }
         }
-    }
-
-    private var agentCardTitle: String {
-        guard let agentCard else { return "No checkout card" }
-        return "\(agentCard.brand.capitalized) •••• \(agentCard.last4)"
     }
 
     private var agentCardSubtitle: String {
@@ -129,33 +175,47 @@ struct PaymentsView: View {
         return "\(card.brand.capitalized) •••• \(card.last4)"
     }
 
-    private var cardSubtitle: String {
-        card == nil ? "No card linked" : "Linked"
-    }
-
     // MARK: - Networking
 
     private func loadPayments() async {
-        async let cardResult = fetchCard()
-        async let balanceResult = fetchBalance()
-        async let agentCardResult = fetchAgentCard()
-        let (fetchedCard, fetchedBalance, fetchedAgentCard) = await (cardResult, balanceResult, agentCardResult)
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        async let cardResult = fetch(CardResponse.self, path: "/connectors/stripe/card")
+        async let balanceResult = fetch(BalanceResponse.self, path: "/concierge/balance")
+        async let agentCardResult = fetch(AgentCardResponse.self, path: "/connectors/agent-card")
+        let results = await (cardResult, balanceResult, agentCardResult)
         await MainActor.run {
-            card = fetchedCard
-            balance = fetchedBalance ?? balance
-            agentCard = fetchedAgentCard
+            var failures: [String] = []
+            switch results.0 {
+            case .success(let response): card = response.card
+            case .failure: failures.append("linked card")
+            }
+            switch results.1 {
+            case .success(let response): balance = response.balance
+            case .failure: failures.append("balance")
+            }
+            switch results.2 {
+            case .success(let response):
+                agentCard = response.card
+                agentCardLoaded = true
+            case .failure:
+                agentCardLoaded = false
+                failures.append("checkout card")
+            }
+            errorMessage = failures.isEmpty ? nil : failures.count == 3
+                ? "Couldn't load payment methods."
+                : "Couldn't load your " + failures.joined(separator: " and ") + "."
             isLoading = false
+            isRefreshing = false
         }
     }
 
-    private func fetchAgentCard() async -> AgentCardSummary? {
+    private func fetch<Response: Decodable>(_ type: Response.Type, path: String) async -> Result<Response, Error> {
         do {
-            let data = try await APIClient.shared.request(path: "/connectors/agent-card")
-            let response = try JSONDecoder().decode(AgentCardResponse.self, from: data)
-            return response.card
+            let data = try await APIClient.shared.request(path: path)
+            return .success(try JSONDecoder().decode(type, from: data))
         } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
-            return nil
+            return .failure(error)
         }
     }
 
@@ -164,32 +224,11 @@ struct PaymentsView: View {
             _ = try await APIClient.shared.request(path: "/connectors/agent-card", method: "DELETE")
             await MainActor.run { agentCard = nil }
         } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
+            await MainActor.run { errorMessage = "Couldn't remove the card. Try again." }
         }
     }
 
-    private func fetchCard() async -> LinkedCard? {
-        do {
-            let data = try await APIClient.shared.request(path: "/connectors/stripe/card")
-            let response = try JSONDecoder().decode(CardResponse.self, from: data)
-            await MainActor.run { errorMessage = nil }
-            return response.card
-        } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
-            return nil
-        }
-    }
 
-    private func fetchBalance() async -> Double? {
-        do {
-            let data = try await APIClient.shared.request(path: "/concierge/balance")
-            let response = try JSONDecoder().decode(BalanceResponse.self, from: data)
-            return response.balance
-        } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
-            return nil
-        }
-    }
 }
 
 // MARK: - Agent card entry
@@ -198,6 +237,7 @@ struct PaymentsView: View {
 // dependency. The number/CVC never persist on device; the response is the masked summary.
 private struct AgentCardEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onSaved: (AgentCardSummary) -> Void
 
     @State private var name = ""
@@ -211,29 +251,30 @@ private struct AgentCardEntrySheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Name on card", text: $name)
+                    if appState.isDemoSession { Text("Sample").font(.caption).foregroundStyle(Color.appMuted) }
+                    TextField("Name on card", text: $name, prompt: Text("Name on card").foregroundStyle(Color.appMuted))
                         .textContentType(.name)
-                    TextField("Card number", text: $number)
+                    TextField("Card number", text: $number, prompt: Text("Card number").foregroundStyle(Color.appMuted))
                         .keyboardType(.numberPad)
                         .textContentType(.creditCardNumber)
                         .onChange(of: number) { _, new in
                             number = Self.formatCardNumber(new)
                         }
-                    TextField("Expiry (MM/YY)", text: $expiry)
+                    TextField("Expiry (MM/YY)", text: $expiry, prompt: Text("Expiry (MM/YY)").foregroundStyle(Color.appMuted))
                         .keyboardType(.numberPad)
                         .onChange(of: expiry) { _, new in
                             expiry = Self.formatExpiry(new)
                         }
-                    TextField("Security code", text: $cvc)
+                    SecureField("Security code", text: $cvc, prompt: Text("Security code").foregroundStyle(Color.appMuted))
                         .keyboardType(.numberPad)
                         .onChange(of: cvc) { _, new in
                             cvc = String(new.filter(\.isNumber).prefix(4))
                         }
                 } footer: {
-                    Text("Encrypted. Used only after you approve the total.")
+                    Text("Encrypted. Used only after you approve the total.").foregroundStyle(Color.appMuted)
                 }
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section { Text(errorMessage).foregroundStyle(Color.appDestructive) }
                 }
             }
             .navigationTitle("Card for checkout")

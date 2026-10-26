@@ -3,11 +3,14 @@ import UniformTypeIdentifiers
 
 struct AgentContinuityView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var snapshot: AgentContinuitySnapshot?
     @State private var showingImporter = false
     @State private var isLoading = true
     @State private var isWorking = false
     @State private var errorMessage: String?
+    @State private var historyError: String?
+    @State private var selectedFileName: String?
     @State private var successMessage: String?
 
     @State private var pendingData: Data?
@@ -24,18 +27,20 @@ struct AgentContinuityView: View {
                             previewCard(preview)
                         } else {
                             importCard
-                        }
-                        if let successMessage {
-                            SettingsStatement(text: successMessage, solid: true)
-                                .padding(.horizontal, 4)
-                        }
-                        if let errorMessage {
-                            ErrorBanner(message: errorMessage, onRetry: snapshot == nil ? { Task { await load() } } : nil)
-                        }
-                        if let snapshot {
-                            history(snapshot.imports)
-                        } else if isLoading {
-                            ProgressView().frame(maxWidth: .infinity).padding(.top, 30)
+                            if let successMessage {
+                                SettingsStatement(text: successMessage, solid: true)
+                            }
+                            if let errorMessage {
+                                ErrorBanner(message: errorMessage)
+                            }
+                            if let historyError {
+                                ErrorBanner(message: historyError, onRetry: { Task { await load() } })
+                            }
+                            if let snapshot {
+                                history(snapshot.imports)
+                            } else if isLoading {
+                                OxySkeletonCard(height: 88)
+                            }
                         }
                     }
                     .padding(.horizontal, AppSpacing.margin)
@@ -44,8 +49,31 @@ struct AgentContinuityView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if preview != nil {
+                importActions
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.vertical, 12)
+                    .background(Color.appBackground)
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await load() }
+        .task {
+            await load()
+            #if DEBUG
+            if PreviewData.isIsolated, let state = ProcessInfo.processInfo.environment["OXY_DEBUG_IMPORT"], ["review", "failure"].contains(state) {
+                preview = AgentContinuityPreview(source: "chatgpt",
+                    counts: AgentContinuityPreviewCounts(conversations: 12, messages: 56, projects: 1, documents: 2, instructions: 0, memories: 3, workflows: 2, scheduledWorkflows: 1, eventWorkflows: 1),
+                    coverage: [:], workflows: [
+                        AgentContinuityWorkflow(name: "Morning update", triggerKind: "schedule", intervalMinutes: 1440, activeAtSource: true, prompt: "Sample morning update"),
+                        AgentContinuityWorkflow(name: "On request", triggerKind: "event", intervalMinutes: nil, activeAtSource: false, prompt: "Sample on-request workflow")
+                    ])
+                pendingData = Data("[]".utf8)
+                selectedFileName = "sample-chatgpt-export.zip"
+                if state == "failure" { await confirmImport() }
+            }
+            #endif
+        }
         .fileImporter(
             isPresented: $showingImporter,
             allowedContentTypes: [.zip, .json],
@@ -60,17 +88,14 @@ struct AgentContinuityView: View {
 
     private var importCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Bring your history")
-                .font(.rowTitle)
-                .foregroundStyle(Color.appInk)
-            Text("Import a .zip export. A .json includes conversations only.")
-                .font(.appBody(13))
+            Text("Choose a ChatGPT or Claude export (.zip or .json).")
+                .font(.appBody(16))
                 .foregroundStyle(Color.appMuted)
             Button {
                 showingImporter = true
             } label: {
                 HStack {
-                    Text(isWorking ? "Reading…" : "Choose export")
+                    Text(isWorking ? "Reading…" : "Choose file")
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
@@ -83,31 +108,36 @@ struct AgentContinuityView: View {
             .buttonStyle(.appScale(0.97))
             .disabled(isWorking)
         }
-        .padding(18)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(radius: 20)
     }
 
     // MARK: - Confirm
 
     private func previewCard(_ preview: AgentContinuityPreview) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("\(preview.source.capitalized) export")
+            Text("\(sourceName(preview.source)) export")
                 .font(.rowTitle)
                 .foregroundStyle(Color.appInk)
+            if let selectedFileName {
+                Text(selectedFileName).font(.appBody(14)).foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(coverageRows(preview), id: \.label) { row in
-                    HStack(spacing: 10) {
-                        AppIcon(row.found ? "bolt" : "dotted", size: 12)
-                            .foregroundStyle(row.found ? Color.appAccent : Color.appMuted)
+                    let layout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                        : AnyLayout(HStackLayout(spacing: 10))
+                    layout {
                         Text(row.label)
-                            .font(.appBody(13, weight: row.found ? .medium : .regular))
-                            .foregroundStyle(row.found ? Color.appInk : Color.appMuted)
-                        Spacer()
+                            .font(.appBody(16, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                        if !typeSize.isAccessibilitySize { Spacer(minLength: 12) }
                         Text(row.detail)
-                            .font(.appBody(12))
+                            .font(.appBody(15))
                             .foregroundStyle(Color.appMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -118,7 +148,7 @@ struct AgentContinuityView: View {
                     Text("Automations")
                         .font(.rowTitle)
                         .foregroundStyle(Color.appInk)
-                    Text("These arrive switched off. Turn each one off in \(preview.source.capitalized) before enabling it here, or it runs twice.")
+                    Text("Imported automations start switched off. Disable matching automations in \(sourceName(preview.source)) before enabling them here.")
                         .font(.appBody(12))
                         .foregroundStyle(Color.appMuted)
                     ForEach(preview.workflows.prefix(8)) { workflow in
@@ -129,7 +159,7 @@ struct AgentContinuityView: View {
                                 Text(workflow.name)
                                     .font(.appBody(13, weight: .medium))
                                     .foregroundStyle(Color.appInk)
-                                Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger — runs only when you ask")
+                                Text(workflow.isScheduled ? cadence(workflow.intervalMinutes) : "Event trigger")
                                     .font(.appBody(12))
                                     .foregroundStyle(Color.appMuted)
                             }
@@ -143,28 +173,43 @@ struct AgentContinuityView: View {
                 }
             }
 
-            HStack(spacing: 12) {
-                Button {
-                    Task { await confirmImport() }
-                } label: {
-                    Text(isWorking ? "Importing…" : "Import")
-                        .font(.appBody(15, weight: .medium))
-                        .foregroundStyle(Color.appOnAction)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Capsule().fill(Color.appAction))
-                }
-                .buttonStyle(.appScale(0.98))
-                .disabled(isWorking)
-
-                Button("Cancel") { reset() }
-                    .font(.appBody(14, weight: .medium))
-                    .foregroundStyle(Color.appMuted)
-                    .disabled(isWorking)
+            if let errorMessage {
+                ErrorBanner(message: errorMessage)
             }
         }
-        .padding(18)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(radius: 20)
+    }
+
+    private var importActions: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Button { Task { await confirmImport() } } label: {
+                Text(isWorking ? "Importing…" : "Import")
+                    .font(.appBody(16, weight: .semibold))
+                    .foregroundStyle(Color.appOnAction)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Color.appAction, in: Capsule())
+            }
+            .buttonStyle(.appScale)
+            .disabled(isWorking)
+            Button("Cancel") { reset() }
+                .font(.appBody(16, weight: .medium))
+                .foregroundStyle(Color.appAccent)
+                .frame(minWidth: 64, minHeight: 44)
+                .buttonStyle(.appScale)
+                .disabled(isWorking)
+        }
+    }
+
+    private func sourceName(_ source: String) -> String {
+        switch source.lowercased() {
+        case "chatgpt": return "ChatGPT"
+        case "claude": return "Claude"
+        default: return source.capitalized
+        }
     }
 
     private struct CoverageRow { let label: String; let detail: String; let found: Bool }
@@ -174,8 +219,8 @@ struct AgentContinuityView: View {
         var rows: [CoverageRow] = [
             CoverageRow(label: "Conversations", detail: "\(counts.conversations)", found: counts.conversations > 0),
             CoverageRow(label: "Messages", detail: "\(counts.messages)", found: counts.messages > 0),
-            CoverageRow(label: "Instructions", detail: counts.instructions > 0 ? "\(counts.instructions)" : "not in this export", found: counts.instructions > 0),
-            CoverageRow(label: "Memory", detail: counts.memories > 0 ? "\(counts.memories)" : "not in this export", found: counts.memories > 0)
+            CoverageRow(label: "Instructions", detail: counts.instructions > 0 ? "\(counts.instructions)" : "Not included", found: counts.instructions > 0),
+            CoverageRow(label: "Memory", detail: counts.memories > 0 ? "\(counts.memories)" : "Not included", found: counts.memories > 0)
         ]
         if counts.projects > 0 { rows.append(CoverageRow(label: "Projects", detail: "\(counts.projects)", found: true)) }
         if counts.documents > 0 { rows.append(CoverageRow(label: "Documents", detail: "\(counts.documents)", found: true)) }
@@ -204,7 +249,7 @@ struct AgentContinuityView: View {
 
     private func history(_ imports: [AgentContinuityImport]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Imported")
+            Text("Import history")
                 .font(.sectionLabel)
                 .foregroundStyle(Color.appMuted)
                 .padding(.horizontal, 4)
@@ -215,12 +260,15 @@ struct AgentContinuityView: View {
             } else {
                 ForEach(imports) { item in
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(item.source.capitalized).font(.appBody(14, weight: .semibold))
-                            Spacer()
+                        let layout = typeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                            : AnyLayout(HStackLayout())
+                        layout {
+                            Text(sourceName(item.source)).font(.appBody(14, weight: .semibold))
+                            if !typeSize.isAccessibilitySize { Spacer() }
                             Text(item.status.capitalized)
                                 .font(.appBody(12, weight: .semibold))
-                                .foregroundStyle(item.status == "failed" ? Color.appDestructive : Color.appAccent)
+                                .foregroundStyle(item.status == "failed" ? Color.appDestructive : Color.appMuted)
                         }
                         Text("\(item.conversationCount) conversations · \(item.messageCount) messages · \(item.memoryCount) memories")
                             .font(.appBody(12))
@@ -235,7 +283,13 @@ struct AgentContinuityView: View {
     // MARK: - Actions
 
     private func load() async {
-        do { snapshot = try await AgentContinuityService.fetch() } catch { errorMessage = "Couldn't load import history." }
+        isLoading = true
+        historyError = nil
+        do {
+            snapshot = try await AgentContinuityService.fetch()
+        } catch {
+            historyError = "Couldn't load import history."
+        }
         isLoading = false
     }
 
@@ -249,6 +303,7 @@ struct AgentContinuityView: View {
             let data = try Data(contentsOf: url)
             preview = try await AgentContinuityService.preview(fileData: data)
             pendingData = data
+            selectedFileName = url.lastPathComponent
         } catch {
             errorMessage = "Couldn't read that export."
         }
@@ -256,7 +311,7 @@ struct AgentContinuityView: View {
     }
 
     private func confirmImport() async {
-        guard let pendingData else { return }
+        guard let pendingData, !isWorking else { return }
         isWorking = true
         errorMessage = nil
         do {
@@ -266,9 +321,9 @@ struct AgentContinuityView: View {
             if counts.workflows > 0 { parts.append("\(counts.workflows) automations, switched off") }
             successMessage = "Imported " + parts.joined(separator: ", ") + "."
             reset()
-            snapshot = try await AgentContinuityService.fetch()
+            await load()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Couldn't import these chats. Try again."
         }
         isWorking = false
     }
@@ -276,5 +331,7 @@ struct AgentContinuityView: View {
     private func reset() {
         preview = nil
         pendingData = nil
+        selectedFileName = nil
+        errorMessage = nil
     }
 }

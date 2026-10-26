@@ -1,0 +1,9 @@
+# Structural pass — 26 October 2026
+
+After rejecting repeated mockups, Chizi asked to proceed. Actual SwiftUI edited: decision information now sits on the canvas with a compact review action; in-progress work uses open rows; Now uses an actionable compact Today suggestion and Memory / Your home rows instead of large tiles. Preserved decision facts and review, stop, dismiss and destination actions. This is a partial local implementation, not a whole-app rebuild or user acceptance. No backend changes. User-selected warm/green palette and wheel remain.
+
+Design provenance: Things reference's compact rows and uncluttered separation inform this pass; user-selected Light Ink palette is preserved. No generated study is treated as an accepted specification. Existing conversation screen was inspected but not structurally rebuilt here.
+
+Initial Debug build `/tmp/adam-structural-ui-20261026.log`: `BUILD_EXIT 0`, `** BUILD SUCCEEDED **`. Initial six isolated iPhone 17e captures opened: quiet home, decision/work light and dark, largest text, conversation outcome and error. Quiet suggestion appeared insufficiently actionable; revised it to show Ask Adam, then final Debug build `/tmp/adam-structural-ui-20261026-final.log` returned `BUILD_EXIT 0`, `** BUILD SUCCEEDED **`; final quiet capture opened. `swiftc -frontend -parse` and scoped `git diff --check` exited0. The quiet fixture still contains a fixed past date; it is sample data, not a real calendar claim.
+
+Native AXe returned exit0 but an empty application children array; interaction, VoiceOver, scroll reachability, and wheel behaviour remain unverified. Large-text screenshot shows review button partially below the initial viewport; ability to scroll to it remains unproven. No npm test, commit, push or deploy; not required for this uncommitted iOS pass. Capture app terminated; 17e restored large/light. Continue full app redesign and real interaction proof; do not call this pass completion.

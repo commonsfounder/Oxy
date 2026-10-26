@@ -11,9 +11,6 @@ struct ErrorBanner: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
             : AnyLayout(HStackLayout(spacing: 10))
         layout {
-            AppIcon("wifi-alert", size: 14)
-                .foregroundStyle(Color.appMuted)
-
             Text(message)
                 .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)

@@ -172,6 +172,7 @@ enum SettingsLead {
 }
 
 struct SettingsRow<Trailing: View>: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let title: String
     var subtitle: String? = nil
     var lead: SettingsLead? = nil
@@ -191,36 +192,43 @@ struct SettingsRow<Trailing: View>: View {
     }
 
     private var row: some View {
-        HStack(spacing: 12) {
-            if let lead {
-                Group {
-                    switch lead {
-                    case .icon(let name):
-                        AppIcon(name, size: 22)
-                            .foregroundStyle(Color.appAccent)
-                            .frame(width: 32, height: 40)
-                    case .dot(let solid): AdamDot(solid: solid, size: 10).frame(width: 22)
+        let stacked = typeSize.isAccessibilitySize && action == nil
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            HStack(alignment: .top, spacing: 12) {
+                if let lead {
+                    Group {
+                        switch lead {
+                        case .icon(let name):
+                            AppIcon(name, size: 22)
+                                .foregroundStyle(Color.appAccent)
+                                .frame(width: 32, height: 40)
+                        case .dot(let solid): AdamDot(solid: solid, size: 10).frame(width: 22)
+                        }
                     }
                 }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.appBody(18, weight: .medium))
-                    .foregroundStyle(Color.appInk)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appMuted)
-                        .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.appBody(18, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.appMuted)
+                    }
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 8)
             trailing
         }
         .padding(.vertical, 8)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
     }
+
 }
 
 extension SettingsRow where Trailing == EmptyView {
@@ -280,7 +288,7 @@ struct SettingsStatement: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(solid ? "On its own: \(text)" : "Asks first: \(text)")
+        .accessibilityLabel(text)
     }
 }
 

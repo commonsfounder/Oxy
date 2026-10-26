@@ -44,15 +44,17 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.35), value: appState.isAuthenticated)
         .preferredColorScheme((ThreadBackground(rawValue: backgroundRaw) ?? .automatic).scheme)
         .task {
-            appState.restoreSession()
             #if DEBUG
-            if !appState.isAuthenticated,
-               ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" {
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" {
                 appState.userId = "demo@oxy.app"
                 appState.token = "debug-local"
                 appState.isDemoSession = true
                 appState.isAuthenticated = true
+            } else {
+                appState.restoreSession()
             }
+            #else
+            appState.restoreSession()
             #endif
             didRestoreSession = true
         }

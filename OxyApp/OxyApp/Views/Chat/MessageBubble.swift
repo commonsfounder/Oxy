@@ -21,6 +21,7 @@ struct MessageBubble: View {
     @State private var showMissingInformationSheet = false
 
     private var isUser: Bool { message.role == .user }
+    private var userContent: (text: String, name: String?) { AttachmentTag.splitFileTag(message.content) }
 
     private func resolveOffer(_ offer: MessageOffer) {
         handledOffers.insert(offer.id)
@@ -43,6 +44,8 @@ struct MessageBubble: View {
         switch action.action {
         case "book_uber", "search_flights", "search_hotels":
             return true
+        case "show_results":
+            return !action.isFailure && (action.results?.count ?? 0) >= 2
         case "get_directions", "plan_trip":
             return !action.isFailure && (action.deepLink != nil || action.webLink != nil)
         case "find_place":
@@ -137,15 +140,12 @@ struct MessageBubble: View {
             .flatMap { $0.selection?.options ?? [] }
     }
 
-    // User turns stay compact rounded bubbles, right-aligned. Assistant turns sit
-    // as plain text directly on the canvas — no fill, no accent bar — so the
-    // conversation reads like a considered reply, not a chat-widget echo.
     private var bubbleShape: some Shape {
         RoundedRectangle(cornerRadius: AppRadius.bubble, style: .continuous)
     }
 
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 6) {
+        VStack(alignment: .leading, spacing: isCompact ? 2 : 6) {
             if isUser, let data = message.attachmentImage, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
@@ -157,36 +157,56 @@ struct MessageBubble: View {
             // Message content
             if !message.content.isEmpty && uberAction == nil {
                 if isUser {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        if let quote = ReplyQuote.split(message.content) {
-                            (Text("\(quote.who == "You" ? "Replying to yourself" : "Replying to \(quote.who)") · ").fontWeight(.medium) + Text(quote.snippet))
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 6) {
+                            Text("You")
+                                .font(.appBody(12, weight: .semibold))
+                            Text(message.timestamp.formatted(
+                                date: Calendar.current.isDateInToday(message.timestamp) ? .omitted : .abbreviated,
+                                time: .shortened))
                                 .font(.appBody(12))
+                                .monospacedDigit()
+                            if message.queuedForActiveTask {
+                                Text("Queued")
+                                    .font(.appBody(12, weight: .medium))
+                            }
+                        }
+                        .foregroundStyle(Color.appMuted)
+                        if let quote = ReplyQuote.split(userContent.text) {
+                            Text("Replying to \(quote.who) · \(quote.snippet)")
+                                .font(.appBody(13))
                                 .foregroundStyle(Color.appMuted)
                                 .lineLimit(2)
-                                .multilineTextAlignment(.trailing)
-                                .padding(.leading, 48)
-                                .padding(.trailing, 2)
                         }
-                        HStack(alignment: .bottom, spacing: 0) {
-                            Spacer(minLength: 64)
-                            Text(AttributedString(ReplyQuote.split(message.content)?.body ?? message.content))
-                                .font(.appBody(isCompact ? 16 : 18))
-                                .foregroundStyle(Color.appInk.opacity(0.9))
-                                .lineSpacing(isCompact ? 3 : 4)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
-                                .background(bubbleShape.fill(Color.appUserBubble))
-                                .overlay(alignment: .topLeading) {
-                                    if let reaction { ReactionBadge(emoji: reaction).offset(x: -14, y: -16) }
-                                }
-                        }
-                        if message.queuedForActiveTask {
-                            Text("Waiting its turn")
-                                .font(.appBody(11.5, weight: .medium))
-                                .foregroundStyle(Color.appMuted)
-                                .padding(.trailing, 2)
+                        Text(AttributedString(ReplyQuote.split(userContent.text)?.body ?? userContent.text))
+                            .font(.appBody(isCompact || message.content.count < 48 ? 18 : 22, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(alignment: .topTrailing) {
+                                if let reaction { ReactionBadge(emoji: reaction).offset(x: 10, y: -14) }
+                            }
+                        if let name = userContent.name {
+                            HStack(spacing: 12) {
+                                AppIcon("doc", size: 22)
+                                    .foregroundStyle(Color.appAccent)
+                                    .frame(width: 32, height: 40)
+                                Text(name)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(Color.appInk)
+                                    .lineLimit(3)
+                                    .truncationMode(.middle)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(12)
+                            .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Attachment, \(name)")
                         }
                     }
+                    .padding(.top, 18)
+                    .padding(.bottom, 4)
                 } else {
                     HStack(spacing: 0) {
                         VStack(alignment: .leading, spacing: 0) {
@@ -211,6 +231,13 @@ struct MessageBubble: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 }
+            }
+
+            if message.replyWasStopped {
+                Text("Reply stopped")
+                    .font(.appBody(13, weight: .medium))
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.top, 8)
             }
 
             if let turnError = message.turnError {
@@ -254,6 +281,8 @@ struct MessageBubble: View {
                             DirectionsResultCard(action: action)
                         } else if action.action == "find_place" {
                             PlaceResultsCard(action: action)
+                        } else if action.action == "show_results" {
+                            ResultOptionsCard(action: action, messageID: message.id)
                         }
                     }
 

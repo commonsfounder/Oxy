@@ -14,10 +14,12 @@ struct ProfileView: View {
     @State private var isDeletingAccount = false
     @State private var isSigningOutAll = false
     @State private var accountStatusText: String?
+    @State private var statusAction: AccountAction?
+    private enum AccountAction { case export, signOut, delete }
+    private var isBusy: Bool { isExportingData || isDeletingAccount || isSigningOutAll }
     @State private var sharePayload: SharePayload?
 
     @Environment(\.colorScheme) private var colorScheme
-    private var lightMode: Bool { colorScheme == .light }
 
     var body: some View {
         NavigationStack {
@@ -28,21 +30,21 @@ struct ProfileView: View {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
                     ScrollView {
                         VStack(alignment: .leading, spacing: 36) {
-                            SettingsList {
-                                identityRow(label: "Account ID", value: appState.userId)
-                            }
+                            identityRow(label: "Account ID", value: appState.userId)
 
                             section(title: "Your data") {
                                 actionRow(
-                                    label: isExportingData ? "Preparing export…" : "Export my data",
+                                    label: isExportingData ? "Preparing export…" : "Export data",
                                     action: exportMyData
                                 )
-                                .disabled(isExportingData || isDeletingAccount)
+                                .disabled(isBusy)
+                                status(for: .export)
+                                SettingsRule()
+                                actionRow(label: "Import from ChatGPT or Claude", action: { showsImport = true })
+                                    .disabled(isBusy)
                             }
 
-                            section(title: "Import and help") {
-                                actionRow(label: "Import from ChatGPT or Claude", action: { showsImport = true })
-                                SettingsRule()
+                            section(title: "Help and policies") {
                                 legalLink(label: "Support", path: "/support")
                                 SettingsRule()
                                 legalLink(label: "Privacy Policy", path: "/privacy")
@@ -50,39 +52,28 @@ struct ProfileView: View {
                                 legalLink(label: "Terms of Use", path: "/terms")
                             }
 
-                            section(title: "Sign out and delete") {
-                                actionRow(
-                                    label: "Sign out",
-                                    action: { showSignOutConfirm = true }
-                                )
-
+                            section(title: "Sign out") {
+                                actionRow(label: "Sign out", action: { showSignOutConfirm = true })
+                                    .disabled(isBusy)
                                 SettingsRule()
-
                                 actionRow(
                                     label: isSigningOutAll ? "Signing out…" : "Sign out of all devices",
                                     action: { showSignOutAllConfirm = true }
                                 )
-                                .disabled(isSigningOutAll)
+                                .disabled(isBusy)
+                                status(for: .signOut)
+                            }
 
-                                SettingsRule()
-
+                            VStack(alignment: .leading, spacing: 8) {
                                 actionRow(
                                     label: isDeletingAccount ? "Deleting account…" : "Delete account",
                                     destructive: true,
                                     action: { showDeleteAccountConfirm = true }
                                 )
-                                .disabled(isExportingData || isDeletingAccount)
-
-                                if let accountStatusText {
-                                    SettingsRule()
-                                    Text(accountStatusText)
-                                        .font(.appBody(12, weight: .regular))
-                                        .foregroundStyle(Color.appMuted)
-                                        .lineSpacing(3)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.vertical, 14)
-                                }
+                                .disabled(isBusy)
+                                status(for: .delete)
                             }
+
 
                         }
                         .padding(.horizontal, AppSpacing.margin)
@@ -92,6 +83,22 @@ struct ProfileView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            #if DEBUG
+            .task {
+                guard PreviewData.isIsolated, let state = ProcessInfo.processInfo.environment["OXY_DEBUG_ACCOUNT"] else { return }
+                try? await Task.sleep(for: .milliseconds(900))
+                switch state {
+                case "delete": showDeleteAccountConfirm = true
+                case "signout": showSignOutConfirm = true
+                case "signout-all": showSignOutAllConfirm = true
+                case "export-failure":
+                    statusAction = .export
+                    accountStatusText = "Couldn't export your data. Try again."
+                case "import": showsImport = true
+                default: break
+                }
+            }
+            #endif
             .fullScreenCover(isPresented: $showsImport) {
                 AgentContinuityView().swipeToDismiss().environment(\.colorScheme, colorScheme)
             }
@@ -99,13 +106,13 @@ struct ProfileView: View {
                 Button("Sign out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Are you sure you want to sign out?")
+                Text("You can sign in again with the same account.")
             }
             .alert("Sign out of all devices", isPresented: $showSignOutAllConfirm) {
                 Button("Sign out everywhere", role: .destructive) { signOutAllDevices() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This will invalidate all active sessions on every device. You will be signed out here too.")
+                Text("You'll need to sign in again on every device, including this one.")
             }
             .alert("Delete account", isPresented: $showDeleteAccountConfirm) {
                 Button("Delete", role: .destructive) { deleteAccount() }
@@ -134,19 +141,29 @@ struct ProfileView: View {
         }
     }
 
-    private func identityRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.appBody(15, weight: .medium))
-                .foregroundStyle(Color.appInk)
-            Spacer(minLength: 16)
-            Text(value)
-                .font(.appMono(12))
+    @ViewBuilder
+    private func status(for action: AccountAction) -> some View {
+        if statusAction == action, let accountStatusText {
+            Text(accountStatusText)
+                .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .accessibilityAddTraits(.updatesFrequently)
         }
-        .frame(minHeight: 50)
+    }
+
+    private func identityRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.appBody(14)).foregroundStyle(Color.appMuted)
+            Text(value)
+                .font(.caption.monospaced())
+                .foregroundStyle(Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func actionRow(
@@ -161,7 +178,8 @@ struct ProfileView: View {
             HStack {
                 Text(label)
                     .font(.appBody(15, weight: .medium))
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 AppIcon("chevron-right", size: 12)
                     .foregroundStyle(Color.appMuted)
             }
@@ -175,7 +193,8 @@ struct ProfileView: View {
     // MARK: - Account actions
 
     private func exportMyData() {
-        guard !isExportingData else { return }
+        guard !isBusy else { return }
+        statusAction = .export
         accountStatusText = nil
         isExportingData = true
         Task {
@@ -192,14 +211,15 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isExportingData = false
-                    accountStatusText = "Couldn't export your data: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't export your data. Try again."
                 }
             }
         }
     }
 
     private func signOutAllDevices() {
-        guard !isSigningOutAll else { return }
+        guard !isBusy else { return }
+        statusAction = .signOut
         accountStatusText = nil
         isSigningOutAll = true
         Task {
@@ -212,14 +232,15 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isSigningOutAll = false
-                    accountStatusText = "Couldn't sign out all devices: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't sign out all devices. Try again."
                 }
             }
         }
     }
 
     private func deleteAccount() {
-        guard !isDeletingAccount else { return }
+        guard !isBusy else { return }
+        statusAction = .delete
         accountStatusText = nil
         isDeletingAccount = true
         Task {
@@ -232,7 +253,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isDeletingAccount = false
-                    accountStatusText = "Couldn't delete your account: \(error.localizedDescription)"
+                    accountStatusText = "Couldn't delete your account. Try again."
                 }
             }
         }

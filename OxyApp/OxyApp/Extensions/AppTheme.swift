@@ -11,18 +11,18 @@ extension Color {
     static let appBackground = Color(UIColor { trait in
         if let chosen = ThreadBackground.current.uiColor { return chosen }
         return trait.userInterfaceStyle == .dark
-            ? UIColor(red: 0.055, green: 0.067, blue: 0.082, alpha: 1)   // #0E0D22, deep indigo
-            : UIColor(red: 0.965, green: 0.976, blue: 0.992, alpha: 1)   // #F6F9FD
+            ? UIColor(red: 0.075, green: 0.09, blue: 0.08, alpha: 1)
+            : UIColor(red: 0.98, green: 0.976, blue: 0.961, alpha: 1)
     })
 
     static let appSurface = appDynamicColor(
-        dark: Color(red: 0.082, green: 0.082, blue: 0.082),   // #151515
+        dark: Color(red: 0.12, green: 0.14, blue: 0.13),
         light: Color.white
     )
 
     static let appSurface2 = appDynamicColor(
-        dark: Color(red: 0.114, green: 0.114, blue: 0.114),   // #1D1D1D
-        light: Color(red: 0.945, green: 0.945, blue: 0.937)   // #F1F1EF
+        dark: Color(red: 0.17, green: 0.19, blue: 0.18),
+        light: Color(red: 0.93, green: 0.93, blue: 0.91)
     )
 
     static let appHairline = appDynamicColor(
@@ -36,36 +36,48 @@ extension Color {
     )
 
     static let appMuted = appDynamicColor(
-        dark: Color(red: 0.64, green: 0.68, blue: 0.73),
+        dark: Color(red: 0.68, green: 0.71, blue: 0.69),
         light: Color(red: 0.420, green: 0.420, blue: 0.420)
     )
 
     static let appAccent = appDynamicColor(
-        dark: Color(red: 0.52, green: 0.72, blue: 1.00),   // #F5C44C, one warm accent as in Flighty
-        light: Color(red: 0.075, green: 0.369, blue: 0.882)   // #135EE1
+        dark: Color(red: 0.72, green: 0.84, blue: 0.76),
+        light: Color(red: 0.07, green: 0.22, blue: 0.16)
     )
 
-    /// The two accents sit on opposite sides of mid-luminance, so a single fixed
-    /// foreground can't serve both: near-black on the light-mode antique gold is
-    /// 3.5:1. Pairing each accent with its own ink gives 7.8:1 dark / 5.0:1 light.
+    /// Each appearance pairs the action colour with contrasting ink.
     static let appOnAccent = appDynamicColor(
-        dark: Color.white,
+        dark: Color(red: 0.035, green: 0.10, blue: 0.06),
         light: Color.white
+    )
+
+    /// A decision keeps its own visible place until its answer is confirmed.
+    static let appDecisionSurface = appDynamicColor(
+        dark: Color(red: 0.20, green: 0.21, blue: 0.18),
+        light: Color(red: 0.94, green: 0.93, blue: 0.89)
+    )
+    static let appMemorySurface = appDynamicColor(
+        dark: Color(red: 0.18, green: 0.20, blue: 0.18),
+        light: Color(red: 0.93, green: 0.93, blue: 0.91)
+    )
+    static let appHomeSurface = appDynamicColor(
+        dark: Color(red: 0.20, green: 0.21, blue: 0.19),
+        light: Color(red: 0.91, green: 0.92, blue: 0.89)
     )
 
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = appDynamicColor(
         dark: Color(red: 0.30, green: 0.75, blue: 0.50),
-        light: Color(red: 0.11, green: 0.52, blue: 0.32)
+        light: Color(red: 0.08, green: 0.44, blue: 0.27)
     )
     static let appWarning = appDynamicColor(
         dark: Color(red: 0.95, green: 0.70, blue: 0.25),
-        light: Color(red: 0.72, green: 0.48, blue: 0.05)
+        light: Color(red: 0.55, green: 0.34, blue: 0.035)
     )
     static let appAttention = appWarning
     static let appLive = appDynamicColor(
         dark: Color(red: 0.20, green: 0.85, blue: 0.55),
-        light: Color(red: 0.08, green: 0.58, blue: 0.36)
+        light: Color(red: 0.08, green: 0.44, blue: 0.27)
     )
 
     static let appScrim = Color.black.opacity(0.5)
@@ -74,10 +86,10 @@ extension Color {
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
-    /// The user's own messages: a soft slate-blue wash, quieter than Adam's words.
+    /// The user's own messages use a quiet neutral wash.
     static let appUserBubble = appDynamicColor(
         dark: Color.white.opacity(0.13),
-        light: Color(red: 0.075, green: 0.369, blue: 0.882).opacity(0.12)
+        light: Color(red: 0.07, green: 0.22, blue: 0.16).opacity(0.08)
     )
 
     /// Adam's side of the conversation: message bubbles and cards.
@@ -89,9 +101,9 @@ extension Color {
 
     // MARK: - Roles (thread and cards)
     /// The strongest surface against the current background: the button to press.
-    static let appAction = appDynamicColor(dark: Color(red: 0.72, green: 0.94, blue: 0.85), light: Color(red: 0.075, green: 0.369, blue: 0.882))
+    static let appAction = appAccent
     /// Text on `appAction`.
-    static let appOnAction = appDynamicColor(dark: Color(red: 0.04, green: 0.12, blue: 0.10), light: Color.white)
+    static let appOnAction = appOnAccent
     /// Adam is doing something (progress, live watches).
     static let appWorking = appAccent
     /// Something is waiting on the user.
@@ -145,8 +157,20 @@ extension Font {
     static var sectionTitle: Font { .appRounded(20, weight: .semibold, relativeTo: .title3) }
     /// Big friendly figures and focal lines.
     static func appRounded(_ size: CGFloat, weight: Font.Weight = .bold, relativeTo style: UIFont.TextStyle = .title1) -> Font {
-        let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size, compatibleWith: nil)
-        return .system(size: scaled, weight: weight, design: .default)
+        let relativeStyle: Font.TextStyle
+        switch style {
+        case .largeTitle: relativeStyle = .largeTitle
+        case .title1: relativeStyle = .title
+        case .title2: relativeStyle = .title2
+        case .title3: relativeStyle = .title3
+        case .headline: relativeStyle = .headline
+        case .subheadline: relativeStyle = .subheadline
+        case .footnote: relativeStyle = .footnote
+        case .caption1: relativeStyle = .caption
+        case .caption2: relativeStyle = .caption2
+        default: relativeStyle = .body
+        }
+        return .system(relativeStyle, design: .default).weight(weight)
     }
 }
 
@@ -269,6 +293,20 @@ private func appFrauncesUIFont(size: CGFloat, weight: CGFloat, soft: CGFloat, wo
     return UIFont(descriptor: descriptor, size: size)
 }
 
+private func appTextStyle(for size: CGFloat) -> Font.TextStyle {
+    switch size {
+    case ...11: return .caption2
+    case ...12: return .caption
+    case ...14: return .footnote
+    case ...16: return .subheadline
+    case ...19: return .body
+    case ...21: return .title3
+    case ...25: return .title2
+    case ...30: return .title
+    default: return .largeTitle
+    }
+}
+
 extension Font {
     static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .default)
@@ -296,13 +334,11 @@ extension Font {
 
     /// Interface text follows the phone's preferred reading size.
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
-        return .system(size: scaled, weight: weight)
+        .system(appTextStyle(for: size), design: .default).weight(weight)
     }
 
     static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let base = UIFont.monospacedSystemFont(ofSize: size, weight: appUIFontWeight(weight))
-        return Font(UIFontMetrics(forTextStyle: .body).scaledFont(for: base))
+        .system(appTextStyle(for: size), design: .monospaced).weight(weight)
     }
 }
 
@@ -320,7 +356,10 @@ extension View {
 // MARK: - List primitives
 
 extension Color {
-    static let appDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
+    static let appDanger = appDynamicColor(
+        dark: Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255),
+        light: Color(red: 0.72, green: 0.10, blue: 0.12)
+    )
 }
 
 struct AppDivider: View {
@@ -371,6 +410,7 @@ struct AppLineField: View {
             .font(.appBody(15))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
+            .frame(minHeight: 44)
             .focused($isFocused)
             .task { if autofocus { try? await Task.sleep(for: .milliseconds(250)); isFocused = true } }
 
@@ -921,8 +961,7 @@ extension View {
 extension Color {
     /// Unselected toggle track.
     static let appToggleOff = Color.appAdaptive(dark: .white, light: .black).opacity(0.25)
-    /// System red — reads on black and white alike, unlike the softer `appDanger` coral.
-    static let appDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
+    static let appDestructive = appDanger
 }
 
 /// Full-bleed dark hairline (#1A1A1A, 0.5pt) — the Adam row separator.
@@ -949,26 +988,12 @@ struct SettingsToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        Button {
-            withAnimation(.appToggle) { isOn.toggle() }
-        } label: {
-            Capsule()
-                .fill(isOn ? Color.appAccent : Color.appAdaptive(dark: .white, light: .black).opacity(0.16))
-                .frame(width: 51, height: 31)
-                .overlay(
-                    Circle()
-                        .fill(isOn ? Color.white : Color.appAdaptive(dark: .white.opacity(0.72), light: .white))
-                        .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
-                        .frame(width: 27, height: 27)
-                        .padding(2)
-                        .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
-                )
-                .frame(width: 51, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
-        .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
+        Toggle("", isOn: $isOn)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .tint(Color.appAccent)
+            .frame(minWidth: 51, minHeight: 44)
+            .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
     }
 }
 

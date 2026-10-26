@@ -6,21 +6,24 @@ struct MainTabView: View {
     @AppStorage(ThreadBackground.storageKey) private var backgroundRaw = ThreadBackground.automatic.rawValue
     @State private var opened: ThreadMenuChoice?
     #if DEBUG
+    @State private var didOpenDebugDestination = false
     @State private var debugSignInSite: String? = ProcessInfo.processInfo.environment["OXY_DEBUG_SIGNIN"]
     #endif
-    @State private var openedFrom: CGPoint?
 
     private var background: ThreadBackground { ThreadBackground(rawValue: backgroundRaw) ?? .automatic }
 
     var body: some View {
-        ChatView(onMenuChoice: { choice, hub in
-            openedFrom = hub
-            opened = choice
-        })
+        ChatView(onMenuChoice: { choice, _ in opened = choice })
             .tint(Color.appAccent)
             .preferredColorScheme(background.scheme)
             .id(accentColor + backgroundRaw)
-            .overlay { revealOverlay }
+            .accessibilityHidden(opened != nil)
+            .fullScreenCover(item: $opened) { choice in
+                destination(choice)
+                    .preferredColorScheme(background.scheme)
+                    .tint(Color.appAccent)
+                    .swipeToDismiss()
+            }
             #if DEBUG
             .sheet(isPresented: Binding(get: { debugSignInSite != nil }, set: { if !$0 { debugSignInSite = nil } })) {
                 SiteSignInSheet(site: debugSignInSite ?? "") {}
@@ -35,38 +38,28 @@ struct MainTabView: View {
             .onAppear {
                 HapticManager.shared.prepare()
                 #if DEBUG
-                if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN"],
-                   let choice = ThreadMenuChoice(rawValue: raw) {
-                    opened = choice
+                if !didOpenDebugDestination {
+                    didOpenDebugDestination = true
+                    if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN"],
+                       let choice = ThreadMenuChoice(rawValue: raw) {
+                        opened = choice
+                    }
                 }
                 #endif
             }
     }
 
-    private static var statusBarHeight: CGFloat {
-        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }.first ?? 59
-    }
-
     @ViewBuilder
-    private var revealOverlay: some View {
-        if let choice = opened {
-            GeometryReader { proxy in
-                let frame = proxy.frame(in: .global)
-                let hub = openedFrom.map { CGPoint(x: $0.x - frame.minX, y: $0.y - frame.minY) }
-                    ?? CGPoint(x: proxy.size.width - 34, y: Self.statusBarHeight + 28)
-                CornerReveal(origin: hub, onClosed: { opened = nil }) {
-                    switch choice {
-                    case .activity: AdamActivityView()
-                    case .today: HomeFeedView()
-                    case .home: YourHomeView()
-                    case .memory: MemoryView()
-                    case .settings, .privateChat: AdamYouView()
-                    }
-                }
-            }
-            .ignoresSafeArea()
+    private func destination(_ choice: ThreadMenuChoice) -> some View {
+        switch choice {
+        case .activity: AdamActivityView()
+        case .today: HomeFeedView()
+        case .home: YourHomeView()
+        case .memory: MemoryView()
+        case .settings, .privateChat: AdamYouView()
         }
     }
+
 }
 
 struct AdamPresence: View {
@@ -268,7 +261,7 @@ private struct AdamYouView: View {
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let items = json["connections"] as? [[String: Any]] {
             total += items.filter { ($0["connected"] as? Bool) == true }.count
-        }
+        } else { appsConnected = nil; return }
         appsConnected = total
     }
 

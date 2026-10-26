@@ -7,23 +7,29 @@ struct ThreadHeader: View {
     var activity: AdamActivityState? = nil
     var deviceOnline: Bool
     var isDemo = false
+    var isComposing = false
+    var showsStatus = true
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
 
     var body: some View {
+        let titleLayout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(isIncognito ? "Private" : "Adam")
-                        .font(.appRounded(28, relativeTo: .title2))
+            VStack(alignment: .leading, spacing: 2) {
+                titleLayout {
+                    Text(isDemo && typeSize.isAccessibilitySize ? "Sample" : (isIncognito ? "Private" : "Adam"))
+                        .font(typeSize.isAccessibilitySize ? .headline : .appRounded(26, relativeTo: .title2))
                         .foregroundStyle(Color.appInk)
-                    if isDemo {
+                    if isDemo && !typeSize.isAccessibilitySize {
                         Text("Sample")
-                            .font(.appBody(12, weight: .medium))
+                            .font(.caption2.weight(.medium))
                             .foregroundStyle(Color.appMuted)
                     }
                 }
-                if let status = visibleStatus {
+                if showsStatus, let status = visibleStatus {
                     Text(status)
                         .font(.appBody(13, weight: .medium))
                         .foregroundStyle(activity == .waiting ? Color.appNeedsYou : Color.appMuted)
@@ -35,10 +41,12 @@ struct ThreadHeader: View {
                 wheelOpen = true
             } label: {
                 HStack(spacing: 8) {
-                    Text("Menu")
-                        .font(.appBody(14, weight: .medium))
-                        .foregroundStyle(Color.appMuted)
-                    WheelHub(progress: 0, incognito: isIncognito, activity: activity)
+                    if !typeSize.isAccessibilitySize {
+                        Text("Menu")
+                            .font(.appBody(13, weight: .medium))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    WheelHub(progress: 0, incognito: isIncognito)
                         .overlay(alignment: .topTrailing) { statusDot }
                         .onGeometryChange(for: CGPoint.self) { proxy in
                             let frame = proxy.frame(in: .global)
@@ -53,20 +61,17 @@ struct ThreadHeader: View {
             .accessibilityValue(isIncognito ? "Private mode on" : (visibleStatus ?? ""))
         }
         .padding(.horizontal, AppSpacing.chatMargin)
-        .padding(.vertical, 12)
-        .frame(minHeight: 72)
+        .padding(.vertical, 8)
+        .frame(minHeight: 60)
         .background(Color.appBackground.ignoresSafeArea(edges: .top))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-        }
         .animation(.appStandard, value: activity)
         .animation(.appStandard, value: deviceOnline)
     }
 
     @ViewBuilder
     private var statusDot: some View {
-        if !isWorking && deviceOnline {
-            Circle().fill(Color.appDone)
+        if activity != nil || deviceOnline {
+            Circle().fill(activity == .waiting ? Color.appNeedsYou : (activity != nil ? Color.appWorking : Color.appDone))
                 .frame(width: 9, height: 9)
                 .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
         }

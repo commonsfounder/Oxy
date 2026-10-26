@@ -69,7 +69,15 @@ struct WheelHub: View {
     var body: some View {
         let open = min(max(progress, 0), 1)
         ZStack {
-            Circle().fill(incognito && open < 0.5 ? Color.appAction : Color.appReceivedBubble)
+            Circle().fill(incognito && open < 0.5 ? Color.appAction : Color.appSurface2)
+            ForEach(0..<24, id: \.self) { tick in
+                Capsule()
+                    .fill(Color.appMuted.opacity(tick.isMultiple(of: 6) ? 0.6 : 0.25))
+                    .frame(width: 1, height: tick.isMultiple(of: 6) ? 3 : 2)
+                    .offset(y: -19)
+                    .rotationEffect(.degrees(Double(tick) * 15))
+                    .opacity(1 - open)
+            }
             if incognito {
                 GhostIcon(active: true)
                     .frame(width: 20, height: 20)
@@ -110,6 +118,8 @@ struct ThreadWheelMenu: View {
     var onChoose: (ThreadMenuChoice) -> Void
 
     @State private var progress: CGFloat = 0
+    @State private var showsList = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// The item picked up with a long press, and where the finger holding it is.
     @State private var lifted: ThreadMenuChoice?
     @State private var liftedPoint: CGPoint = .zero
@@ -136,11 +146,23 @@ struct ThreadWheelMenu: View {
     var body: some View {
         ZStack {
             if mounted {
+                if showsList || typeSize.isAccessibilitySize {
+                    navigationList
+                } else {
                 WheelLayout(progress: progress, spin: spin, hub: hub, incognito: incognito, choices: choices,
                             lifted: lifted, liftedPoint: liftedPoint,
                             onChoose: choose, onLiftMove: liftMove, onLiftEnd: liftEnd, onNudge: nudge,
                             onClose: { isOpen = false })
                     .simultaneousGesture(dragGesture)
+                    Button("All destinations") {
+                        showsList = true
+                        HapticManager.shared.select()
+                    }
+                    .font(.appBody(15, weight: .medium))
+                    .foregroundStyle(Color.appAccent)
+                    .frame(minWidth: 160, minHeight: 44)
+                    .position(x: hub.x - 110, y: hub.y + 310)
+                }
             }
         }
         .allowsHitTesting(mounted)
@@ -150,6 +172,7 @@ struct ThreadWheelMenu: View {
         .onChange(of: isOpen) { _, open in
             if open {
                 order = ThreadMenuChoice.ordered(from: orderRaw)
+                showsList = false
                 spin = 0
                 lastDetent = 0
                 mounted = true
@@ -168,6 +191,60 @@ struct ThreadWheelMenu: View {
                     if !isOpen { mounted = false }
                 }
             }
+        }
+    }
+
+    private var navigationList: some View {
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Menu").font(.pageTitle).foregroundStyle(Color.appInk)
+                    Spacer()
+                    Button("Close") { isOpen = false }
+                        .font(.appBody(17, weight: .medium))
+                        .foregroundStyle(Color.appAccent)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(choices) { choice in
+                            Button { choose(choice) } label: {
+                                HStack(spacing: 16) {
+                                    WheelGlyph(choice: choice, size: 24)
+                                        .frame(width: 44, height: 44)
+                                    Text(choice.title).font(.appBody(20, weight: .medium))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer()
+                                    AppIcon("chevron-right", size: 16)
+                                }
+                                .foregroundStyle(Color.appInk)
+                                .padding(.vertical, 10)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.appScale)
+                            Color.appHairline.frame(height: 0.5)
+                        }
+                        Button { choose(.privateChat) } label: {
+                            HStack(spacing: 16) {
+                                GhostIcon(active: incognito).frame(width: 24, height: 24)
+                                    .frame(width: 44, height: 44)
+                                Text(incognito ? "Turn off private mode" : "Private mode")
+                                    .font(.appBody(20, weight: .medium))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                            }
+                            .foregroundStyle(Color.appInk)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.appScale)
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, max(hub.y - 22, 60))
+            .padding(.bottom, 40)
         }
     }
 

@@ -13,12 +13,16 @@ struct ConnectorsView: View {
     @State private var catalogueConnected: Set<String> = []
     @State private var pending: String?
     @State private var isLoading = true
+    @State private var isRefreshing = false
+    @State private var ownLoaded = false
+    @State private var catalogueLoaded = false
     @State private var message: String?
     @State private var manage: Entry?
     @State private var place: Place?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var typeSize
 
-    private enum Place: Identifiable {
+    private enum Place: String, Identifiable {
         case displays, payments, logins
         var id: String { "\(self)" }
     }
@@ -133,10 +137,17 @@ struct ConnectorsView: View {
                     OxySkeletonCard(height: 148)
                 }
             } else {
-                Text(connectedCount == 0 ? "No apps connected" : "\(connectedCount) connected")
-                    .font(.appBody(16))
-                    .foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: false, vertical: true)
+                if ownLoaded && catalogueLoaded {
+                    if connectedCount == 0 {
+                        Text("No apps connected")
+                            .font(.appBody(16))
+                            .foregroundStyle(Color.appInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    ErrorBanner(message: "Couldn't load all your apps.", onRetry: { Task { await load() } })
+                        .disabled(isRefreshing)
+                }
 
                 if let message {
                     Text(message).font(.appBody(13)).foregroundStyle(Color.appMuted)
@@ -144,11 +155,26 @@ struct ConnectorsView: View {
 
                 let connected = sections.flatMap(\.entries).filter(isConnected)
                 if !connected.isEmpty {
-                    Text("Connected")
+                    Text(ownLoaded && catalogueLoaded ? "\(connectedCount) connected" : "Connected")
                         .font(.appBody(15, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                        ForEach(connected) { entry in tile(entry) }
+                    if typeSize.isAccessibilitySize {
+                        VStack(spacing: 12) {
+                            ForEach(connected) { entry in tile(entry) }
+                        }
+                    } else {
+                        Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                            ForEach(Array(stride(from: 0, to: connected.count, by: 2)), id: \.self) { index in
+                                GridRow {
+                                    tile(connected[index])
+                                    if index + 1 < connected.count {
+                                        tile(connected[index + 1])
+                                    } else {
+                                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -168,17 +194,14 @@ struct ConnectorsView: View {
 
                 SettingsGroup(title: "Devices and payments") {
                     SettingsList {
-                        SettingsNavRow(title: "Displays", subtitle: "Screens Adam can show things on") { place = .displays }
+                        SettingsNavRow(title: "Displays") { place = .displays }
                         SettingsRule()
-                        SettingsNavRow(title: "Payment methods", subtitle: "The card Adam checks out with") { place = .payments }
+                        SettingsNavRow(title: "Payment methods") { place = .payments }
                         SettingsRule()
-                        SettingsNavRow(title: "Saved logins", subtitle: "Sign-ins Adam can use for you") { place = .logins }
+                        SettingsNavRow(title: "Saved logins") { place = .logins }
                     }
                 }
 
-                Text("You can disconnect an app at any time.")
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
             }
         }
         .fullScreenCover(item: $place) { destination in
@@ -194,6 +217,14 @@ struct ConnectorsView: View {
             .environment(\.colorScheme, colorScheme)
         }
         .task { await load() }
+        #if DEBUG
+        .task {
+            if PreviewData.isIsolated, let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_APPS"] {
+                try? await Task.sleep(for: .milliseconds(700))
+                place = Place(rawValue: raw)
+            }
+        }
+        #endif
         .refreshable { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await load() } }
@@ -215,7 +246,10 @@ struct ConnectorsView: View {
     /// A connected app as an object: its logo, its name and a quiet status, one tap to manage.
     private func tile(_ entry: Entry) -> some View {
         Button { manage = entry } label: {
-            VStack(alignment: .leading, spacing: 24) {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+            layout {
                 AppIconView(candidates: iconCandidates(entry))
                     .frame(width: 38, height: 38)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -229,7 +263,7 @@ struct ConnectorsView: View {
                 }
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.settingsRaised))
 
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -294,29 +328,39 @@ struct ConnectorsView: View {
     // MARK: Loading
 
     private func load() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
         async let own = loadOwn()
         async let catalogue = loadCatalogue()
-        _ = await (own, catalogue)
-        await MainActor.run { isLoading = false; pending = nil }
+        let results = await (own, catalogue)
+        await MainActor.run {
+            ownLoaded = results.0
+            catalogueLoaded = results.1
+            isLoading = false
+            isRefreshing = false
+            pending = nil
+        }
     }
 
-    private func loadOwn() async {
+    private func loadOwn() async -> Bool {
         guard let data = try? await APIClient.shared.request(path: "/connectors/\(appState.userId)"),
               let response = try? JSONDecoder().decode(ConnectorsResponse.self, from: data) else {
-            await MainActor.run { if connectors.isEmpty { message = "Couldn't load your apps. Pull down to try again." } }
-            return
+            return false
         }
         await MainActor.run { connectors = response.connectors.filter { $0.kind == "connection" }; message = nil }
+        return true
     }
 
-    private func loadCatalogue() async {
+    private func loadCatalogue() async -> Bool {
         guard let data = try? await APIClient.shared.request(path: "/connectors/apps"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        let items = (json["connections"] as? [[String: Any]]) ?? []
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let configured = json["configured"] as? Bool,
+              let items = json["connections"] as? [[String: Any]] else { return false }
         await MainActor.run {
-            catalogueOn = (json["configured"] as? Bool) == true
+            catalogueOn = configured
             catalogueConnected = Set(items.compactMap { ($0["connected"] as? Bool) == true ? $0["toolkit"] as? String : nil })
         }
+        return true
     }
 
     // MARK: Actions

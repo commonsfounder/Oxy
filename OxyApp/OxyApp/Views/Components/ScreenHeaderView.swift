@@ -1,49 +1,64 @@
 import SwiftUI
 
-/// Shared navigation and title geometry for the app's detail surfaces.
 struct ScreenHeaderView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dynamicTypeSize) private var typeSize
     let title: String
-    /// Provide for pushed/presented screens; leave nil for tab roots (e.g. More).
     var onBack: (() -> Void)? = nil
 
-    private let circle: CGFloat = 44
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let onBack {
-                // Raw chevron on its own line, so the title below lines up with the content.
-                Button(action: onBack) {
-                    AppIcon("chevron-left", size: 17)
-                        .foregroundStyle(Color.appInk)
-                        .frame(width: circle, height: circle, alignment: .leading)
-                        .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 10) {
+            if typeSize.isAccessibilitySize {
+                HStack {
+                    backButton
+                    Spacer()
+                    sampleLabel
                 }
-                .buttonStyle(.appScale)
-                .accessibilityLabel("Back")
+                heading
+            } else {
+                HStack(spacing: 10) {
+                    backButton
+                    heading
+                    Spacer(minLength: 0)
+                    sampleLabel
+                }
             }
-
-            Text(title)
-                .font(.pageTitle)
-                .foregroundStyle(Color.appInk)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, onBack == nil ? 8 : 0)
-                .padding(.bottom, 20)
-                .accessibilityAddTraits(.isHeader)
         }
-        .frame(maxWidth: .infinity, minHeight: onBack == nil ? 64 : nil, alignment: .topLeading)
         .padding(.horizontal, AppSpacing.margin)
-        .padding(.top, 2)
-        // Opaque, and extended up through the status-bar inset, so scrolled content
-        // can never ghost above or behind the header at the very top of the screen.
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
         .background(Color.appBackground.ignoresSafeArea(edges: .top))
     }
-}
 
-#Preview {
-    VStack(spacing: 0) {
-        ScreenHeaderView(title: "Profile", onBack: {})
-        ScreenHeaderView(title: "More")
-        Spacer()
+    private var heading: some View {
+        Text(title)
+            .font(typeSize.isAccessibilitySize ? .title2.bold() : .appRounded(30, weight: .bold, relativeTo: .largeTitle))
+            .tracking(-0.7)
+            .foregroundStyle(Color.appInk)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
     }
-    .background(Color.appBackground)
+
+    @ViewBuilder
+    private var backButton: some View {
+        if let onBack {
+            Button(action: onBack) {
+                AppIcon("chevron-left", size: 19)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 44, height: 44)
+                    .background(Color.appSurface2, in: Circle())
+            }
+            .buttonStyle(.appScale)
+            .accessibilityLabel("Back")
+        }
+    }
+
+    @ViewBuilder
+    private var sampleLabel: some View {
+        if appState.isDemoSession {
+            Text("Sample")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.appMuted)
+        }
+    }
 }

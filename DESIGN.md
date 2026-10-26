@@ -1,104 +1,39 @@
-# DESIGN.md — Adam
+# Adam interface — local rebuild candidate
 
-**Register:** product
+26 October 2026. Chizi chose option A from the colour studies, particularly its decision-heading typography and cohesive brand feel. The generated study is a reference, not evidence of an approved implementation. Operate mode: a native iPhone control surface for a general-purpose personal worker. This replaces the September composition rules. The whole-app rebuild remains local, uncommitted, unaccepted and unfinished. Product truth remains in PRODUCT.md; scope and acceptance remain in docs/ui-loop/EXHAUSTIVE_UI_AUDIT.md.
 
-**Direction established:** 2026-09-02
+## Structure
 
-**Supersedes:** the warm-paper, gold and editorial-newspaper direction.
+The entry defaults to Now, with a native Now / Conversation picker. Now orders pending decisions, active work, recent outcomes and Updates before one real Today suggestion and Memory / Your home shortcuts. The decision leads directly on the canvas, with its question, qualified amount and review action together; Work detail remains the review destination. Active work uses separate detail and Stop controls. Memory and Your home use compact destination rows on Now. Review decision opens the existing work detail. The composer remains available; entering a request moves into Conversation. Each user turn starts an inspectable section; earlier turns collapse to their actual request text while the newest stays open. Visible sections measure eagerly so initial bottom anchoring does not lose the conversation at large text; closed sections still omit their message bodies. Assistant replies remain with that turn even after delays; day/time separators preserve chronology. Pending decisions and errors stay open.
 
-Adam is a household companion and control surface for a general-purpose personal worker. The interface should feel like a small, beautifully made piece of domestic technology: calm at rest, unmistakably alive when doing something, and direct whenever the user must decide.
+The spinning wheel remains the distinctive navigation control. Its rotary hub keeps Adam’s mark; a small status dot and accessible value carry the current work state. Today, Activity, Memory, Your home and Settings open as full native presentations with a visible return control. The wheel also has a list containing every destination and private mode; larger accessibility text uses that list directly. Subpages never repeat the root Adam hub. Accessibility sizes stack header identity and context controls. Now leads directly with work content; Activity stays in the navigation menu. The decision question needs no extra eyebrow, and Memory / Your home use their destination names without a Your context heading.
 
-## Identity
+Today separates one suggested next action from compact remaining suggestions. Now reuses the same suggestion content, handled state and loading / failure / quiet states; dismissals stay in sync with full Today through shared notifications and saved-state reloads. Suggestions ask Adam; they do not grant authority. Payment and other protected decisions use a focused, scrollable review sheet with server-supplied facts above a fixed, reachable action area. An approval is not a verified result.
 
-The Adam mark is architectural: a graphite frame with three electric-blue channels. It defines the product language.
+You prioritises Name, Home address and Memory before saved context; its old decorative orbit is removed. Memory prioritises saved content and search. Retained photo notes can expand and participate in search. Connected apps are recognisable objects with real logos; ordinary settings remain flat rows. Unknown and not configured home states must stay explicit.
 
-- **Graphite is structure.** Navigation, typography and durable controls use deep blue-black ink.
-- **Blue is energy.** Reserve it for activity, selection, live context and the next useful action.
-- **White space is functional.** The mark's negative space becomes the layout's breathing room. Do not fill every gap with a card.
-- Render the mark from deterministic vector geometry (`AdamMark`), not a loosely matched icon or generated bitmap.
+## Visual grammar
 
-The wordmark uses compact, tracked sans-serif capitals. Fraunces is no longer part of the core interface voice.
+A warm off-white canvas, dark ink, forest-green actions and a small instrument-like rotary bezel. Selected reference qualities: Family's object identity, Things' reading hierarchy, Flighty's facts before action, Gentler Streak's approachable forms, Oura's intentional focus, Halide's separate control zone and !Boring's confidence in silhouette. These are ingredients for testing, not seven themes or a claim that their full character has already been achieved.
 
-Use the logo once per screen at most. It is an identity anchor, never a watermark,
-empty-state glyph, card ornament or repeated button icon.
+- Canvas: warm near-white in light appearance; dark green-black in dark appearance. Existing appearance preferences remain available.
+- Surfaces: white / deep neutral green-grey. Inset controls use warm neutrals.
+- Primary actions: deep forest green with white ink in light appearance; pale muted green with dark ink in dark appearance.
+- Meaning: amber asks for attention, green denotes confirmed success, red denotes failure or destructive controls. Colour alone never carries status.
+- Type: native system sans serif text styles that respond live to Dynamic Type. The decision question uses a bold, slightly tightened title to evoke the selected study; its exact generated typeface is unknown. Body, caption, subheadline and title roles establish hierarchy; requested point sizes map to those semantic roles. No serif receipt amounts or private-font-name lookup.
+- Shapes: circular rotary and voice controls, 16–18pt text fields and buttons, a 16pt neutral suggestion surface with a forest-green action. Decision buttons become full-width padded rounded rectangles at accessibility sizes. Do not make all content into identical cards.
+- Depth: restrained borders and native presentation. No decorative halos, fake sensing visualisations or nested receipt cards.
 
-## Product hierarchy
+Now groups active work in open rows, with separate detail and Stop controls and a compact, truthful Workspace entry beside its task. Results are open receipts: task identity, actual result or failure reason, and date. At accessibility sizes the status icon and disclosure sit above full-width receipt facts. Regular-width iPad uses a primary work column and a 280pt Today/context column; accessibility text returns to one column. These source91 compositions have inspected Simulator geometry; manual scrolling, workspace opening and whole-app visual acceptance remain open.
 
-The app is not a task manager and not a SaaS connector catalogue. Its primary hierarchy is:
+Result collections show actual source, title, stated price and supporting facts as objects. Ordinary sizes use horizontal collections; accessibility sizes use full-width vertical options. Static facts are grouped per option, with separate named View controls. Compare uses an ordinary horizontal table and vertical criterion sections at accessibility sizes; missing fields say Not stated and Best is conveyed in text as well as colour. Actual notes remain available in comparison. Native Compare/Back and earlier-request expansion/collapse have bounded AX proof; full VoiceOver and physical scrolling are still open.
 
-1. **Home state** — what Adam truthfully knows about the household now.
-2. **Needs you** — specific decisions and approvals, with their real context.
-3. **In motion** — active work and watches.
-4. **Around you** — timely deliveries, reservations and other grounded context.
-5. **Adam noticed** — concise changes and outcomes, deduplicated.
+## Interaction and states
 
-Conversation remains one tap away, but the persistent composer must not dominate Home or cover content. Activity/history, services and controls live behind the account surface.
+The composer reserves its own lower zone. Attachment, text and voice are distinct targets. Growing text and the keyboard must leave the last message reachable. The attachment menu contains camera, photos/video and files; private mode lives with navigation.
 
-Never invent rooms, occupants, sensors, devices or environmental readings to make a screen feel richer. Unknown and not configured are designed states, not empty spaces to disguise.
+Decision answers show Sending answer during submission, then Updating until a matching checkpoint-resolution event is read back; unavailable status retains the decision with Check status, and rejection stays inline with the original decision.
 
-## Palette
+Use bundled icon assets through AppIcon and real service logos. SF Symbols remain banned even where a platform skill suggests them. All targets are at least 44pt. Standard native controls and real return paths take precedence over custom page-reveal effects. Preserve the wheel spin, haptics and reordering; Reduce Motion and large-text alternatives must remain usable.
 
-Light values are the primary rendered values; dark values remain complete and usable.
-
-- **Canvas:** `appBackground` #F6F9FD — cool near-white.
-- **Surface:** `appSurface` #FFFFFF.
-- **Active inset:** `appSurface2` #E8F0FB.
-- **Ink:** `appInk` #101721.
-- **Secondary:** `appMuted` #5C697A.
-- **Energy:** `appAccent` #135EE1.
-- **Hairline:** blue-black at 11%.
-- **Semantics:** green for confirmed/live success, amber for attention, red only for failure or destructive action.
-
-No beige, antique gold, paper grain, sepia vignette or decorative pastel blobs. Gradients are limited to a very faint ambient blue lift on the canvas. Do not put gradients on ordinary controls.
-
-## Typography
-
-- Interface and display type use the system sans-serif.
-- Display: 25–32pt, bold, tight tracking, short statements.
-- Section title: 18pt bold.
-- Row title: 14–16pt semibold.
-- Secondary text: 11–14pt regular.
-- Mono is for timestamps, counts and technical identifiers only.
-- Never use light font weights for essential text. Dynamic Type and multiline layouts are mandatory.
-
-## Shape and depth
-
-- Hero/home state: 22pt continuous radius.
-- Grouped list: 18pt.
-- Individual activity row: 16pt.
-- Compact control: 13–17pt.
-- Use one hairline and a restrained local shadow. Never combine blur, thick border and heavy shadow on the same surface.
-- Prefer grouped rows inside one surface over a stack of identical floating cards.
-- Pills are for status, compact counts and short choices only.
-
-## Interaction
-
-- Home uses a safe-area dock, never an overlay that obscures scroll content.
-- The main dock says **Ask Adam** and supports voice or text. Conversation history is a separate, adjacent action.
-- A whole household-state surface is tappable only when it has a meaningful action: setup or refresh. Static states should not promise navigation.
-- Connected services use **Manage**, followed by explicit confirmation before disconnecting.
-- Protected and irreversible actions are always gated by the deterministic execution policy. UI preferences may add review; they may not remove mandatory review.
-
-## Copy
-
-Copy is terse, factual and situated.
-
-- Prefer “You're away” over “Adam has detected that you may no longer be at home.”
-- Prefer “No action needed” over a motivational empty state.
-- Replace generic approval text with the actual prompt or subject when available.
-- Do not narrate how an assistant works, use fake warmth, or add marketing subtitles to self-evident labels.
-
-## Motion and feedback
-
-- Motion communicates state change, hierarchy and continuity only.
-- Use short spring responses for touch, one entrance sequence per visit, and subtle progress motion for live work.
-- Respect Reduce Motion.
-- Use light haptics on navigation and selection; medium haptics for committing or beginning work.
-
-## Accessibility and QA
-
-- WCAG AA contrast is the floor.
-- Minimum hit target is 44pt even when the visible control is smaller.
-- Check every primary screen at large Dynamic Type.
-- SF Symbols are banned. All icons are bundled assets rendered through `AppIcon`.
-- Simulator review must cover Home, More, Services and Settings, including scroll bottoms and the safe-area dock.
+Every surface requires actual populated, quiet, loading, error and relevant interactive proof. Now distinguishes initial work-load failure, failed refresh with saved work, and partial source unavailability; none may become a false quiet state. Fixture captures say Sample and do not imply connected accounts, observed occupancy, executed payments or real verified outcomes. Native accessibility actions verify Menu/Today/local dismissal/return and focusing the composer selecting Conversation with a keyboard edit. Direct mode taps and scrolling, VoiceOver, wheel motion and successful mutations remain unproven. Files opens through the actual attachment chooser, but picker cancellation/selection and modal containment remain unverified. Review progress and remaining faults live in the exhaustive audit, not in a blanket design-pass claim.

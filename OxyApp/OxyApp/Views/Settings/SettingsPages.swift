@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Who you are to Adam: a portrait first, every remembered detail one tap further.
+/// Personal settings and the context already saved for this account.
 struct YouPage: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
@@ -38,61 +38,83 @@ struct YouPage: View {
         ]
     }
 
-    private var introLine: String {
-        let identity = model.context?.profile.identity ?? []
-        if !identity.isEmpty { return identity.prefix(2).joined(separator: " · ") }
-        return areas.contains(where: { !$0.lines.isEmpty }) ? "What Adam has picked up so far" : "Adam learns about you as you talk"
-    }
-
     var body: some View {
         SettingsPage(title: "You") {
-            hero
-
-            if model.failed {
-                ErrorBanner(message: "Couldn't load your details.", onRetry: { Task { await model.load(isDemo: appState.isDemoSession) } })
-            }
-
-            let known = areas.filter { !$0.lines.isEmpty && $0.id != "places" }
-            if !known.isEmpty {
-                SettingsList {
-                    ForEach(Array(known.enumerated()), id: \.element.id) { index, area in
-                        if index > 0 { SettingsRule() }
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(area.title)
-                                .font(.appBody(12, weight: .medium))
-                                .foregroundStyle(Color.appMuted)
-                            ForEach(Array(area.lines.prefix(3).enumerated()), id: \.offset) { _, line in
-                                Text(line)
-                                    .font(.appBody(15))
-                                    .foregroundStyle(Color.appInk)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if area.lines.count > 3 {
-                                Button { destination = .saved } label: {
-                                    Text("\(area.lines.count - 3) more")
-                                        .font(.appBody(14))
-                                        .foregroundStyle(Color.appAccent)
-                                }
-                                .buttonStyle(.plain)
-                            }
+            SettingsList {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Name")
+                        .font(.appBody(13, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
+                    TextField("", text: $settings.userName,
+                        prompt: Text("Add your name").foregroundStyle(Color.appMuted))
+                        .font(.appBody(22, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                        .tint(Color.appAccent)
+                        .textContentType(.givenName)
+                        .submitLabel(.done)
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Name")
+                        .onChange(of: settings.userName) { _, _ in
+                            SettingsStore.save(settings, userId: appState.userId)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 14)
-                    }
                 }
-            }
-
-            SettingsGroup(title: "Places") {
-                SettingsList {
-                    SettingsNavRow(
-                        title: "Home",
-                        subtitle: settings.homeAddress.isEmpty ? "Add your address for arrival reminders" : settings.homeAddress
-                    ) { destination = .home }
+                .padding(.vertical, 16)
+                SettingsRule()
+                SettingsNavRow(title: "Home address", subtitle: settings.homeAddress.isEmpty ? "Not set" : settings.homeAddress) {
+                    destination = .home
                 }
             }
 
             SettingsList {
-                SettingsNavRow(title: "Memory", subtitle: "See, correct or delete anything") { destination = .saved }
+                SettingsNavRow(title: "Memory", subtitle: "Saved notes and photo context") { destination = .saved }
+            }
+
+            if model.isLoading {
+                ProgressView("Loading your details")
+                    .font(.appBody(15))
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else if model.failed {
+                ErrorBanner(message: "Couldn't load your details.", onRetry: { Task { await model.load(isDemo: appState.isDemoSession) } })
+            } else {
+                let identity = model.context?.profile.identity ?? []
+                let known = areas.filter { !$0.lines.isEmpty && $0.id != "places" }
+                if !identity.isEmpty || !known.isEmpty {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Saved context")
+                            .font(.appRounded(22, weight: .semibold, relativeTo: .title2))
+                            .foregroundStyle(Color.appInk)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(Array(identity.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.appBody(17))
+                                .foregroundStyle(Color.appInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        ForEach(known) { area in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(area.title)
+                                    .font(.appBody(14, weight: .medium))
+                                    .foregroundStyle(Color.appMuted)
+                                    .accessibilityAddTraits(.isHeader)
+                                ForEach(Array(area.lines.prefix(3).enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.appBody(17))
+                                        .foregroundStyle(Color.appInk)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                if area.lines.count > 3 {
+                                    Button("Show \(area.lines.count - 3) more") { destination = .saved }
+                                        .font(.appBody(15, weight: .medium))
+                                        .foregroundStyle(Color.appAccent)
+                                        .frame(minHeight: 44)
+                                        .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .task { await model.load(isDemo: appState.isDemoSession) }
@@ -109,34 +131,6 @@ struct YouPage: View {
         }
     }
 
-    private var hero: some View {
-        VStack(spacing: 4) {
-            OrbitPortrait(satellites: areas.isEmpty
-                ? ["People", "Places", "Work and study", "Plans", "Preferences"].map { .init(id: $0, label: $0, count: 0) }
-                : areas.map { .init(id: $0.id, label: $0.title, count: $0.lines.count) })
-            HStack(spacing: 8) {
-                TextField(
-                    "",
-                    text: $settings.userName,
-                    prompt: Text("Add your name").foregroundStyle(Color.appAccent)
-                )
-                .font(.appBody(24, weight: .semibold))
-                .foregroundStyle(Color.appInk)
-                .tint(Color.appAccent)
-                .multilineTextAlignment(.center)
-                .textContentType(.givenName)
-                .submitLabel(.done)
-                .onChange(of: settings.userName) { _, _ in SettingsStore.save(settings, userId: appState.userId) }
-            }
-            Text(introLine)
-                .font(.appBody(14))
-                .foregroundStyle(Color.appMuted)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .settingsSurface(radius: 20)
-    }
 }
 
 /// Where home is, for arrival reminders and directions.
@@ -152,7 +146,7 @@ struct HomeAddressPage: View {
     private var draftIsEmpty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        SettingsPage(title: "Home") {
+        SettingsPage(title: "Home address") {
             VStack(alignment: .leading, spacing: 14) {
                 if !settings.homeAddress.isEmpty {
                     Text(settings.homeAddress)
@@ -162,9 +156,11 @@ struct HomeAddressPage: View {
                 AppLineField(placeholder: "Street, town or postcode", text: $draft)
                 HStack(spacing: 10) {
                     Button { Task { await find() } } label: { buttonLabel("Find", busy: isFinding, filled: false) }
-                        .disabled(draftIsEmpty || isFinding)
+                        .disabled(draftIsEmpty || isFinding || isSaving)
+                        .opacity(draftIsEmpty || isFinding || isSaving ? 0.45 : 1)
                     Button { Task { await save() } } label: { buttonLabel("Save", busy: isSaving, filled: true) }
-                        .disabled(draftIsEmpty || isSaving)
+                        .disabled(draftIsEmpty || isSaving || isFinding)
+                        .opacity(draftIsEmpty || isSaving || isFinding ? 0.45 : 1)
                     Spacer(minLength: 0)
                 }
                 .buttonStyle(.appScale(0.97))

@@ -42,6 +42,31 @@ extension CompareTable {
         return CompareTable(rows: ["Rating", "Price", "Open", "Distance"], columns: columns)
     }
 
+    static func results(_ options: [ResultOption]) -> CompareTable {
+        // Prices are only ranked when every one carries a number; a text price like "from £20" is shown, not ranked.
+        let amounts = options.map(\.priceAmount)
+        let priceBest = amounts.allSatisfy { $0 != nil } ? markBest(amounts, lowest: true) : []
+        let ratingBest = markBest(options.map(\.rating), lowest: false)
+        let hasNotes = options.contains { $0.note != nil }
+        let columns = options.enumerated().map { index, option in
+            let cells: [CompareCell?] = [
+                option.price.map { CompareCell(text: $0, best: priceBest.contains(index)) },
+                option.rating.map { CompareCell(text: "★ \(String(format: "%.1f", $0))" + (option.ratingCount.map { " (\($0))" } ?? ""), best: ratingBest.contains(index)) },
+                option.subtitle.map { CompareCell(text: $0) },
+                option.source.map { CompareCell(text: $0) }
+            ]
+            return CompareColumn(id: option.id, title: option.title,
+                                 cells: cells + (hasNotes ? [option.note.map { CompareCell(text: $0) }] : []))
+        }
+        let ranked = !priceBest.isEmpty
+        let unranked = options.contains { $0.price != nil } && !ranked
+        return CompareTable(
+            rows: ["Price", "Rating", "Detail", "From"] + (hasNotes ? ["Notes"] : []),
+            columns: columns,
+            note: unranked ? "Prices weren't ranked because they aren't all stated as numbers" : nil
+        )
+    }
+
     static func travel(_ options: [TravelOption], hotels: Bool) -> CompareTable {
         // Only a price quoted for the dates asked can win, and only against another in the same currency:
         // a cheaper fare for a different week answers a different question.
@@ -100,49 +125,81 @@ extension CompareTable {
 /// Options side by side. The best value in a row is marked, never assumed.
 struct CompareSheet: View {
     let table: CompareTable
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private let labelWidth: CGFloat = 70
-    private let columnWidth: CGFloat = 108
+    private let columnWidth: CGFloat = 148
 
     var body: some View {
         SettingsPage(title: "Compare") {
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    row(label: "", cells: table.columns.map { CompareCell(text: $0.title) }, isHeader: true)
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 28) {
                     ForEach(Array(table.rows.enumerated()), id: \.offset) { index, label in
-                        SettingsRule()
-                        row(label: label, cells: table.columns.map { $0.cells[index] ?? CompareCell(text: "–") }, isHeader: false)
+                        accessibleRow(label: label, index: index)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .settingsSurface()
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                SettingsStatement(text: "The best in a row is in blue", solid: false)
-                if let note = table.note {
-                    SettingsStatement(text: note, solid: false)
+            } else {
+                Text("\(table.columns.count) options").font(.sectionLabel).foregroundStyle(Color.appMuted)
+                ScrollView(.horizontal, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        row(label: "", cells: table.columns.map { CompareCell(text: $0.title) }, isHeader: true)
+                        ForEach(Array(table.rows.enumerated()), id: \.offset) { index, label in
+                            SettingsRule()
+                            row(label: label, cells: table.columns.map { $0.cells[index] ?? CompareCell(text: "Not stated") }, isHeader: false)
+                        }
+                    }
+                    .padding(.vertical, 6)
                 }
             }
-            .padding(.horizontal, 4)
+            if let note = table.note {
+                SettingsStatement(text: note, solid: false)
+            }
+        }
+    }
+
+    private func accessibleRow(label: String, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(label).font(.headline).foregroundStyle(Color.appInk)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(table.columns) { column in
+                let cell = column.cells[index]
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(column.title).font(.body.weight(.medium)).foregroundStyle(Color.appInk)
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(cell?.text ?? "Not stated")
+                            .font(.body.weight(cell?.best == true ? .semibold : .regular))
+                            .foregroundStyle(cell?.best == true ? Color.appAccent : Color.appMuted)
+                        if cell?.best == true {
+                            Text("Best").font(.caption.weight(.semibold)).foregroundStyle(Color.appAccent)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                SettingsRule()
+            }
         }
     }
 
     private func row(label: String, cells: [CompareCell], isHeader: Bool) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(label)
-                .font(.fineprint)
-                .foregroundStyle(Color.appMuted)
+            Text(label).font(.fineprint).foregroundStyle(Color.appMuted)
                 .frame(width: labelWidth, alignment: .leading)
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                Text(cell.text)
-                    .font(isHeader ? .rowTitle : .appBody(14, weight: cell.best ? .semibold : .regular))
-                    .foregroundStyle(cell.best ? Color.appAccent : (isHeader ? Color.appInk : Color.appInk))
-                    .frame(width: columnWidth, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cell.text)
+                        .font(isHeader ? .rowTitle : .appBody(14, weight: cell.best ? .semibold : .regular))
+                        .foregroundStyle(cell.best ? Color.appAccent : Color.appInk)
+                    if cell.best { Text("Best").font(.caption2.weight(.semibold)).foregroundStyle(Color.appAccent) }
+                }
+                .frame(width: columnWidth, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(isHeader ? cell.text : "\(table.columns[index].title), \(label): \(cell.text)\(cell.best ? ", best in row" : "")")
             }
         }
         .padding(.vertical, 12)
-        .accessibilityElement(children: .combine)
     }
 }

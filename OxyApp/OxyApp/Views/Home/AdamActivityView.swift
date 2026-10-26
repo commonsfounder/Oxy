@@ -56,7 +56,10 @@ struct AdamActivityView: View {
         var id: String { rawValue }
     }
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var filter: Filter = .all
     @State private var feed: ActivityFeed = .empty
     @State private var isLoading = false
@@ -83,35 +86,68 @@ struct AdamActivityView: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                ScreenHeaderView(title: "Activity", onBack: { dismiss() })
+            GeometryReader { geometry in
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Activity")
-                            .font(.heroTitle)
-                            .foregroundStyle(Color.appInk)
-                            .accessibilityAddTraits(.isHeader)
                         filterBar
                     }
 
-                    if let errorMessage {
-                        ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
-                    } else if isEmpty && loaded {
-                        emptyState
+                    if !loaded && isLoading {
+                        VStack(spacing: 16) {
+                            OxySkeletonCard(height: 88, cornerRadius: 14)
+                            OxySkeletonCard(height: 88, cornerRadius: 14)
+                            OxySkeletonCard(height: 88, cornerRadius: 14)
+                        }
+                        .frame(width: max(0, geometry.size.width - AppSpacing.margin * 2))
+                        .accessibilityLabel("Loading activity")
                     } else {
-                        if !asks.isEmpty { section("Waiting on you", asks) }
-                        if !upcoming.isEmpty { section("Coming up", upcoming) }
-                        if !past.isEmpty { section(filter == .done ? "Done" : "Recently", past) }
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
+                                .disabled(isLoading)
+                        }
+                        if isEmpty && loaded && errorMessage == nil {
+                            emptyState
+                        } else {
+                            if !asks.isEmpty { section("Waiting on you", asks) }
+                            if !upcoming.isEmpty { section("Coming up", upcoming) }
+                            if !past.isEmpty { section(filter == .done ? "Done" : "Recently", past) }
+                        }
                     }
                 }
+                .frame(width: max(0, geometry.size.width - AppSpacing.margin * 2), alignment: .leading)
                 .padding(.horizontal, AppSpacing.margin)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
+            }
+            }
             }
             .background(Color.appBackground.ignoresSafeArea())
             .refreshable { await load() }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task { await load() }
+        .task {
+            await load()
+            #if DEBUG
+            if PreviewData.isIsolated, let state = ProcessInfo.processInfo.environment["OXY_DEBUG_ACTIVITY"] {
+                switch state {
+                case "refresh-failure": await load()
+                case "expanded": expandedID = feed.asks.first?.id ?? feed.events.first?.id
+                case "done": filter = .done
+                case "coming-up": filter = .comingUp
+                case "workflow":
+                    try? await Task.sleep(for: .milliseconds(700))
+                    openWorkflowID = "sample-workflow"
+                default: break
+                }
+            }
+            #endif
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load() } }
+        }
         .fullScreenCover(item: Binding(
             get: { openWorkflowID.map(ActivityWorkflow.init) },
             set: { openWorkflowID = $0?.id }
@@ -123,33 +159,58 @@ struct AdamActivityView: View {
 
     // MARK: Pieces
 
+    @ViewBuilder
     private var filterBar: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(spacing: 6))
-        return layout {
-            ForEach(Filter.allCases) { item in
-                Button {
-                    guard filter != item else { return }
-                    HapticManager.shared.select()
-                    withAnimation(.appStandard) { filter = item }
-                } label: {
-                    Text(item.rawValue)
-                        .font(.appBody(15, weight: .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
-                        .padding(.horizontal, 15)
-                        .frame(minHeight: 44)
-                        .overlay(alignment: .bottom) {
-                            Capsule().fill(filter == item ? Color.appAccent : Color.clear).frame(height: 2)
-                        }
+        if dynamicTypeSize.isAccessibilitySize {
+            Menu {
+                ForEach(Filter.allCases) { item in
+                    Button(item.rawValue) { selectFilter(item) }
+                        .accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
-                .buttonStyle(.appScale)
-                .accessibilityAddTraits(filter == item ? .isSelected : [])
+            } label: {
+                HStack(spacing: 12) {
+                    Text(filter.rawValue)
+                        .font(.body.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    AppIcon("chevron-down", size: 16)
+                }
+                .foregroundStyle(Color.appAccent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 14))
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel("Filter activity")
+            .accessibilityValue(filter.rawValue)
+        } else {
+            HStack(spacing: 6) {
+                ForEach(Filter.allCases) { item in
+                    Button { selectFilter(item) } label: {
+                        Text(item.rawValue)
+                            .font(.appBody(15, weight: .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(filter == item ? Color.appInk : Color.appMuted)
+                            .padding(.horizontal, 15)
+                            .frame(minHeight: 44)
+                            .overlay(alignment: .bottom) {
+                                Capsule().fill(filter == item ? Color.appAccent : Color.clear).frame(height: 2)
+                            }
+                    }
+                    .buttonStyle(.appScale)
+                    .accessibilityAddTraits(filter == item ? .isSelected : [])
+                }
+            }
+            .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func selectFilter(_ item: Filter) {
+        guard filter != item else { return }
+        HapticManager.shared.select()
+        withAnimation(reduceMotion ? nil : .appStandard) { filter = item }
     }
 
     private func section(_ title: String, _ items: [ActivityEvent]) -> some View {
@@ -170,18 +231,29 @@ struct AdamActivityView: View {
 
     private func row(_ item: ActivityEvent) -> some View {
         let expanded = expandedID == item.id
+        let rowLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 13))
         return VStack(alignment: .leading, spacing: 10) {
             Button {
                 HapticManager.shared.impact(.light)
-                withAnimation(.appExpand) { expandedID = expanded ? nil : item.id }
+                withAnimation(reduceMotion ? nil : .appExpand) { expandedID = expanded ? nil : item.id }
             } label: {
-                HStack(alignment: .top, spacing: 13) {
+                rowLayout {
+                    HStack {
                     Text(timeLabel(for: item))
                         .font(.appBody(13, weight: .medium))
                         .foregroundStyle(Color.appMuted)
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .minimumScaleFactor(0.75)
-                        .frame(width: 66, alignment: .leading)
+                        .accessibilityLabel(item.date == nil ? "Time unavailable" : timeLabel(for: item))
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Spacer()
+                            marker(for: item)
+                            disclosure(expanded: expanded)
+                        }
+                    }
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 66, alignment: .leading)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.isFailure ? "Couldn't finish" : item.type.label)
                             .font(.appBody(12, weight: .semibold))
@@ -189,47 +261,64 @@ struct AdamActivityView: View {
                         Text(item.title)
                             .font(.appBody(17, weight: .medium))
                             .foregroundStyle(Color.appInk)
-                            .lineLimit(expanded ? nil : 2)
+                            .lineLimit(expanded || dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             .multilineTextAlignment(.leading)
                         if let detail = detailLine(for: item) {
                             Text(detail)
                                 .font(.appBody(13))
                                 .foregroundStyle(Color.appMuted)
-                                .lineLimit(expanded ? nil : 2)
+                                .lineLimit(expanded || dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                 .multilineTextAlignment(.leading)
                         }
                     }
-                    Spacer(minLength: 4)
-                    marker(for: item)
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Spacer(minLength: 4)
+                        marker(for: item)
+                        disclosure(expanded: expanded)
+                    }
                 }
-                .padding(.vertical, 20)
+                .padding(.vertical, 16)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.appScale(0.995))
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Show or hide activity actions")
 
             if expanded {
-                HStack(spacing: 8) {
+                let actionLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 8))
+                actionLayout {
                     if let workflowId = item.workflowId {
-                        actionPill("Open") { openWorkflowID = workflowId }
+                        actionPill("View work") { openWorkflowID = workflowId }
                     }
-                    actionPill("Ask Adam about this") { AskAdam.draft("Tell me more about: \(item.title)") }
+                    actionPill("Ask about this") { AskAdam.draft("Tell me more about: \(item.title)") }
+                        .accessibilityLabel("Ask about \(item.title)")
+                        .accessibilityHint("Opens a draft in the conversation")
                 }
-                .padding(.leading, 57)
+                .padding(.leading, dynamicTypeSize.isAccessibilitySize ? 0 : 79)
                 .padding(.bottom, 14)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    private func disclosure(expanded: Bool) -> some View {
+        AppIcon("chevron-down", size: 13)
+            .foregroundStyle(Color.appMuted)
+            .rotationEffect(.degrees(expanded ? 180 : 0))
+            .accessibilityHidden(true)
     }
 
     private func actionPill(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.appBody(13, weight: .medium))
-                .foregroundStyle(Color.appInk)
+                .foregroundStyle(Color.appAccent)
                 .padding(.horizontal, 14)
-                .frame(minHeight: 36)
-                .background(Capsule().fill(Color.appBackground))
+                .frame(minHeight: 44)
+                .background(Capsule().fill(Color.appSurface2))
                 .frame(minHeight: 44)
         }
         .buttonStyle(.appScale(0.95))
@@ -258,8 +347,8 @@ struct AdamActivityView: View {
 
     private func detailLine(for item: ActivityEvent) -> String? {
         if item.type == .scheduled {
-            if item.stale == true { return "Waiting to run" }
-            return item.detail.map { $0.capitalized }
+            if item.stale == true { return "Next run unavailable" }
+            return item.detail
         }
         guard let detail = item.detail, !detail.isEmpty,
               detail.caseInsensitiveCompare(item.title) != .orderedSame else { return nil }
@@ -267,7 +356,7 @@ struct AdamActivityView: View {
     }
 
     private func timeLabel(for item: ActivityEvent) -> String {
-        guard let date = item.date else { return item.type == .asked ? "Now" : "" }
+        guard let date = item.date else { return "Unknown" }
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
         if calendar.isDateInTomorrow(date) { return "Tomorrow" }
@@ -277,13 +366,9 @@ struct AdamActivityView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(filter == .comingUp ? "Nothing scheduled" : "Nothing yet")
+            Text(filter == .comingUp ? "Nothing scheduled" : (filter == .done ? "No completed work" : "No activity yet"))
                 .font(.sectionTitle)
                 .foregroundStyle(Color.appInk)
-            Text("Your updates and completed work will appear here.")
-                .font(.appBody(14))
-                .foregroundStyle(Color.appMuted)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 24)
     }
@@ -291,10 +376,11 @@ struct AdamActivityView: View {
     // MARK: Loading
 
     private func load() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         #if DEBUG
-        if ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
+        if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "1" {
             feed = Self.sampleFeed
             errorMessage = nil
             loaded = true
@@ -302,15 +388,32 @@ struct AdamActivityView: View {
         }
         #endif
         do {
-            feed = try await ActivityService.fetch()
+            let fetched = try await ActivityService.fetch()
+            #if DEBUG
+            if PreviewData.isIsolated, loaded,
+               ProcessInfo.processInfo.environment["OXY_DEBUG_ACTIVITY"] == "refresh-failure" {
+                feed = try JSONDecoder().decode(ActivityFeed.self, from: Data("{invalid isolated activity response".utf8))
+            } else {
+                feed = ProcessInfo.processInfo.environment["OXY_DEBUG_ACTIVITY"] == "unknown" && PreviewData.isIsolated
+                    ? Self.unknownFeed : fetched
+            }
+            #else
+            feed = fetched
+            #endif
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't load Activity."
+            errorMessage = feed == .empty ? "Couldn't load Activity." : "Couldn't update Activity. Showing saved activity."
         }
         loaded = true
     }
 
     #if DEBUG
+    private static let unknownFeed = ActivityFeed(events: [], asks: [
+        ActivityEvent(id: "sample-unknown", type: .asked, title: "Review the delivery change", detail: "Waiting for your yes", at: nil, failed: false, open: true, stale: nil, workflowId: nil)
+    ], upcoming: [
+        ActivityEvent(id: "sample-stale", type: .scheduled, title: "Flight price check", detail: "Every Friday morning", at: nil, failed: false, open: nil, stale: true, workflowId: nil)
+    ])
+
     private static let sampleFeed: ActivityFeed = {
         func iso(_ minutesAgo: Double) -> String {
             ISO8601DateFormatter().string(from: Date().addingTimeInterval(-minutesAgo * 60))

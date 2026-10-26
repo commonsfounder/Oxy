@@ -57,7 +57,15 @@ final class APIClient: @unchecked Sendable {
         queryItems: [URLQueryItem]? = nil
     ) async throws -> Data {
         #if DEBUG
-        if let preview = PreviewData.response(path: path, method: method) { return preview }
+        if let preview = PreviewData.response(path: path, method: method) {
+            if let raw = ProcessInfo.processInfo.environment["OXY_DEBUG_DELAY_MS"], let delay = UInt64(raw) {
+                try await Task.sleep(nanoseconds: min(delay, 15_000) * 1_000_000)
+            }
+            return preview
+        }
+        if PreviewData.isIsolated {
+            throw APIError.server(503, "Unavailable in the local UI preview.")
+        }
         #endif
         guard var components = URLComponents(string: "\(baseURL)\(path)") else {
             throw APIError.invalidURL
@@ -121,6 +129,9 @@ final class APIClient: @unchecked Sendable {
         fileData: Data,
         queryItems: [URLQueryItem]? = nil
     ) async throws -> Data {
+        #if DEBUG
+        if PreviewData.isIsolated { throw APIError.server(503, "Uploads are off in the local UI preview.") }
+        #endif
         guard var components = URLComponents(string: "\(baseURL)\(path)") else {
             throw APIError.invalidURL
         }
@@ -183,6 +194,15 @@ final class APIClient: @unchecked Sendable {
         body: [String: Any]? = nil,
         queryItems: [URLQueryItem]? = nil
     ) -> AsyncStream<SSEEvent> {
+        #if DEBUG
+        if PreviewData.isIsolated {
+            return AsyncStream { continuation in
+                continuation.yield(.error("Sending is off in the local UI preview."))
+                continuation.finish()
+            }
+        }
+        #endif
+
         let baseURL = self.baseURL
         let token = self.token
         let bodyDataResult: Result<Data?, Error> = Result {

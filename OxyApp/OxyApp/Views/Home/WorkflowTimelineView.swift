@@ -1,300 +1,354 @@
 import SwiftUI
 
-/// One responsibility, watched.
-///
-/// Nothing in this app has ever shown long-running work actually progressing. A
-/// backgrounded job was a single static line on Home with no steps and no motion. This
-/// screen polls the responsibility while it is open and animates each new event in as it
-/// lands, so the work is legible while it happens rather than only after it finishes.
+/// Work detail, its outstanding decisions, files and recorded events.
 struct WorkflowTimelineView: View {
     let workflowId: String
     var onChanged: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var detail: WorkflowDetail?
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var resolvingCheckpointID: String?
+    @State private var checkpointErrors: [String: String] = [:]
+    @State private var submittedIDs: Set<String> = []
+    @State private var expiredIDs: Set<String> = []
     @State private var seenEventIDs = Set<String>()
+    @State private var currentDate = Date()
 
-    /// Fast while the work is live. A finished responsibility stops polling entirely —
-    /// there is nothing left to arrive.
-    private static let livePoll: Duration = .seconds(3)
+    private var shouldPoll: Bool { detail?.workflow.isFinished == false && scenePhase == .active }
 
     var body: some View {
-        ZStack {
-            Color.appBackground.ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-
-                    if let errorMessage {
-                        ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
-                    }
-
-                    if isLoading && detail == nil {
-                        ProgressView()
-                            .tint(Color.appMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
-                    } else if let detail {
-                        ForEach(detail.pendingCheckpoints) { checkpoint in
-                            checkpointCard(checkpoint)
+        VStack(spacing: 0) {
+            ScreenHeaderView(title: "Work", onBack: { dismiss() })
+            GeometryReader { geometry in
+              ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
+                                .disabled(isLoading)
                         }
-
-                        if !detail.documents.isEmpty {
-                            documentsSection(detail.documents)
+                        if let detail {
+                            summary(detail.workflow)
+                            ForEach(detail.pendingCheckpoints) { checkpoint in
+                                checkpointSection(checkpoint)
+                                    .id("decision-\(checkpoint.id)")
+                            }
+                            if !detail.documents.isEmpty { documentsSection(detail.documents) }
+                            timelineSection(detail.timeline)
+                        } else if isLoading {
+                            VStack(spacing: 16) {
+                                OxySkeletonCard(height: 104)
+                                OxySkeletonCard(height: 180)
+                            }
+                            .frame(width: max(0, geometry.size.width - AppSpacing.margin * 2))
+                            .accessibilityLabel("Loading work")
                         }
-
-                        timelineSection(detail.timeline)
                     }
+                    .frame(width: max(0, geometry.size.width - AppSpacing.margin * 2), alignment: .leading)
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.top, 16)
+                    .padding(.bottom, 40)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 60)
+                .refreshable { await load() }
+                #if DEBUG
+                .task(id: detail) {
+                    guard PreviewData.isIsolated, let focus = ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW_FOCUS"],
+                          let checkpoint = detail?.pendingCheckpoints.first else { return }
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    if focus == "decision" { proxy.scrollTo("decision-\(checkpoint.id)", anchor: .top) }
+                    if focus == "decision-bottom" { proxy.scrollTo("decision-end-\(checkpoint.id)", anchor: .bottom) }
+                }
+                #endif
+              }
             }
-            .refreshable { await load() }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await load()
+            #if DEBUG
+            if PreviewData.isIsolated {
+                switch ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW"] {
+                case "refresh-failure": await load(quiet: true)
+                case "resolve-failure", "server-expired":
+                    if let checkpoint = detail?.pendingCheckpoints.first {
+                        resolve(checkpoint, approved: true, choice: nil)
+                    }
+                default: break
+                }
+            }
+            #endif
+        }
+        .task(id: shouldPoll) {
+            guard shouldPoll else { return }
             while !Task.isCancelled {
-                guard detail?.workflow.isFinished != true else { break }
-                try? await Task.sleep(for: Self.livePoll)
-                guard !Task.isCancelled else { break }
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
                 await load(quiet: true)
             }
         }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Button {
-                    HapticManager.shared.impact(.light)
-                    dismiss()
-                } label: {
-                    AppIcon("chevron-left", size: 18)
-                        .foregroundStyle(Color.appMuted)
-                        .padding(8)
-                }
-                .buttonStyle(.appScale)
-                Spacer()
-            }
-            .padding(.leading, -8)
-
-            if let workflow = detail?.workflow {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(workflow.goal)
-                        .font(.pageTitle)
-                        .foregroundStyle(Color.appInk)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 8) {
-                        if !workflow.isFinished {
-                            PulsingWorkDot(active: true)
-                        } else {
-                            AppIcon(workflow.status == "completed" ? "check-circle" : "alert-circle", size: 14)
-                                .foregroundStyle(workflow.status == "completed"
-                                                 ? Color.appAccent
-                                                 : Color.appDestructive)
-                        }
-                        Text(workflow.plainStatus)
-                            .font(.appBody(13, weight: .medium))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                }
-            }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load(quiet: true) } }
         }
-        .padding(.top, 8)
     }
 
-    // MARK: - The decision that stopped the work
-
-    private func checkpointCard(_ checkpoint: WorkflowCheckpoint) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 9) {
-                AppIcon("bolt", size: 15)
-                    .foregroundStyle(Color.appAccent)
-                    .padding(.top, 1)
-                Text(checkpoint.prompt)
-                    .font(.appBody(16, weight: .medium))
-                    .foregroundStyle(Color.appInk)
+    private func summary(_ workflow: WorkflowSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(workflow.goal)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 10) {
+                AppIcon(statusIcon(workflow.status), size: 19)
+                    .accessibilityHidden(true)
+                Text(workflow.plainStatus).font(.body.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
             }
+            .foregroundStyle(statusColor(workflow.status))
+        }
+    }
 
-            if resolvingCheckpointID == checkpoint.id {
-                ProgressView()
-                    .tint(Color.appMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if checkpoint.isChoice, let options = checkpoint.options {
-                VStack(spacing: 6) {
-                    ForEach(options) { option in
-                        Button {
-                            resolve(checkpoint, approved: true, choice: option.label)
-                        } label: {
-                            HStack(spacing: 8) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(option.label)
-                                        .font(.rowTitle)
-                                        .foregroundStyle(Color.appInk)
-                                    if let detail = option.detail, !detail.isEmpty {
-                                        Text(detail)
-                                            .font(.appBody(12))
-                                            .foregroundStyle(Color.appMuted)
+    private func statusIcon(_ status: String) -> String {
+        switch status.lowercased() {
+        case "completed": return "check-circle"
+        case "failed": return "alert-circle"
+        case "cancelled": return "stop"
+        case "waiting_for_user": return "alert-circle"
+        default: return "clock"
+        }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "completed": return .appSuccess
+        case "failed": return .appDestructive
+        case "waiting_for_user": return .appNeedsYou
+        case "gathering", "working": return .appAccent
+        default: return .appMuted
+        }
+    }
+
+    private func expired(_ checkpoint: WorkflowCheckpoint) -> Bool {
+        if expiredIDs.contains(checkpoint.id) { return true }
+        guard let expiry = Date.oxyParse(checkpoint.expiresAt) else { return false }
+        return expiry <= currentDate
+    }
+
+    private func checkpointSection(_ checkpoint: WorkflowCheckpoint) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Decision").font(.appBody(14, weight: .semibold)).foregroundStyle(Color.appInk)
+                .accessibilityAddTraits(.isHeader)
+            Text(checkpoint.prompt)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+            if let message = checkpointErrors[checkpoint.id] {
+                Text(message).font(.body).foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if expired(checkpoint) {
+                Text("This decision has expired.").font(.body).foregroundStyle(Color.appInk)
+                Button("Ask Adam to check again") { AskAdam.draft("Check this again: \(checkpoint.prompt)") }
+                    .font(.body.weight(.medium)).foregroundStyle(Color.appAccent)
+                    .frame(minHeight: 44)
+            } else if submittedIDs.contains(checkpoint.id) {
+                Text("Answer sent. Updating status…").font(.body).foregroundStyle(Color.appInk)
+            } else if resolvingCheckpointID == checkpoint.id {
+                ProgressView("Sending answer").font(.body).tint(Color.appAccent)
+            } else if detail?.workflow.isFinished != true {
+                if checkpoint.isChoice, let options = checkpoint.options {
+                    VStack(spacing: 8) {
+                        ForEach(options) { option in
+                            Button { resolve(checkpoint, approved: true, choice: option.label) } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(option.label).font(.body.weight(.medium)).foregroundStyle(Color.appInk)
+                                    if let text = option.detail, !text.isEmpty {
+                                        Text(text).font(.subheadline).foregroundStyle(Color.appMuted)
                                     }
                                 }
-                                Spacer(minLength: 0)
-                                AppIcon("chevron-right", size: 12)
-                                    .foregroundStyle(Color.appMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(14)
+                                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 12))
                             }
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .buttonStyle(.appScale)
                         }
-                        .buttonStyle(.appScale(0.98))
+                        decisionButton("Decline", primary: false) { resolve(checkpoint, approved: false, choice: nil) }
                     }
-                }
-            } else {
-                HStack(spacing: 8) {
-                    Button { resolve(checkpoint, approved: true, choice: nil) } label: {
-                        Text("Yes, do it")
-                            .font(.appBody(15, weight: .medium))
-                            .foregroundStyle(Color.appOnAction)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Capsule().fill(Color.appAction))
+                    .disabled(resolvingCheckpointID != nil || errorMessage != nil)
+                    .opacity(resolvingCheckpointID != nil || errorMessage != nil ? 0.45 : 1)
+                } else {
+                    let layout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
+                    layout {
+                        decisionButton("Approve", primary: true) { resolve(checkpoint, approved: true, choice: nil) }
+                        decisionButton("Decline", primary: false) { resolve(checkpoint, approved: false, choice: nil) }
                     }
-                    .buttonStyle(.appScale(0.97))
-
-                    Button { resolve(checkpoint, approved: false, choice: nil) } label: {
-                        Text("Not now")
-                            .font(.appBody(15, weight: .medium))
-                            .foregroundStyle(Color.appInk)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Capsule().fill(Color.appInk.opacity(0.10)))
-                    }
-                    .buttonStyle(.appScale(0.97))
+                    .disabled(resolvingCheckpointID != nil || errorMessage != nil)
+                    .opacity(resolvingCheckpointID != nil || errorMessage != nil ? 0.45 : 1)
                 }
             }
+            Color.clear.frame(height: 1).id("decision-end-\(checkpoint.id)")
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(radius: 20)
+        .background(Color.appDecisionSurface, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - What it gathered
+    private func decisionButton(_ title: String, primary: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.body.weight(.semibold))
+                .foregroundStyle(primary ? Color.appBackground : Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .padding(.vertical, 8)
+                .background(primary ? Color.appInk : Color.appSurface, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.appScale)
+    }
 
     private func documentsSection(_ documents: [WorkflowDocument]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Files")
-                .font(.sectionLabel)
-                .foregroundStyle(Color.appMuted)
-
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Files").font(.sectionLabel).foregroundStyle(Color.appMuted).accessibilityAddTraits(.isHeader)
             ForEach(documents) { document in
-                HStack(spacing: 10) {
-                    AppIcon("doc", size: 14)
-                        .foregroundStyle(Color.appMuted)
-                    Text(document.displayName)
-                        .font(.appBody(14, weight: .medium))
-                        .foregroundStyle(Color.appInk)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if let size = document.sizeText {
-                        Text(size)
-                            .font(.appBody(12, weight: .medium))
-                            .foregroundStyle(Color.appMuted)
+                HStack(alignment: .top, spacing: 12) {
+                    AppIcon("doc", size: 22).foregroundStyle(Color.appAccent).frame(width: 28, height: 32)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(document.displayName).font(.body.weight(.medium)).foregroundStyle(Color.appInk)
+                        if document.displayName != document.filename {
+                            Text(document.filename).font(.subheadline).foregroundStyle(Color.appMuted)
+                        }
+                        if let size = document.sizeText {
+                            Text(size).font(.caption).foregroundStyle(Color.appMuted)
+                        }
                     }
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(Color.settingsRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .accessibilityElement(children: .combine)
             }
         }
     }
-
-    // MARK: - Timeline
 
     private func timelineSection(_ events: [WorkflowEvent]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("What happened")
-                .font(.sectionLabel)
-                .foregroundStyle(Color.appMuted)
-
-            VStack(alignment: .leading, spacing: 0) {
-                // Newest first: the interesting end of a live job is the most recent thing.
-                ForEach(Array(events.reversed().enumerated()), id: \.element.id) { index, event in
-                    TimelineRow(
-                        event: event,
-                        isFirst: index == 0,
-                        isLast: index == events.count - 1
-                    )
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .top)),
-                        removal: .opacity
-                    ))
+        VStack(alignment: .leading, spacing: 14) {
+            Text("What happened").font(.sectionLabel).foregroundStyle(Color.appMuted).accessibilityAddTraits(.isHeader)
+            if events.isEmpty {
+                Text("No updates yet").font(.body).foregroundStyle(Color.appMuted)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(events.reversed().enumerated()), id: \.element.id) { index, event in
+                        TimelineRow(event: event, isFirst: index == 0, isLast: index == events.count - 1)
+                            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
         }
     }
 
-    // MARK: - Data
-
     private func load(quiet: Bool = false) async {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW"] == "1" {
-            let json = #"{"workflow":{"id":"w1","goal":"Order the headphones from John Lewis","status":"waiting_for_user"},"timeline":[{"id":"e1","kind":"started","summary":"Started looking for the headphones","actor":"adam","created_at":"2026-10-06T21:00:00Z"},{"id":"e2","kind":"found","summary":"Found them at John Lewis for £54.20","actor":"adam","created_at":"2026-10-06T21:02:00Z"},{"id":"e3","kind":"asked","summary":"Asked you to approve the payment","actor":"adam","created_at":"2026-10-06T21:03:00Z"}],"pendingCheckpoints":[{"id":"c1","type":"payment_confirmation","status":"pending","prompt":"Place the order for £54.20?"}],"documents":[{"id":"d1","filename":"receipt.pdf","label":"Order summary","mime_type":"application/pdf","byte_size":48211}]}"#
-            detail = try? JSONDecoder().decode(WorkflowDetail.self, from: Data(json.utf8))
-            isLoading = false
-            return
-        }
-        #endif
-        if !quiet { isLoading = true }
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false; currentDate = Date() }
         do {
-            let fetched = try await HomeBoardService.fetchWorkflow(id: workflowId)
-            let arriving = Set(fetched.timeline.map(\.id)).subtracting(seenEventIDs)
-            // Only animate genuinely new rows. Animating the whole list on every poll made
-            // the screen twitch every three seconds.
-            if !seenEventIDs.isEmpty && !arriving.isEmpty {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { detail = fetched }
-                HapticManager.shared.impact(.light)
+            let fetched: WorkflowDetail
+            #if DEBUG
+            if PreviewData.isIsolated, let mode = ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW"], mode != "failure" {
+                if mode == "loading" { try await Task.sleep(for: .seconds(12)) }
+                if mode == "refresh-failure", detail != nil {
+                    fetched = try JSONDecoder().decode(WorkflowDetail.self, from: Data("{invalid isolated work response".utf8))
+                } else {
+                    fetched = try Self.sampleDetail(mode)
+                }
             } else {
-                detail = fetched
+                fetched = try await HomeBoardService.fetchWorkflow(id: workflowId)
             }
+            #else
+            fetched = try await HomeBoardService.fetchWorkflow(id: workflowId)
+            #endif
+            let arriving = Set(fetched.timeline.map(\.id)).subtracting(seenEventIDs)
+            if !seenEventIDs.isEmpty && !arriving.isEmpty {
+                withAnimation(reduceMotion ? nil : .appStandard) { detail = fetched }
+            } else { detail = fetched }
             seenEventIDs = Set(fetched.timeline.map(\.id))
+            submittedIDs.formIntersection(Set(fetched.pendingCheckpoints.map(\.id)))
             errorMessage = nil
+        } catch is CancellationError {
+            return
         } catch {
-            if !quiet { errorMessage = "Couldn't load this." }
+            errorMessage = detail == nil ? "Couldn't load this work." : "Couldn't update this work. Showing saved details."
         }
-        isLoading = false
     }
 
     private func resolve(_ checkpoint: WorkflowCheckpoint, approved: Bool, choice: String?) {
+        guard resolvingCheckpointID == nil, !submittedIDs.contains(checkpoint.id), !expired(checkpoint),
+              checkpoint.status == "pending", errorMessage == nil, detail?.workflow.isFinished != true else { return }
         HapticManager.shared.impact(.medium)
         resolvingCheckpointID = checkpoint.id
+        checkpointErrors[checkpoint.id] = nil
         Task {
+            defer { resolvingCheckpointID = nil }
             do {
-                try await HomeBoardService.resolveCheckpoint(
-                    workflowId: workflowId,
-                    checkpointId: checkpoint.id,
-                    approved: approved,
-                    choice: choice
-                )
+                #if DEBUG
+                if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_WORKFLOW"] == "server-expired" {
+                    throw APIError.server(500, "That decision expired — ask me again and I'll re-check.")
+                }
+                #endif
+                try await HomeBoardService.resolveCheckpoint(workflowId: workflowId, checkpointId: checkpoint.id,
+                                                             approved: approved, choice: choice)
+                submittedIDs.insert(checkpoint.id)
                 await load(quiet: true)
                 onChanged?()
             } catch {
-                errorMessage = "Couldn't send that answer."
+                if let apiError = error as? APIError, case let .server(_, message) = apiError,
+                   message.localizedCaseInsensitiveContains("decision expired") {
+                    expiredIDs.insert(checkpoint.id)
+                    checkpointErrors[checkpoint.id] = nil
+                } else {
+                    checkpointErrors[checkpoint.id] = "Couldn't send that answer. Try again."
+                }
             }
-            resolvingCheckpointID = nil
         }
     }
-}
 
-// MARK: - Row
+    #if DEBUG
+    private static func sampleDetail(_ mode: String) throws -> WorkflowDetail {
+        func iso(_ secondsAgo: Double) -> String { Date().addingTimeInterval(-secondsAgo).oxyISO8601String }
+        let json = """
+        {"workflow":{"id":"sample-workflow","goal":"Order the headphones from John Lewis","status":"waiting_for_user"},
+        "timeline":[{"id":"e1","kind":"started","summary":"Started looking for the headphones","actor":"adam","created_at":"\(iso(180))"},
+        {"id":"e2","kind":"found","summary":"Found them at John Lewis for £54.20","actor":"adam","created_at":"\(iso(120))"},
+        {"id":"e3","kind":"asked","summary":"Asked you to approve the payment","actor":"adam","created_at":"\(iso(60))"}],
+        "pendingCheckpoints":[{"id":"sample-decision","type":"payment_confirmation","status":"pending","prompt":"Place the order for £54.20?"}],
+        "documents":[{"id":"d1","filename":"order-summary-john-lewis-headphones.pdf","label":"Order summary","mime_type":"application/pdf","byte_size":48211}]}
+        """
+        guard var object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        if mode == "choice" {
+            object["pendingCheckpoints"] = [["id": "sample-choice", "type": "choice_required", "status": "pending", "prompt": "Choose a delivery option", "options": [["id":"standard", "label":"Standard delivery", "detail":"Thursday · Free"], ["id":"express", "label":"Express delivery", "detail":"Tuesday · £5"]]]]
+        }
+        if mode == "expired" {
+            object["pendingCheckpoints"] = [["id":"sample-expired", "type":"payment_confirmation", "status":"pending", "prompt":"Place the order for £54.20?", "expires_at": iso(60)]]
+        }
+        if mode == "completed" {
+            object["workflow"] = ["id":"sample-workflow", "goal":"Check the headphone price", "status":"completed"]
+            object["pendingCheckpoints"] = []
+            object["timeline"] = [["id":"sample-complete", "kind":"completed", "summary":"Price checked: £54.20 at John Lewis", "actor":"adam", "created_at":iso(60)]]
+        }
+        if mode == "empty" { object["timeline"] = []; object["documents"] = []; object["pendingCheckpoints"] = [] }
+        return try JSONDecoder().decode(WorkflowDetail.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+    #endif
+}
 
 private struct TimelineRow: View {
     let event: WorkflowEvent
@@ -302,45 +356,25 @@ private struct TimelineRow: View {
     let isLast: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // The rail: a dot per event, joined by a hairline, so the sequence reads as one
-            // continuous thread rather than a stack of unrelated rows.
+        HStack(alignment: .top, spacing: 14) {
             VStack(spacing: 0) {
-                Rectangle()
-                    .fill(isFirst ? Color.clear : Color.appMuted)
-                    .frame(width: 1, height: 8)
-                Circle()
-                    .fill(isFirst ? Color.appAccent : Color.appMuted)
-                    .frame(width: isFirst ? 8 : 6, height: isFirst ? 8 : 6)
-                Rectangle()
-                    .fill(isLast ? Color.clear : Color.appMuted)
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
+                Circle().fill(isFirst ? Color.appAccent : Color.appMuted).frame(width: 7, height: 7)
+                Rectangle().fill(isLast ? Color.clear : Color.appHairline).frame(width: 1)
             }
             .frame(width: 8)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.summary ?? event.kind)
-                    .font(.appBody(15, weight: isFirst ? .medium : .regular))
-                    .foregroundStyle((isFirst ? Color.appInk : Color.appMuted))
+            .padding(.top, 7)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(event.summary ?? "Update").font(.body.weight(isFirst ? .medium : .regular))
+                    .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 6) {
-                    if event.isUser {
-                        Text("You")
-                            .font(.appBody(12, weight: .semibold))
-                            .foregroundStyle(Color.appAccent.opacity(0.8))
-                    }
-                    if let relative = event.date?.oxyRelativeShort {
-                        Text(relative)
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                }
+                Text(event.date.map { $0.formatted(date: Calendar.current.isDateInToday($0) ? .omitted : .abbreviated, time: .shortened) } ?? "Time unavailable")
+                    .font(.caption).foregroundStyle(Color.appMuted)
+                if event.isUser { Text("You").font(.caption).foregroundStyle(Color.appMuted) }
             }
-            .padding(.bottom, 14)
-
-            Spacer(minLength: 0)
+            .padding(.bottom, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .accessibilityElement(children: .combine)
     }
 }

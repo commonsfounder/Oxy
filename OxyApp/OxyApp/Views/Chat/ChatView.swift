@@ -18,6 +18,15 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
     @State private var wheelOpen = false
+    @State private var overviewSelected = true
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var showsOverview: Bool {
+        overviewSelected && !isIncognito && initialSession == nil && !startFresh && !viewModel.isViewingHistorySnapshot
+    }
+    @State private var expandedExchanges = Set<UUID>()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ThreadMenuChoice.orderKey) private var wheelOrderRaw = ""
     @State private var showsPrivateExplainer = false
     @State private var replyingTo: Message?
@@ -37,6 +46,10 @@ struct ChatView: View {
     @State private var showCamera = false
     @State private var attachmentError: String?
     @State private var showAttachMenu = false
+    @State private var nextAttachmentSource: AttachmentSource?
+    @State private var isLoadingAttachment = false
+
+    private enum AttachmentSource { case camera, photos, files }
     @State private var isIncognito = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImageData: Data?
@@ -110,13 +123,14 @@ struct ChatView: View {
         let isGroupEnd = nextRole != message.role
         let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
         let previousMessage = idx > 0 ? msgs[idx - 1] : nil
-        if idx == 0 || !Calendar.current.isDate(previousMessage?.timestamp ?? message.timestamp, inSameDayAs: message.timestamp) || message.timestamp.timeIntervalSince(previousMessage?.timestamp ?? message.timestamp) > 20 * 60 {
-            Text("\(Self.dayLabel(for: message.timestamp)) \(message.timestamp.formatted(date: .omitted, time: .shortened))")
+        if message.role == .assistant, let previousMessage,
+           !Calendar.current.isDate(previousMessage.timestamp, inSameDayAs: message.timestamp)
+                || message.timestamp.timeIntervalSince(previousMessage.timestamp) > 20 * 60 {
+            Text("\(Self.dayLabel(for: message.timestamp)) · \(message.timestamp.formatted(date: .omitted, time: .shortened))")
                 .font(.appBody(12))
                 .foregroundStyle(Color.appMuted)
-                .frame(maxWidth: .infinity)
-                .padding(.top, idx == 0 ? 4 : 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, AppSpacing.chatMargin)
+                .padding(.top, 16)
         }
         ThreadMessageRow(
             message: message,
@@ -129,21 +143,16 @@ struct ChatView: View {
                 showsTypingIndicator: false,
                 isGroupStart: isGroupStart,
                 isGroupEnd: isGroupEnd,
-                showsTimestamp: shouldShowTimestamp(
-                    for: message,
-                    previous: previousMessage,
-                    next: nextMessage,
-                    isGroupEnd: isGroupEnd
-                ),
+                showsTimestamp: false,
                 onActionCommand: { command in
                     viewModel.sendCommand(command, userId: appState.userId)
                 },
                 onOpenAction: { action in
                     handleActionOpen(action)
                 },
-                onRetryFailedTurn: {
-                    viewModel.retryLastFailedMessage(userId: appState.userId)
-                },
+                onRetryFailedTurn: viewModel.canRetryFailedMessage(id: message.id) ? {
+                    viewModel.retryFailedMessage(id: message.id, userId: appState.userId)
+                } : nil,
                 onSceneRequest: { request in
                     viewModel.sendInterfaceRequest(request, userId: appState.userId)
                 },
@@ -151,7 +160,7 @@ struct ChatView: View {
             )
         }
         .id(message.id)
-        .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
+        .padding(.top, isGroupStart && message.role == .assistant ? 12 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
 
         if message.id == viewModel.activeTurnUserMessageID, viewModel.isSending || viewModel.isWaitingForSavedReply, !replyStarted {
@@ -159,6 +168,79 @@ struct ChatView: View {
                 .id("working-\(message.id)")
                 .padding(.top, 10)
         }
+    }
+
+    private var exchanges: [ThreadExchange] {
+        ThreadExchange.group(viewModel.messages.filter { !isHiddenInThread($0) })
+    }
+
+    private func exchangeIsOpen(_ exchange: ThreadExchange) -> Bool {
+        exchange.id == exchanges.last?.id || expandedExchanges.contains(exchange.id)
+            || exchange.messages.contains { message in
+                message.isStreaming || message.turnError != nil || message.actions.contains(where: \.needsUser)
+                    || (viewModel.isSending && message.id == viewModel.activeTurnUserMessageID)
+            }
+    }
+
+    @ViewBuilder
+    private func exchangeSection(_ exchange: ThreadExchange) -> some View {
+        let isOpen = exchangeIsOpen(exchange)
+        VStack(alignment: .leading, spacing: 0) {
+            if exchange.id != exchanges.last?.id {
+                Button {
+                    HapticManager.shared.select()
+                    withAnimation(reduceMotion ? nil : .appStandard) {
+                        if !expandedExchanges.insert(exchange.id).inserted {
+                            expandedExchanges.remove(exchange.id)
+                        }
+                    }
+                } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(Self.dayLabel(for: exchange.date))
+                                .font(.appBody(12, weight: .medium))
+                                .foregroundStyle(Color.appMuted)
+                            if !isOpen {
+                                Text(exchange.title)
+                                    .font(.appBody(17, weight: .medium))
+                                    .foregroundStyle(Color.appInk)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        if !exchange.requiresAttention {
+                            AppIcon("chevron-down", size: 14)
+                                .foregroundStyle(Color.appMuted)
+                                .rotationEffect(.degrees(isOpen ? 180 : 0))
+                                .padding(.top, 5)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, AppSpacing.chatMargin)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(exchange.title)
+                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+                .accessibilityHint("Show or hide earlier messages")
+                .disabled(exchange.requiresAttention)
+            }
+            if isOpen {
+                ForEach(exchange.messages) { message in
+                    if let idx = viewModel.messages.firstIndex(where: { $0.id == message.id }) {
+                        messageRow(idx: idx, message: message)
+                    }
+                }
+                .padding(.bottom, 16)
+            }
+        }
+        .background(isOpen ? Color.appSurface : Color.clear)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+        }
+        .id("exchange-\(exchange.id)")
     }
 
     @ViewBuilder
@@ -190,6 +272,7 @@ struct ChatView: View {
     /// What the Adam button shows: you speaking, a yes being waited on, or work in progress.
     private var hubActivity: AdamActivityState? {
         if voiceInput.isRecording { return .listening }
+        if !boardModel.submittingDecisions.isEmpty || boardModel.hasDecisionReadback { return .working }
         if boardModel.needsYou.contains(where: { boardModel.acknowledged[$0.id] == nil }) { return .waiting }
         if !boardModel.working.isEmpty || viewModel.isSending { return .working }
         return nil
@@ -209,10 +292,108 @@ struct ChatView: View {
         .ignoresSafeArea()
     }
 
+    private var overview: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if horizontalSizeClass == .regular && !typeSize.isAccessibilitySize {
+                HStack(alignment: .top, spacing: 32) {
+                    ThreadBoardCards(model: boardModel, askedInThread: askedInThread, isOverview: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    overviewContext
+                        .frame(width: 280)
+                }
+            } else {
+                ThreadBoardCards(model: boardModel, askedInThread: askedInThread, isOverview: true)
+                overviewContext
+            }
+        }
+        .padding(.horizontal, AppSpacing.chatMargin)
+        .padding(.top, 0).padding(.bottom, 24)
+        .id("overview")
+    }
+
+    private var overviewContext: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("For today").font(.sectionTitle).foregroundStyle(Color.appInk)
+                    .accessibilityAddTraits(.isHeader)
+                TodaySuggestionsContent(limit: 1, onMore: { onMenuChoice?(.today, hubCenter) })
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                    contextDestination(.memory, icon: "wheel-memory")
+                    contextDestination(.home, icon: "wheel-home")
+            }
+            .id("overview-context")
+        }
+    }
+
+    private func contextDestination(_ choice: ThreadMenuChoice, icon: String) -> some View {
+        Button { onMenuChoice?(choice, hubCenter) } label: {
+            HStack(spacing: 16) {
+                AppIcon(icon, size: 22).foregroundStyle(Color.appAccent)
+                    .accessibilityHidden(true)
+                    Text(choice.title).font(.appBody(17, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    AppIcon("chevron-right", size: 14).foregroundStyle(Color.appMuted)
+            }
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .contentShape(Rectangle())
+            .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
+        }
+        .buttonStyle(.appScale)
+    }
+
+    private var quietConversation: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if viewModel.isLoadingHistory {
+                ProgressView("Loading conversation")
+                    .font(.appBody(15))
+                    .foregroundStyle(Color.appMuted)
+            } else if viewModel.networkError == nil {
+                Text("No messages yet")
+                    .font(.appRounded(28, weight: .semibold, relativeTo: .title1))
+                    .foregroundStyle(Color.appInk)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        quietDestination(.today, icon: "wheel-today")
+                        quietDestination(.memory, icon: "wheel-memory")
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        quietDestination(.today, icon: "wheel-today")
+                        quietDestination(.memory, icon: "wheel-memory")
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppSpacing.chatMargin)
+        .padding(.vertical, 32)
+    }
+
+    private func quietDestination(_ choice: ThreadMenuChoice, icon: String) -> some View {
+        Button { onMenuChoice?(choice, hubCenter) } label: {
+            HStack(spacing: 10) {
+                AppIcon(icon, size: 20)
+                Text(choice.title).font(.appBody(16, weight: .medium))
+            }
+            .foregroundStyle(Color.appAccent)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 52)
+            .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.appScale)
+    }
+
     private func loadOlderMessages(_ proxy: ScrollViewProxy) {
         Task {
             guard let anchor = await viewModel.loadOlder(userId: appState.userId) else { return }
-            proxy.scrollTo(anchor, anchor: .top)
+            if let exchange = exchanges.first(where: { $0.messages.contains { $0.id == anchor } }), !exchangeIsOpen(exchange) {
+                proxy.scrollTo("exchange-\(exchange.id)", anchor: .top)
+            } else {
+                proxy.scrollTo(anchor, anchor: .top)
+            }
         }
     }
 
@@ -260,6 +441,14 @@ struct ChatView: View {
         return last.role == .assistant && !last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var isReviewPreview: Bool {
+        #if DEBUG
+        PreviewData.isIsolated && ProcessInfo.processInfo.environment["OXY_DEBUG_REVIEW"] != nil
+        #else
+        false
+        #endif
+    }
+
     private var assistantReplySettled: Bool {
         guard let last = viewModel.messages.last else { return false }
         return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
@@ -269,10 +458,32 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            GlebChrome.pastelBlob
-                .ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                            ThreadHeader(
+                                isIncognito: isIncognito,
+                                isWorking: !boardModel.working.isEmpty,
+                                activity: hubActivity,
+                                deviceOnline: boardModel.deviceOnline,
+                                isDemo: appState.isDemoSession,
+                                isComposing: isInputFocused,
+                                showsStatus: !showsOverview,
+                                wheelOpen: $wheelOpen,
+                                hubCenter: $hubCenter
+                            )
+                            .onChange(of: isIncognito) { _, on in
+                                viewModel.incognito = on
+                            }
+                if !isIncognito && initialSession == nil && !startFresh && !viewModel.isViewingHistorySnapshot {
+                    Picker("Adam workspace", selection: $overviewSelected) {
+                        Text("Now").tag(true)
+                        Text("Conversation").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, AppSpacing.chatMargin)
+                    .padding(.top, 4).padding(.bottom, 4)
+                }
                 // Offline banner
                 if isOffline {
                     HStack(spacing: 8) {
@@ -317,7 +528,11 @@ struct ChatView: View {
                         ErrorBanner(
                             message: networkError,
                             onRetry: {
-                                viewModel.retryLastFailedMessage(userId: appState.userId)
+                                if viewModel.messages.isEmpty {
+                                    Task { await viewModel.loadHistory(userId: appState.userId) }
+                                } else {
+                                    viewModel.retryLastFailedMessage(userId: appState.userId)
+                                }
                             },
                             onDismiss: {
                                 viewModel.networkError = nil
@@ -342,20 +557,27 @@ struct ChatView: View {
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                if showsOverview {
+                                    overview
+                                } else {
+                                if viewModel.messages.isEmpty && boardModel.isEmpty {
+                                    quietConversation
+                                }
                                 if viewModel.hasOlderHistory, !viewModel.messages.isEmpty, didSettleAtBottom {
                                     Color.clear
                                         .frame(height: 1)
                                         .onAppear { loadOlderMessages(proxy) }
                                 }
-                                ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
-                                    messageRow(idx: idx, message: message)
+                                ForEach(exchanges) { exchange in
+                                    exchangeSection(exchange)
                                 }
 
                                 ThreadBoardCards(model: boardModel, askedInThread: askedInThread)
                                     .padding(.horizontal, AppSpacing.chatMargin)
                                     .padding(.top, boardModel.isEmpty ? 0 : 14)
 
+                                }
                                 Color.clear
                                     .frame(height: 1)
                                     .id("bottom")
@@ -371,7 +593,8 @@ struct ChatView: View {
                             .padding(.vertical, 12)
                             .animation(.appSpring, value: viewModel.messages.count)
                         }
-                        .defaultScrollAnchor(.bottom)
+                        .defaultScrollAnchor(showsOverview || viewModel.messages.isEmpty ? .top : .bottom)
+                        .modifier(ThreadShortContentAlignment())
                         .coordinateSpace(name: "chatScroll")
                         .background(
                             GeometryReader { geo in
@@ -381,7 +604,7 @@ struct ChatView: View {
                         .onPreferenceChange(ChatViewportHeightKey.self) { height in
                             let resized = scrollViewportHeight != height
                             scrollViewportHeight = height
-                            if resized, didSettleAtBottom, isScrollPinnedToBottom {
+                            if !showsOverview, resized, didSettleAtBottom, isScrollPinnedToBottom {
                                 Task { @MainActor in
                                     await Task.yield()
                                     proxy.scrollTo("bottom", anchor: .bottom)
@@ -393,25 +616,17 @@ struct ChatView: View {
                             isScrollPinnedToBottom = bottomY <= scrollViewportHeight + 96
                         }
                         .scrollDismissesKeyboard(.interactively)
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            ThreadHeader(
-                                isIncognito: isIncognito,
-                                isWorking: !boardModel.working.isEmpty,
-                                activity: hubActivity,
-                                deviceOnline: boardModel.deviceOnline,
-                                isDemo: appState.isDemoSession,
-                                wheelOpen: $wheelOpen,
-                                hubCenter: $hubCenter
-                            )
-                            .onChange(of: isIncognito) { _, on in
-                                viewModel.incognito = on
-                            }
-                        }
-                        .hidesTabBarOnScroll()
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             VStack(spacing: 0) {
                     if let replyingTo {
                         ReplyPreviewBar(message: replyingTo) { withAnimation(.appSpring) { self.replyingTo = nil } }
+                    }
+
+                    if isLoadingAttachment {
+                        AttachmentLoadingStatus {
+                            selectedPhotoItem = nil
+                            isLoadingAttachment = false
+                        }
                     }
 
                     // Input bar
@@ -419,6 +634,7 @@ struct ChatView: View {
                         text: $viewModel.inputText,
                         isSending: isOffline,
                         isBusy: viewModel.isSending,
+                        isLoadingAttachment: isLoadingAttachment,
                         onStop: { viewModel.stopCurrentTurn() },
                         voiceLevel: { voiceInput.level() },
                         isRecording: voiceInput.isRecording,
@@ -445,7 +661,7 @@ struct ChatView: View {
                         onAttach: {
                             HapticManager.shared.impact(.light)
                             isInputFocused = false
-                            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) { showAttachMenu = true }
+                            showAttachMenu = true
                         },
                         onCancelVoice: {
                             voiceInput.cancel()
@@ -462,8 +678,61 @@ struct ChatView: View {
                                 ComposerBackdrop()
                             }
                         }
+                        #if DEBUG
+                        .task(id: "\(showsOverview)-\(boardModel.decisionErrors.count)") {
+                            guard PreviewData.isIsolated, showsOverview,
+                                  let focus = ProcessInfo.processInfo.environment["OXY_DEBUG_OVERVIEW_FOCUS"] else { return }
+                            try? await Task.sleep(for: .seconds(1))
+                            guard !Task.isCancelled else { return }
+                            if focus == "decision", let first = boardModel.needsYou.first {
+                                proxy.scrollTo("board-decision-\(first.id)", anchor: .bottom)
+                            } else if focus == "context" {
+                                proxy.scrollTo("overview-context", anchor: .bottom)
+                            } else if focus == "updates" {
+                                proxy.scrollTo("board-updates", anchor: .top)
+                            } else if focus == "work" {
+                                proxy.scrollTo("board-work", anchor: .top)
+                            } else if focus == "work-bottom", let last = boardModel.working.last {
+                                proxy.scrollTo("board-work-\(last.id)", anchor: .bottom)
+                            } else if focus == "outcomes" {
+                                proxy.scrollTo("board-outcomes", anchor: .top)
+                            } else if focus == "outcome-bottom", let last = boardModel.finished.last {
+                                proxy.scrollTo("board-outcome-\(last.id)", anchor: .bottom)
+                            }
+                        }
+                        #endif
+                        #if DEBUG
+                        .task(id: showsOverview) {
+                            guard PreviewData.isIsolated, !showsOverview,
+                                  let focus = ProcessInfo.processInfo.environment["OXY_DEBUG_CONVERSATION_FOCUS"] else { return }
+                            try? await Task.sleep(for: .seconds(1))
+                            guard !Task.isCancelled else { return }
+                            if focus == "request", let first = exchanges.first {
+                                proxy.scrollTo("exchange-\(first.id)", anchor: .top)
+                            } else if focus == "results",
+                                      let message = viewModel.messages.first(where: { $0.actions.contains { !($0.results ?? []).isEmpty } }),
+                                      let first = message.actions.compactMap(\.results).first?.first {
+                                proxy.scrollTo("result-option-\(message.id)-\(first.id)", anchor: .top)
+                            }
+                        }
+                        #endif
+                        .onChange(of: overviewSelected) { _, selected in
+                            if selected { isInputFocused = false }
+                            Task { @MainActor in
+                                await Task.yield()
+                                proxy.scrollTo(selected ? "overview" : "bottom", anchor: selected ? .top : .bottom)
+                                if !selected && !viewModel.messages.isEmpty { didSettleAtBottom = true }
+                            }
+                        }
+                        .onChange(of: viewModel.isSending) { _, sending in
+                            if sending { overviewSelected = false }
+                        }
+                        .onChange(of: isInputFocused) { _, focused in
+                            if focused { overviewSelected = false }
+                        }
                         .onChange(of: viewModel.messages.count) {
                             ReactionStore.shared.migrate(with: viewModel.messages)
+                            guard !showsOverview else { return }
                             if !didSettleAtBottom, !viewModel.messages.isEmpty, viewModel.scrollTargetMessageID == nil {
                                 // First load: jump to the newest message, with no animation, and again once rows have measured.
                                 proxy.scrollTo("bottom", anchor: .bottom)
@@ -481,13 +750,14 @@ struct ChatView: View {
                             }
                         }
                         .onChange(of: viewModel.inputText) {
-                            guard isScrollPinnedToBottom else { return }
+                            guard !showsOverview, isScrollPinnedToBottom else { return }
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(100))
                                 proxy.scrollTo("bottom", anchor: .bottom)
                             }
                         }
                         .onChange(of: viewModel.messages.last?.content) {
+                            guard !showsOverview else { return }
                             guard viewModel.scrollTargetMessageID == nil else { return }
                             guard isScrollPinnedToBottom else { return }
                             withAnimation(.appSpring) {
@@ -496,6 +766,10 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.scrollTargetMessageID) { _, targetID in
                             guard let targetID else { return }
+                            overviewSelected = false
+                            if let exchange = exchanges.first(where: { $0.messages.contains { $0.id == targetID } }) {
+                                expandedExchanges.insert(exchange.id)
+                            }
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(150))
                                 withAnimation(.appStandard) {
@@ -512,18 +786,24 @@ struct ChatView: View {
                     }
                 }
 
-                attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
             #if DEBUG
             .onAppear {
-                if ProcessInfo.processInfo.environment["OXY_DEBUG_REVIEW"] == "1" {
-                    let json = #"{"action":"transaction_authorize","success":false,"outcome":"awaiting_user","pending":true,"text":"Waiting for your yes","cardText":"Pay £54.20 to johnlewis.com with your Visa ending 4242.","actionSummary":"Place the order","subject":{"amount":"£54.20","merchant":"johnlewis.com","card":"Visa ending 4242"}}"#
-                    pendingReviewAction = try? JSONDecoder().decode(ActionResult.self, from: Data(json.utf8))
+                if PreviewData.isIsolated, let review = ProcessInfo.processInfo.environment["OXY_DEBUG_REVIEW"] {
+                    let paymentJSON = #"{"action":"transaction_authorize","success":false,"outcome":"awaiting_user","pending":true,"text":"Waiting for your yes","cardText":"Pay £54.20 to johnlewis.com with your Visa ending 4242.","actionSummary":"Place the order","subject":{"name":"Wireless headphones","amount":"£54.20","merchant":"johnlewis.com","card":"Visa ending 4242","options":["Standard delivery · Thursday"]}}"#
+                    let emailJSON = #"{"action":"send_email","success":false,"outcome":"awaiting_user","pending":true,"cardText":"Recipient: alex@example.com\nSubject: Order update\n\nBody: The supplier quoted £50. Please send the revised delivery date.","actionSummary":"Send order update"}"#
+                    pendingReviewAction = try? JSONDecoder().decode(ActionResult.self, from: Data((review == "email" ? emailJSON : paymentJSON).utf8))
                 }
                 if ProcessInfo.processInfo.environment["OXY_DEBUG_RECORDING"] == "1" {
                     voiceInput.isRecording = true
-                    voiceInput.transcript = "Remind me to call the dentist tomorrow morning and"
+                    voiceInput.transcript = "Remind me to call the dentist tomorrow morning"
+                }
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_TRANSCRIBING"] == "1" {
+                    voiceInput.isTranscribing = true
+                }
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_VOICE_ERROR"] == "1" {
+                    voiceErrorMessage = "Microphone access is off. Enable it in Settings to use voice."
                 }
             }
             #endif
@@ -531,7 +811,17 @@ struct ChatView: View {
             .task {
                 while !Task.isCancelled {
                     await boardModel.refresh()
+                    #if DEBUG
+                    await boardModel.checkDecisionFailurePreview()
+                    #endif
                     try? await Task.sleep(for: boardModel.working.isEmpty ? .seconds(60) : .seconds(10))
+                }
+            }
+            .task(id: boardModel.hasDecisionReadback && scenePhase == .active) {
+                guard boardModel.hasDecisionReadback, scenePhase == .active else { return }
+                while !Task.isCancelled && boardModel.hasDecisionReadback {
+                    await boardModel.refresh()
+                    try? await Task.sleep(for: .seconds(3))
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -539,11 +829,13 @@ struct ChatView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: AskAdam.sendNotification)) { note in
                 guard let text = note.object as? String else { return }
+                overviewSelected = false
                 viewModel.inputText = text
                 viewModel.sendMessage(userId: appState.userId)
             }
             .onReceive(NotificationCenter.default.publisher(for: AskAdam.notification)) { note in
                 guard let text = note.object as? String else { return }
+                overviewSelected = false
                 viewModel.inputText = text
                 Task {
                     try? await Task.sleep(for: .milliseconds(450))
@@ -577,15 +869,15 @@ struct ChatView: View {
                     onConfirm: {
                         handledReviewActionIDs.insert(action.id)
                         pendingReviewAction = nil
-                        viewModel.sendCommand("confirm", userId: appState.userId)
+                        if !isReviewPreview { viewModel.sendCommand("confirm", userId: appState.userId) }
                     },
                     onCancel: {
                         handledReviewActionIDs.insert(action.id)
                         pendingReviewAction = nil
-                        viewModel.sendCommand("cancel", userId: appState.userId)
+                        if !isReviewPreview { viewModel.sendCommand("cancel", userId: appState.userId) }
                     }
                 )
-                .presentationDetents([.height(340), .medium])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
             .sheet(item: $messageDraft) { draft in
@@ -601,6 +893,12 @@ struct ChatView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(messageComposerAlert ?? "")
+            }
+            .sheet(isPresented: $showAttachMenu, onDismiss: presentAttachmentSource) {
+                AttachmentChooser { source in
+                    nextAttachmentSource = source
+                    showAttachMenu = false
+                }
             }
             .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .any(of: [.images, .videos]))
             .fullScreenCover(isPresented: $showCamera) {
@@ -630,27 +928,52 @@ struct ChatView: View {
                 allowedContentTypes: [.pdf, .plainText, .commaSeparatedText, .json, .image, .audio, .data],
                 allowsMultipleSelection: false
             ) { result in
-                guard let url = try? result.get().first else { return }
-                let didAccess = url.startAccessingSecurityScopedResource()
-                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-                stageFile(at: url, name: url.lastPathComponent, mime: mimeType(for: url))
-            }
-            .onChange(of: selectedPhotoItem) { _, item in
-                guard let item else { return }
-                Task {
-                    if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
-                        if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
-                            await MainActor.run {
-                                stageFile(at: movie.url, name: "Video.\(movie.url.pathExtension.isEmpty ? "mov" : movie.url.pathExtension)",
-                                          mime: mimeType(for: movie.url), deleteAfter: true)
-                            }
-                        }
-                    } else if let data = try? await item.loadTransferable(type: Data.self) {
-                        await MainActor.run {
-                            stageAttachment(data: data, name: "Photo",
-                                            mime: data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg")
-                        }
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let didAccess = url.startAccessingSecurityScopedResource()
+                    defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                    stageFile(at: url, name: url.lastPathComponent, mime: mimeType(for: url))
+                case .failure(let error):
+                    if (error as NSError).code != NSUserCancelledError {
+                        attachmentError = "The file couldn't be opened. Choose it again."
                     }
+                }
+            }
+            .task(id: selectedPhotoItem) {
+                guard let item = selectedPhotoItem else {
+                    isLoadingAttachment = false
+                    return
+                }
+                isLoadingAttachment = true
+                defer {
+                    if selectedPhotoItem == item {
+                        selectedPhotoItem = nil
+                        isLoadingAttachment = false
+                    }
+                }
+                do {
+                    if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
+                        guard let movie = try await item.loadTransferable(type: PickedMovie.self) else {
+                            throw CocoaError(.fileReadUnknown)
+                        }
+                        guard !Task.isCancelled else {
+                            try? FileManager.default.removeItem(at: movie.url)
+                            return
+                        }
+                        stageFile(at: movie.url, name: "Video.\(movie.url.pathExtension.isEmpty ? "mov" : movie.url.pathExtension)",
+                                  mime: mimeType(for: movie.url), deleteAfter: true)
+                    } else {
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
+                            throw CocoaError(.fileReadUnknown)
+                        }
+                        guard !Task.isCancelled else { return }
+                        let mime = item.supportedContentTypes.first(where: { $0.conforms(to: .image) })?.preferredMIMEType ?? "image/jpeg"
+                        stageAttachment(data: data, name: "Photo", mime: mime)
+                    }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    attachmentError = "The photo or video couldn't be loaded. Choose it again."
                 }
             }
             .onChange(of: pendingReviewAction) { oldValue, newValue in
@@ -676,6 +999,7 @@ struct ChatView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .oxyDraftMessage)) { note in
                 guard let text = note.userInfo?["text"] as? String else { return }
+                overviewSelected = false
                 viewModel.inputText = text
             }
             .onReceive(NotificationCenter.default.publisher(for: .oxyPendantCommand)) { note in
@@ -705,6 +1029,40 @@ struct ChatView: View {
             if let initialReviewAction {
                 pendingReviewAction = initialReviewAction
             }
+            #if DEBUG
+            if appState.isDemoSession, let flow = ProcessInfo.processInfo.environment["OXY_DEBUG_FLOW"],
+               let messages = PreviewData.threadMessages(for: flow) {
+                viewModel.prepareUIPreview(messages: messages, flow: flow)
+                overviewSelected = ProcessInfo.processInfo.environment["OXY_DEBUG_OVERVIEW"] == "1"
+            }
+            if let draft = ProcessInfo.processInfo.environment["OXY_DEBUG_DRAFT"] {
+                viewModel.inputText = draft
+                isInputFocused = true
+            }
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_ATTACHMENT"] == "file" {
+                pendingImageData = Data("Local UI review fixture.".utf8)
+                pendingImageName = "UI review.txt"
+                pendingImageMimeType = "text/plain"
+                pendingIsImage = false
+            }
+            if PreviewData.isIsolated {
+                switch ProcessInfo.processInfo.environment["OXY_DEBUG_ATTACHMENT"] {
+                case "menu": showAttachMenu = true
+                case "photos": showPhotoPicker = true
+                case "files": showFileImporter = true
+                case "camera": openCamera()
+                case "unreadable":
+                    stageFile(at: FileManager.default.temporaryDirectory.appendingPathComponent("missing-ui-review.txt"),
+                              name: "UI review.txt", mime: "text/plain")
+                case "oversize":
+                    stageAttachment(data: Data(count: Self.attachmentLimit + 1), name: "UI review.txt", mime: "text/plain")
+                case "loading": isLoadingAttachment = true
+                case "retry-failure": await viewModel.checkAttachmentRetryPreview(userId: appState.userId)
+                default: break
+                }
+            }
+            #endif
+
             if let transcript = autoSendTranscript, !transcript.isEmpty {
                 injectVoiceMessage(transcript)
             }
@@ -739,92 +1097,115 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Attachment sheet (custom, flat obsidian)
+    // MARK: - Attachments
 
-    @ViewBuilder
-    private var attachmentSheetOverlay: some View {
-        if showAttachMenu {
-            ZStack(alignment: .bottomLeading) {
-                Color.black.opacity(0.18)
-                    .ignoresSafeArea()
-                    .onTapGesture { dismissAttachMenu() }
+    /// Present the system picker only after the source chooser has dismissed.
+    private func presentAttachmentSource() {
+        guard let source = nextAttachmentSource else { return }
+        nextAttachmentSource = nil
+        switch source {
+        case .camera: openCamera()
+        case .photos: showPhotoPicker = true
+        case .files: showFileImporter = true
+        }
+    }
 
-                VStack(spacing: 0) {
-                    attachSheetRow("Camera", icon: "camera") {
-                        dismissAttachMenu()
-                        openCamera()
-                    }
-                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
-                    attachSheetRow("Photos & Videos", icon: "photo") {
-                        dismissAttachMenu()
-                        showPhotoPicker = true
-                    }
-                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
-                    attachSheetRow("Files", icon: "doc") {
-                        dismissAttachMenu()
-                        showFileImporter = true
-                    }
-                    Rectangle().fill(Color.appCardOutline).frame(height: 1).padding(.leading, 52)
-                    Button {
-                        HapticManager.shared.impact(.light)
-                        dismissAttachMenu()
-                        handleMenuChoice(.privateChat)
-                    } label: {
-                        HStack(spacing: 14) {
-                            GhostIcon(active: isIncognito)
-                                .frame(width: 20, height: 20)
-                                .foregroundStyle(Color.appInk)
-                                .frame(width: 24)
-                            Text(isIncognito ? "Turn off private mode" : "Private mode")
-                                .font(.appBody(16, weight: .medium))
-                                .foregroundStyle(Color.appInk)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 56)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.appScale(0.97))
+    private struct AttachmentLoadingStatus: View {
+        @Environment(\.dynamicTypeSize) private var typeSize
+        let cancel: () -> Void
+
+        var body: some View {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 12))
+            layout {
+                HStack(spacing: 12) {
+                    ProgressView().tint(Color.appAccent)
+                    Text("Loading attachment")
+                        .font(.body)
+                        .foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(width: 232)
-                .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.appSurface2))
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.appCardOutline, lineWidth: 1))
-                .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
-                .padding(.leading, 14)
-                .padding(.bottom, 74)
-                .transition(.scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Cancel", action: cancel)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.appAccent)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minHeight: 44)
             }
-            .zIndex(20)
+            .padding(.horizontal, AppSpacing.chatMargin)
+            .accessibilityElement(children: .contain)
         }
     }
 
-    private func attachSheetRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                AppIcon(icon, size: 20)
-                    .foregroundStyle(Color.appInk)
-                    .frame(width: 24)
-                Text(title)
-                    .font(.appBody(16, weight: .medium))
-                    .foregroundStyle(Color.appInk)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.appScale(0.97))
-    }
+    private struct AttachmentChooser: View {
+        @Environment(\.dismiss) private var dismiss
+        @Environment(\.dynamicTypeSize) private var typeSize
+        @Environment(AppState.self) private var appState
+        let select: (AttachmentSource) -> Void
 
-    private func dismissAttachMenu() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showAttachMenu = false }
+        var body: some View {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Add attachment")
+                            .font(.title2.bold())
+                            .foregroundStyle(Color.appInk)
+                            .accessibilityAddTraits(.isHeader)
+                        if appState.isDemoSession {
+                            Text("Sample").font(.caption).foregroundStyle(Color.appMuted)
+                        }
+                    }
+                    VStack(spacing: 0) {
+                        sourceRow("Photos and videos", icon: "photo", source: .photos)
+                        Divider().overlay(Color.appHairline)
+                        sourceRow("Camera", icon: "camera", source: .camera)
+                        Divider().overlay(Color.appHairline)
+                        sourceRow("Files", icon: "doc", source: .files)
+                    }
+                    .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .padding(AppSpacing.margin)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button("Cancel") { dismiss() }
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.appAccent)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .padding(.horizontal, AppSpacing.margin)
+                    .padding(.vertical, 12)
+                    .background(Color.appBackground)
+            }
+            .background(Color.appBackground)
+            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+
+        private func sourceRow(_ title: String, icon: String, source: AttachmentSource) -> some View {
+            Button { select(source) } label: {
+                HStack(spacing: 16) {
+                    AppIcon(icon, size: 24)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(width: 32)
+                    Text(title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    AppIcon("chevron-right", size: 14)
+                        .foregroundStyle(Color.appMuted)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.appScale)
+        }
     }
 
     /// Send a spoken transcript once.
     private func injectVoiceMessage(_ rawText: String) {
+        overviewSelected = false
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         viewModel.inputText = text
@@ -833,7 +1214,7 @@ struct ChatView: View {
 
     private func submitVoiceTranscriptIfReady() {
         let text = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !voiceInput.isRecording, !voiceInput.isTranscribing else { return }
         voiceInput.transcript = ""
         voiceErrorMessage = nil
         viewModel.inputText = text
@@ -841,6 +1222,10 @@ struct ChatView: View {
     }
 
     private func sendCurrentDraft() {
+        overviewSelected = false
+        guard !isLoadingAttachment else { return }
+        // Attachment uploads cannot be queued by the text-only turn queue.
+        guard pendingImageData == nil || !viewModel.isSending else { return }
         HapticManager.shared.impact(.light)
         if let pendingImageData {
             let defaultName = pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg"
@@ -946,7 +1331,10 @@ struct ChatView: View {
             attachmentError = "That's over the 25 MB limit."
             return
         }
-        guard let data = try? Data(contentsOf: url) else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            attachmentError = "The file couldn't be read. Choose it again."
+            return
+        }
         stageAttachment(data: data, name: name, mime: mime)
     }
 
@@ -1213,18 +1601,14 @@ private struct ActionReviewSheet: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
+    /// The capability identifies the consequence. Prices in an email or event do not.
     private var isPayment: Bool {
-        action.action == "transaction_authorize" ||
-        (action.actionSummary ?? "").localizedCaseInsensitiveContains("payment") ||
-        (action.actionSummary ?? "").localizedCaseInsensitiveContains("order") ||
-        (action.text ?? "").localizedCaseInsensitiveContains("charge") ||
-        (action.cardText ?? "").localizedCaseInsensitiveContains("£") ||
-        action.actionSummary == "Awaiting payment confirmation"
+        action.action == "transaction_authorize"
     }
 
     private var title: String {
         if isPayment {
-            return action.actionSummary ?? "Confirm order"
+            return action.actionSummary ?? "Review payment"
         }
         return action.actionSummary ?? {
             switch action.action {
@@ -1232,7 +1616,7 @@ private struct ActionReviewSheet: View {
             case "send_message", "send_telegram": return "Message ready to send"
             case "make_call": return "Call ready to make"
             case "create_calendar_event": return "Calendar event ready"
-            default: return "This needs your OK"
+            default: return "Review action"
             }
         }()
     }
@@ -1245,7 +1629,7 @@ private struct ActionReviewSheet: View {
 
     private var confirmLabel: String {
         if let amount = purchase?.amount { return "Pay \(amount)" }
-        if isPayment { return "Confirm & Place Order" }
+        if isPayment { return "Confirm payment" }
         switch action.action {
         case "send_email", "send_outlook_email": return "Send"
         case "send_message", "send_telegram": return "Send"
@@ -1260,95 +1644,90 @@ private struct ActionReviewSheet: View {
         cleanDetail(action.cardText ?? action.text ?? "Ready.")
     }
 
+    private var detailRepeatsReceipt: Bool {
+        guard let purchase, let amount = purchase.amount, let merchant = purchase.merchant, let card = purchase.card else { return false }
+        let receipt = "Pay \(amount) to \(merchant) with your \(card)."
+        return detail.caseInsensitiveCompare(receipt) == .orderedSame
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Capsule()
-                .fill(Color.appHairline)
-                .frame(width: 36, height: 4)
-                .frame(maxWidth: .infinity)
-
-            HStack(spacing: 12) {
-                AppIcon(sf: iconName, size: 17)
-                    .foregroundStyle(isPayment ? Color.appAccent : Color.appMuted)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle().fill(isPayment ? Color.appAccent.opacity(0.15) : Color.appSurface)
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.sectionTitle)
-                        .foregroundStyle(Color.appInk)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                HStack {
+                    AppIcon(reviewIcon, size: 26)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(width: 60, height: 60)
+                        .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 18))
+                    Spacer()
+                    #if DEBUG
+                    if PreviewData.isActive {
+                        Text("Sample")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    #endif
                 }
-                Spacer()
-            }
+                Text(title)
+                    .font(.appRounded(32, weight: .bold, relativeTo: .largeTitle))
+                    .tracking(-0.7)
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Needs your OK")
-                    .appEyebrow()
-                    .foregroundStyle(isPayment ? Color.appAccent.opacity(0.9) : Color.appMuted)
                 if let purchase {
                     purchaseReceipt(purchase)
-                } else {
+                }
+                if !detailRepeatsReceipt {
                     Text(detail)
-                        .font(.appBody(15))
-                        .foregroundStyle(Color.appInk)
+                        .font(.appBody(17))
+                        .foregroundStyle(Color.appMuted)
                         .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(16)
-            .background(Color.appSurface.opacity(0.82))
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                    .stroke(isPayment ? Color.appAccent.opacity(0.28) : Color.appHairline, lineWidth: 0.75)
-            )
-
-            if isPayment {
-                Text("Double-check the total and address on the site if anything looks off.")
-                    .font(.appBody(12))
-                    .foregroundStyle(Color.appMuted)
-            }
-
-            HStack(spacing: 12) {
-                Button(action: onCancel) {
-                    Text("Cancel")
-                        .font(.appBody(15, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.appScale)
-                .foregroundStyle(Color.appMuted)
-                .background(Color.appSurface2)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
-
+            .padding(.horizontal, 26)
+            .padding(.top, 32)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
                 Button(action: onConfirm) {
                     Text(confirmLabel)
-                        .font(.appBody(15, weight: .semibold))
-                        .foregroundStyle(Color.appOnAccent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .font(.appBody(17, weight: .semibold))
+                        .foregroundStyle(Color.appOnAction)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .padding(.vertical, 4)
+                        .background(Color.appAction, in: RoundedRectangle(cornerRadius: 18))
                 }
                 .buttonStyle(.appScale)
-                .foregroundStyle(Color.appOnAccent)
-                .background(isPayment ? Color.appAccent : Color.appAccent)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .font(.appBody(17, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.appScale)
             }
+            .padding(.horizontal, 26)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+            .background(Color.appBackground)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.appBackground)
     }
 
     /// The amount large, then the shop and the card, so the person sees exactly what they are approving.
     private func purchaseReceipt(_ purchase: ResultSubject) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            if let name = purchase.name, !name.isEmpty {
+                Text(name)
+                    .font(.appBody(20, weight: .medium))
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let amount = purchase.amount {
                 Text(amount)
-                    .font(.appEditorial(36, weight: 400, soft: 30, wonk: false, relativeTo: .largeTitle))
+                    .font(.appRounded(44, weight: .semibold, relativeTo: .largeTitle))
                     .foregroundStyle(Color.appInk)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
@@ -1369,30 +1748,34 @@ private struct ActionReviewSheet: View {
                         .foregroundStyle(Color.appInk)
                 }
             }
+            if let options = purchase.options {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                    Text(option)
+                        .font(.appBody(16))
+                        .foregroundStyle(Color.appMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
     private func cleanDetail(_ raw: String) -> String {
-        raw.strippingMarkdown
-            .replacingOccurrences(of: #"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?"#, with: "$3/$2/$1 at $4:$5", options: .regularExpression)
-            .replacingOccurrences(of: #"(?i)\b(title|start|end|notes|recipient|body):\s*"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\n\n+", with: "\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        raw.strippingMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var iconName: String {
-        if isPayment { return "creditcard.fill" }
+    private var reviewIcon: String {
+        if isPayment { return "card" }
         switch action.action {
-        case "send_email": return "envelope.fill"
-        case "send_message": return "message.fill"
-        case "send_telegram": return "paperplane.fill"
-        case "make_call": return "phone.fill"
-        case "create_calendar_event": return "calendar.badge.plus"
-        default: return "checkmark.circle.fill"
+        case "send_email", "send_outlook_email": return "envelope"
+        case "send_message", "send_telegram": return "chat"
+        case "make_call": return "phone"
+        case "create_calendar_event": return "calendar"
+        default: return "check-circle"
         }
     }
+
 }
 
 struct ChatSessionSummary: Codable, Identifiable, Hashable {
@@ -1465,6 +1848,7 @@ private struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
     var isBusy: Bool = false
+    var isLoadingAttachment: Bool = false
     var onStop: () -> Void = {}
     var voiceLevel: (() -> Double)? = nil
     let isRecording: Bool
@@ -1483,6 +1867,7 @@ private struct ChatInputBar: View {
 
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1508,19 +1893,19 @@ private struct ChatInputBar: View {
                         Text(attachmentLabel)
                             .font(.appBody(13, weight: .medium))
                             .foregroundStyle(Color.appInk)
-                            .lineLimit(1)
-                        Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appMuted)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                     Button(action: onRemoveAttachment) {
                         AppIcon(sf: "xmark.circle.fill", size: 17)
                             .foregroundStyle(Color.appMuted)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.appScale)
+                    .accessibilityLabel("Remove attachment")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -1551,12 +1936,11 @@ private struct ChatInputBar: View {
                 }
                 .accessibilityLabel("Add a photo, video or file")
                 .buttonStyle(.appScale)
-                .disabled(isSending)
+                .disabled(isSending || isLoadingAttachment)
             }
 
             HStack(alignment: .bottom, spacing: 4) {
                 if isVoiceActive { voiceField } else { textField }
-                actionButton
             }
             .padding(4)
             .background(Color.appReceivedBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1565,6 +1949,8 @@ private struct ChatInputBar: View {
                     .strokeBorder(isFocused.wrappedValue || incognito ? Color.appAccent : Color.appCardOutline, lineWidth: 1)
             }
             .animation(.appFast, value: isFocused.wrappedValue)
+
+            actionButton
         }
     }
 
@@ -1578,13 +1964,13 @@ private struct ChatInputBar: View {
                 } else if isPreparingVoice && !canSend {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.appMuted)
+                        .tint(Color.appOnAction)
                 } else {
                     AppIcon(canSend ? "arrow-up" : (isRecording ? "stop" : "mic"), size: 18)
                 }
             }
             .foregroundStyle(buttonForeground)
-            .frame(width: 34, height: 34)
+            .frame(width: 48, height: 48)
             .background {
                 if isRecording && !reduceMotion {
                     Circle()
@@ -1594,7 +1980,7 @@ private struct ChatInputBar: View {
                 }
                 Circle().fill(buttonFill)
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 52, height: 52)
             .contentShape(Circle())
         }
         .disabled(!canAct && !showsStop)
@@ -1606,17 +1992,18 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField("", text: $text, prompt: Text(isSending ? "You're offline" : (incognito ? "Private message" : "Ask Adam")).foregroundStyle(Color.appMuted), axis: .vertical)
+        TextField("", text: $text, prompt: Text(isSending ? "You're offline" : (incognito ? "Private message" : (typeSize.isAccessibilitySize ? "Ask" : "Ask Adam"))).foregroundStyle(Color.appMuted), axis: .vertical)
             .font(.appBody(17, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appAccent)
-            .lineLimit(1...6)
+            .lineLimit(1...(typeSize.isAccessibilitySize ? (attachmentLabel == nil ? 2 : 1) : 6))
             .focused(isFocused)
             .disabled(isSending)
             .opacity(isSending ? 0.72 : 1)
             .onSubmit { if canSend { onSend() } }
             .padding(.horizontal, 4)
             .padding(.vertical, 12)
+            .accessibilityLabel(incognito ? "Private message" : "Ask Adam")
             .accessibilityHint(incognito ? "Private chat. This turn is not saved." : "")
     }
 
@@ -1635,7 +2022,9 @@ private struct ChatInputBar: View {
             .buttonStyle(.appScale)
             .accessibilityLabel("Cancel")
 
-            AdamActivityMark(state: isPreparingVoice ? .working : .listening, size: 28, tint: isPreparingVoice ? Color.appMuted : Color.appAccent, level: voiceLevel)
+            if !isPreparingVoice {
+                AdamActivityMark(state: .listening, size: 28, tint: Color.appAccent, level: voiceLevel)
+            }
 
             Group {
                 if isPreparingVoice {
@@ -1671,16 +2060,16 @@ private struct ChatInputBar: View {
 
     private var buttonFill: Color {
         if canSend || showsStop || isRecording { return Color.appAction }
-        return Color.appFillSubtle
+        return Color.appAction
     }
 
     private var buttonForeground: Color {
         if canSend || showsStop || isRecording { return Color.appOnAction }
-        return canAct ? Color.appInk.opacity(0.8) : Color.appMuted.opacity(0.5)
+        return canAct ? Color.appOnAction : Color.appMuted
     }
 
     private var canAct: Bool {
-        !isSending && !isPreparingVoice
+        !isSending && !isPreparingVoice && !isLoadingAttachment && !(isBusy && attachmentLabel != nil)
     }
 
     static func canSendDraft(text: String, attachmentLabel: String?, isOffline: Bool) -> Bool {
@@ -1759,5 +2148,42 @@ private struct PrivateModeSheet: View {
             .font(.appBody(16))
             .foregroundStyle(Color.appInk)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct ThreadExchange: Identifiable {
+    let id: UUID
+    var messages: [Message]
+    var date: Date { messages[0].timestamp }
+    var requiresAttention: Bool {
+        messages.contains { $0.actions.contains(where: \.needsUser) || $0.turnError != nil }
+    }
+    var title: String {
+        let first = messages.first(where: { $0.role == .user }) ?? messages[0]
+        let attachment = AttachmentTag.splitFileTag(first.content)
+        let text = ReplyQuote.split(attachment.text)?.body ?? attachment.text
+        return text.isEmpty ? attachment.name ?? "Attachment" : text.replacingOccurrences(of: "\n", with: " ")
+    }
+
+    static func group(_ messages: [Message]) -> [ThreadExchange] {
+        var result: [ThreadExchange] = []
+        for message in messages {
+            if message.role == .assistant, !result.isEmpty {
+                result[result.count - 1].messages.append(message)
+            } else {
+                result.append(ThreadExchange(id: message.id, messages: [message]))
+            }
+        }
+        return result
+    }
+}
+
+private struct ThreadShortContentAlignment: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.defaultScrollAnchor(.top, for: .alignment)
+        } else {
+            content
+        }
     }
 }

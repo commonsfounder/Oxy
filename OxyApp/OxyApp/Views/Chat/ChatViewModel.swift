@@ -51,6 +51,7 @@ final class ChatViewModel {
     var networkError: String?
     /// The thread shows everything ever said; older messages load as the user scrolls up.
     var isLoadingOlder = false
+    var isLoadingHistory = false
     /// The connection went quiet but Adam is still working; the saved reply is being fetched.
     var isWaitingForSavedReply = false
     var hasOlderHistory = true
@@ -70,6 +71,17 @@ final class ChatViewModel {
     @ObservationIgnored private var lastFailedText: String?
     @ObservationIgnored private var lastFailedUserMessageID: UUID?
     @ObservationIgnored private var lastFailedAssistantMessageID: UUID?
+    private struct FailedAttachment {
+        let userMessageID: UUID
+        let data: Data
+        let name: String
+        let mime: String
+        let isImage: Bool
+    }
+    @ObservationIgnored private var lastFailedAttachment: FailedAttachment?
+    #if DEBUG
+    @ObservationIgnored private var previewAttachmentAttemptCount = 0
+    #endif
     @ObservationIgnored private var queuedTurns: [QueuedTurn] = []
     @ObservationIgnored private var interfaceTurnIDs: Set<UUID> = []
 
@@ -160,6 +172,9 @@ final class ChatViewModel {
     }()
 
     func loadHistory(userId: String) async {
+        isLoadingHistory = true
+        networkError = nil
+        defer { isLoadingHistory = false }
         do {
             let entries = try await chatService.loadHistory(userId: userId)
             let loaded = messages(from: entries)
@@ -171,6 +186,7 @@ final class ChatViewModel {
                 historySnapshotLabel = nil
             }
         } catch {
+            if !Task.isCancelled { networkError = "Couldn't load the conversation." }
             print("[ChatVM] History load failed: \(error.localizedDescription)")
         }
     }
@@ -478,6 +494,7 @@ final class ChatViewModel {
                         statusLabel = nil
                         networkError = nil
                         lastFailedText = nil
+                        lastFailedAttachment = nil
                         lastFailedUserMessageID = nil
                         lastFailedAssistantMessageID = nil
                         isSending = false
@@ -531,8 +548,14 @@ final class ChatViewModel {
         if let index = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
             messages[index].isStreaming = false
             if messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                messages[index].content = "Stopped."
+                messages[index].content = "Reply stopped."
+            } else {
+                messages[index].replyWasStopped = true
             }
+        } else if let requestID = activeTurnUserMessageID,
+                  let requestIndex = messages.firstIndex(where: { $0.id == requestID }),
+                  (requestIndex + 1 == messages.count || messages[requestIndex + 1].role == .user) {
+            messages.insert(Message(role: .assistant, content: "Reply stopped."), at: requestIndex + 1)
         }
         statusLabel = nil
         isSending = false
@@ -732,11 +755,81 @@ final class ChatViewModel {
         }
     }
 
+    func canRetryFailedMessage(id: UUID) -> Bool {
+        id == lastFailedAssistantMessageID && lastFailedText != nil && lastFailedUserMessageID != nil && !isSending
+    }
+
+    func retryFailedMessage(id: UUID, userId: String) {
+        guard canRetryFailedMessage(id: id) else { return }
+        retryLastFailedMessage(userId: userId)
+    }
+
+    #if DEBUG
+    func prepareUIPreview(messages: [Message], flow: String) {
+        self.messages = messages
+        hasOlderHistory = false
+        if let failed = messages.last, failed.turnError != nil,
+           let request = messages.dropLast().last(where: { $0.role == .user }) {
+            lastFailedAssistantMessageID = failed.id
+            lastFailedUserMessageID = request.id
+            lastFailedText = request.content
+        }
+        if flow == "working" || flow == "streaming", let request = messages.first {
+            isSending = true
+            activeTurnUserMessageID = request.id
+            activitySteps = [ActivityStep(title: flow == "working" ? "Checking your calendar" : "Writing reply", state: .active)]
+        }
+    }
+
+    /// Exercises the real rejected upload and retry path without contacting an account.
+    func checkAttachmentRetryPreview(userId: String) async {
+        guard PreviewData.isIsolated else { return }
+        let bytes = Data("Isolated attachment retry proof.".utf8)
+        inputText = "Summarise the attached notes"
+        sendImageMessage(userId: userId, imageData: bytes, fileName: "UI review.txt", mimeType: "text/plain", isImage: false)
+        for _ in 0..<100 {
+            if !isSending { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let requestID = lastFailedUserMessageID
+        let failedID = lastFailedAssistantMessageID
+        let requestCount = messages.filter { $0.role == .user }.count
+        inputText = "Unsent follow-up"
+        retryLastFailedMessage(userId: userId)
+        for _ in 0..<100 {
+            if !isSending { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let checks: [String: Bool] = [
+            "twoUploadAttempts": previewAttachmentAttemptCount == 2,
+            "sameRequest": requestID != nil && lastFailedUserMessageID == requestID,
+            "noDuplicateRequest": messages.filter { $0.role == .user }.count == requestCount,
+            "newFailure": failedID != nil && lastFailedAssistantMessageID != failedID,
+            "attachmentRetained": lastFailedAttachment?.data == bytes && lastFailedAttachment?.name == "UI review.txt" && lastFailedAttachment?.mime == "text/plain" && lastFailedAttachment?.isImage == false,
+            "draftPreserved": inputText == "Unsent follow-up",
+            "settled": !isSending
+        ]
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ui-attachment-retry-proof.json")
+        if let data = try? JSONEncoder().encode(checks) { try? data.write(to: url, options: .atomic) }
+        print("[UI attachment retry] \(checks)")
+        assert(checks.values.allSatisfy { $0 }, "Attachment retry regression")
+    }
+    #endif
+
     func retryLastFailedMessage(userId: String) {
         guard let lastFailedText, let lastFailedUserMessageID, !isSending else { return }
         networkError = nil
+        let draft = inputText
         inputText = lastFailedText
-        sendMessage(userId: userId, retryingUserMessageID: lastFailedUserMessageID)
+        if let attachment = lastFailedAttachment, attachment.userMessageID == lastFailedUserMessageID {
+            sendImageMessage(userId: userId, imageData: attachment.data, fileName: attachment.name,
+                             mimeType: attachment.mime, isImage: attachment.isImage,
+                             retryingUserMessageID: lastFailedUserMessageID)
+        } else {
+            sendMessage(userId: userId, retryingUserMessageID: lastFailedUserMessageID)
+        }
+        inputText = draft
     }
 
     /// A small JPEG kept with the sent turn so the photo shows in the chat. Nil when the bytes
@@ -753,12 +846,16 @@ final class ChatViewModel {
         return resized.jpegData(compressionQuality: 0.6)
     }
 
-    func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String, isImage: Bool = true) {
+    func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String, isImage: Bool = true,
+                          retryingUserMessageID: UUID? = nil) {
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = typed.isEmpty
             ? (isImage ? "Look at this image and tell me what you see." : "Read this file and tell me what's in it.")
             : typed
         guard !isSending else { return }
+        #if DEBUG
+        if PreviewData.isIsolated { previewAttachmentAttemptCount += 1 }
+        #endif
         if isViewingHistorySnapshot {
             startNewChat(userId: userId)
         }
@@ -770,10 +867,19 @@ final class ChatViewModel {
         networkError = nil
 
         let thumbnail = isImage ? Self.thumbnailJPEG(from: imageData) : nil
-        let content = isImage ? text : "\(text)\n[File attached: \(fileName)]"
-        let userMessage = Message(role: .user, content: content, attachmentImage: thumbnail)
-        messages.append(userMessage)
-        activeTurnUserMessageID = userMessage.id
+        let userMessageID: UUID
+        if let retryingUserMessageID,
+           messages.contains(where: { $0.id == retryingUserMessageID && $0.role == .user }) {
+            userMessageID = retryingUserMessageID
+            if let failedID = lastFailedAssistantMessageID { removeMessage(id: failedID) }
+            lastFailedAssistantMessageID = nil
+        } else {
+            let content = isImage ? text : "\(text)\n[File attached: \(fileName)]"
+            let userMessage = Message(role: .user, content: content, attachmentImage: thumbnail)
+            messages.append(userMessage)
+            userMessageID = userMessage.id
+        }
+        activeTurnUserMessageID = userMessageID
 
         let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
         messages.append(assistantMessage)
@@ -801,6 +907,7 @@ final class ChatViewModel {
                     chatStartedAt: activeChatStartedAt,
                     settings: settings
                 )
+                guard !Task.isCancelled else { return }
                 let actions = response.actions ?? []
                 await MainActor.run {
                     _ = updateAssistantMessage(id: assistantID) {
@@ -812,6 +919,9 @@ final class ChatViewModel {
                     statusLabel = nil
                     networkError = nil
                     lastFailedText = nil
+                    lastFailedUserMessageID = nil
+                    lastFailedAssistantMessageID = nil
+                    lastFailedAttachment = nil
                     isSending = false
                     currentSendTask = nil
                     finishActivity()
@@ -819,9 +929,12 @@ final class ChatViewModel {
                     drainQueuedTurns()
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     lastFailedText = text
-                    lastFailedUserMessageID = userMessage.id
+                    lastFailedUserMessageID = userMessageID
+                    lastFailedAttachment = FailedAttachment(userMessageID: userMessageID, data: imageData,
+                                                            name: fileName, mime: mimeType, isImage: isImage)
                     _ = updateAssistantMessage(id: assistantID) {
                         $0.isStreaming = false
                         $0.turnError = friendlyNetworkError(error.localizedDescription)
@@ -840,6 +953,7 @@ final class ChatViewModel {
     }
 
     func clearChat() {
+        lastFailedAttachment = nil
         currentSendTask?.cancel()
         currentSendTask = nil
         sendWatchdogTask?.cancel()

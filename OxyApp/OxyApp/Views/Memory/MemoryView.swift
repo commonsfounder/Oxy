@@ -2,18 +2,24 @@ import SwiftUI
 
 struct MemoryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var systemDismiss
     @Environment(\.revealClose) private var revealClose
     private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
     @State private var items: [MemoryItem] = []
     @State private var isLoading = true
     @State private var isSaving = false
+    @State private var isMutating = false
     @State private var draft = ""
     @State private var saveMessage: String?
+    @State private var errorMessage: String?
+    @State private var mutationError: String?
     @State private var showClearAllConfirm = false
     @State private var pendingDeleteItem: MemoryItem?
     @State private var editingItem: MemoryItem?
     @State private var search = ""
+    @State private var photosExpanded = false
     // The composer stays collapsed to a single line so saved memories lead the screen —
     // you read memories far more often than you add one.
     @State private var composerExpanded = false
@@ -52,14 +58,17 @@ struct MemoryView: View {
                 List {
                     VStack(alignment: .leading, spacing: 18) {
                         MemorySearchField(text: $search)
-                        HStack {
-                            Text("\(items.filter { $0.source != "photos" }.count) saved memories")
+                        let summaryLayout = typeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                            : AnyLayout(HStackLayout())
+                        summaryLayout {
+                            Text(isLoading ? "Loading memories" : (errorMessage != nil ? (items.isEmpty ? "Memories unavailable" : "Last loaded memories") : "\(items.count) saved memories"))
                                 .font(.appBody(14)).foregroundStyle(Color.appMuted)
-                            Spacer()
+                            if !typeSize.isAccessibilitySize { Spacer() }
                             Button {
                                 HapticManager.shared.impact(.light)
                                 saveMessage = nil
-                                withAnimation(.appStandard) { composerExpanded.toggle() }
+                                withAnimation(reduceMotion ? nil : .appStandard) { composerExpanded.toggle() }
                             } label: {
                                 HStack(spacing: 7) {
                                     AppIcon(composerExpanded ? "xmark" : "plus", size: 14)
@@ -70,19 +79,25 @@ struct MemoryView: View {
                                 .frame(minHeight: 44)
                             }
                             .buttonStyle(.appScale(0.98))
+                            .disabled(isMutating || isSaving)
                         }
                         if composerExpanded {
                             MemoryDropBox(draft: $draft, isSaving: isSaving, message: saveMessage,
-                                onSave: { Task { await saveMemory() } },
-                                onCollapse: { withAnimation(.appStandard) { composerExpanded = false } })
+                                onSave: { Task { await saveMemory() } })
+                        }
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await loadMemory() } })
+                        }
+                        if let mutationError {
+                            ErrorBanner(message: mutationError, onDismiss: { self.mutationError = nil })
                         }
                         if isLoading {
                             OxySkeletonCard(height: 90, cornerRadius: 12)
-                        } else if items.isEmpty {
+                        } else if items.isEmpty && errorMessage == nil {
                             Text("Nothing saved yet")
                                 .font(.appBody(20, weight: .medium)).foregroundStyle(Color.appInk)
                                 .padding(.vertical, 30)
-                        } else if groupedItems.isEmpty && !search.isEmpty {
+                        } else if groupedItems.isEmpty && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text("No memories match “\(search)”.")
                                 .font(.appBody(16)).foregroundStyle(Color.appMuted)
                                 .padding(.vertical, 20)
@@ -98,6 +113,7 @@ struct MemoryView: View {
                         Text(group.title)
                             .font(.appBody(15, weight: .semibold))
                             .foregroundStyle(Color.appInk)
+                            .accessibilityAddTraits(.isHeader)
                             .padding(.top, index == 0 ? 8 : 26)
                             .padding(.bottom, 4)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -105,20 +121,7 @@ struct MemoryView: View {
                             .listRowBackground(Color.clear)
 
                         ForEach(group.items) { item in
-                            MemoryRow(item: item, onTap: { editingItem = item })
-                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 0))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        pendingDeleteItem = item
-                                    } label: {
-                                        Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
-                                    }
-                                    // The app's accent tint (mint/etc.) otherwise bleeds into
-                                    // swipe actions, overriding the system's destructive red.
-                                    .tint(Color.appDestructive)
-                                }
+                            memoryListRow(item)
 
                             SettingsDivider()
                                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -128,29 +131,34 @@ struct MemoryView: View {
                     }
 
                     if photoNoteCount > 0, search.trimmingCharacters(in: .whitespaces).isEmpty {
-                        HStack {
-                            Text("From your photos")
-                                .font(.appBody(15, weight: .medium))
-                                .foregroundStyle(Color.appInk)
-                            Spacer()
-                            Text(photoNoteCount == 1 ? "1 note" : "\(photoNoteCount) notes")
-                                .font(.appBody(13))
-                                .foregroundStyle(Color.appMuted)
+                        Button {
+                            withAnimation(reduceMotion ? nil : .appStandard) { photosExpanded.toggle() }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text("From your photos").font(.appBody(17, weight: .medium))
+                                Spacer()
+                                Text(photoNoteCount == 1 ? "1 note" : "\(photoNoteCount) notes")
+                                    .font(.appBody(13)).foregroundStyle(Color.appMuted)
+                                AppIcon("chevron-down", size: 14)
+                                    .rotationEffect(.degrees(photosExpanded ? 180 : 0))
+                            }
+                            .foregroundStyle(Color.appInk)
+                            .frame(minHeight: 52)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.top, 26)
-                        .padding(.bottom, 4)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .buttonStyle(.appScale)
+                        .accessibilityValue(photosExpanded ? "Expanded" : "Collapsed")
+                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 0, trailing: 20))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        Text("Notes saved from your photos.")
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appMuted)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
+                        if photosExpanded {
+                            ForEach(items.filter { $0.source == "photos" }) { item in
+                                memoryListRow(item)
+                            }
+                        }
                     }
 
-                    if !groupedItems.isEmpty, search.trimmingCharacters(in: .whitespaces).isEmpty {
+                    if !items.isEmpty, search.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button {
                             HapticManager.shared.impact(.light)
                             showClearAllConfirm = true
@@ -161,6 +169,7 @@ struct MemoryView: View {
                                 .padding(.vertical, 18)
                         }
                         .buttonStyle(.appScale(0.98))
+                        .disabled(isMutating || isSaving)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -169,17 +178,30 @@ struct MemoryView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .environment(\.defaultMinListRowHeight, 0)
-                .animation(.appSpring, value: isLoading)
+                .animation(reduceMotion ? nil : .appSpring, value: isLoading)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await loadMemory() }
+        .task {
+            await loadMemory()
+            #if DEBUG
+            if PreviewData.isIsolated {
+                if let query = ProcessInfo.processInfo.environment["OXY_DEBUG_MEMORY_SEARCH"] { search = query }
+                if ["editor", "edit-failure"].contains(ProcessInfo.processInfo.environment["OXY_DEBUG_MEMORY"] ?? "") {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    editingItem = items.first
+                }
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_MEMORY"] == "clear" { showClearAllConfirm = true }
+                if ProcessInfo.processInfo.environment["OXY_DEBUG_MEMORY"] == "add" { composerExpanded = true }
+            }
+            #endif
+        }
         .refreshable { await loadMemory() }
         .alert("Clear all memories?", isPresented: $showClearAllConfirm) {
             Button("Clear all", role: .destructive) { Task { await clearAll() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes everything remembered about you.")
+            Text("This permanently deletes saved memories, checkout details and the checkout payment card.")
         }
         .alert(
             "Delete this memory?",
@@ -194,13 +216,29 @@ struct MemoryView: View {
         .sheet(item: $editingItem) { item in
             MemoryEditSheet(
                 item: item,
-                onSave: { newContent in
-                    editingItem = nil
-                    Task { await editItem(item, content: newContent) }
-                },
+                onSave: { newContent in await editItem(item, content: newContent) },
                 onCancel: { editingItem = nil }
             )
         }
+    }
+
+    private func memoryListRow(_ item: MemoryItem) -> some View {
+        MemoryRow(item: item, onTap: { editingItem = item })
+            .disabled(isMutating || isSaving)
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    pendingDeleteItem = item
+                } label: {
+                    Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
+                }
+                                    // The app's accent tint (mint/etc.) otherwise bleeds into
+                                    // swipe actions, overriding the system's destructive red.
+                .tint(Color.appDestructive)
+            }
+
     }
 
     // Group memories into a few buckets so the screen reads as curated
@@ -216,14 +254,16 @@ struct MemoryView: View {
             : own.filter { $0.content.localizedCaseInsensitiveContains(query) }
         let order = ["About you", "How Adam works for you", "People", "Plans"]
         let grouped = Dictionary(grouping: visible, by: { $0.category })
-        return order.compactMap { title in
+        let ownGroups: [(title: String, items: [MemoryItem])] = order.compactMap { title in
             guard let group = grouped[title], !group.isEmpty else { return nil }
             return (title, group)
         }
+        let photos = query.isEmpty ? [] : items.filter { $0.source == "photos" && $0.content.localizedCaseInsensitiveContains(query) }
+        return photos.isEmpty ? ownGroups : ownGroups + [(title: "From your photos", items: photos)]
     }
 
     private func loadMemory() async {
-        await MainActor.run { isLoading = true; saveMessage = nil }
+        await MainActor.run { isLoading = true; saveMessage = nil; errorMessage = nil }
         do {
             let data = try await APIClient.shared.request(path: "/memory/\(appState.userId)/items")
             let response = try JSONDecoder().decode(MemoryItemsResponse.self, from: data)
@@ -232,7 +272,7 @@ struct MemoryView: View {
                 isLoading = false
             }
         } catch {
-            await MainActor.run { items = []; isLoading = false }
+            await MainActor.run { isLoading = false; errorMessage = "Couldn't load memories." }
         }
     }
 
@@ -253,7 +293,7 @@ struct MemoryView: View {
                 saveMessage = nil
                 isSaving = false
                 // Collapse back to the quiet line so the freshly-saved memory leads again.
-                withAnimation(.appStandard) { composerExpanded = false }
+                withAnimation(reduceMotion ? nil : .appStandard) { composerExpanded = false }
             }
             await loadMemory()
         } catch {
@@ -265,52 +305,67 @@ struct MemoryView: View {
     }
 
     private func deleteItem(_ item: MemoryItem) async {
-        HapticManager.shared.impact(.light)
-        // Optimistic removal so the row disappears instantly.
-        await MainActor.run { items.removeAll { $0.id == item.id } }
+        guard !isMutating else { return }
+        isMutating = true
+        mutationError = nil
+        defer { isMutating = false }
         do {
-            _ = try await APIClient.shared.request(
-                path: "/memory/\(appState.userId)/items/\(item.id)",
-                method: "DELETE"
+            let data = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)/items/\(item.id)", method: "DELETE"
             )
+            let result = try JSONDecoder().decode(MemoryChangeResponse.self, from: data)
+            if result.success {
+                items.removeAll { $0.id == item.id }
+                HapticManager.shared.success()
+            } else {
+                mutationError = "Couldn't delete this memory."
+            }
         } catch {
-            await loadMemory() // restore on failure
+            mutationError = "Couldn't delete this memory."
         }
     }
 
-    private func editItem(_ item: MemoryItem, content: String) async {
+    private func editItem(_ item: MemoryItem, content: String) async -> String? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != item.content else { return }
-        HapticManager.shared.impact(.light)
-        // Optimistic update so the row reflects the edit instantly.
-        await MainActor.run {
+        guard !trimmed.isEmpty else { return "Enter a memory to save." }
+        guard trimmed != item.content else { return nil }
+        do {
+            let data = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)/items/\(item.id)", method: "PUT", body: ["content": trimmed]
+            )
+            let result = try JSONDecoder().decode(MemoryChangeResponse.self, from: data)
+            guard result.success else { return "Couldn't save the change. Try again." }
             if let index = items.firstIndex(where: { $0.id == item.id }) {
                 items[index] = MemoryItem(id: item.id, content: trimmed, source: item.source, createdAt: item.createdAt)
             }
-        }
-        do {
-            _ = try await APIClient.shared.request(
-                path: "/memory/\(appState.userId)/items/\(item.id)",
-                method: "PUT",
-                body: ["content": trimmed]
-            )
+            HapticManager.shared.success()
+            return nil
         } catch {
-            await loadMemory() // restore on failure
+            return "Couldn't save the change. Try again."
         }
     }
 
     private func clearAll() async {
-        await MainActor.run { items = [] }
+        guard !isMutating else { return }
+        isMutating = true
+        mutationError = nil
+        defer { isMutating = false }
         do {
-            _ = try await APIClient.shared.request(
-                path: "/memory/\(appState.userId)",
-                method: "DELETE",
-                body: ["scope": "all"]
+            let data = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)", method: "DELETE", body: ["scope": "all"]
             )
+            let result = try JSONDecoder().decode(MemoryChangeResponse.self, from: data)
+            if result.success {
+                items = []
+                HapticManager.shared.success()
+            } else {
+                mutationError = "Couldn't clear memories."
+            }
         } catch {
-            await loadMemory()
+            mutationError = "Couldn't clear memories."
         }
     }
+
 }
 
 private struct MemoryRow: View {
@@ -329,7 +384,7 @@ private struct MemoryRow: View {
                 }
                 Spacer(minLength: 8)
                 AppIcon("chevron-right", size: 13)
-                    .foregroundStyle(Color.appMuted.opacity(0.5))
+                    .foregroundStyle(Color.appMuted)
                     .padding(.top, 2)
                     .padding(.trailing, 24)
             }
@@ -337,6 +392,9 @@ private struct MemoryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.99))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.content)
+        .accessibilityHint("Edit memory")
     }
 }
 
@@ -355,6 +413,7 @@ private struct MemorySearchField: View {
                 .font(.appBody(16))
                 .foregroundStyle(Color.appInk)
                 .tint(Color.appMuted)
+                .accessibilityLabel("Search memories")
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($isFocused)
@@ -364,14 +423,16 @@ private struct MemorySearchField: View {
                 } label: {
                     AppIcon("xmark-circle", size: 15)
                         .foregroundStyle(Color.appMuted)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.appScale)
+                .accessibilityLabel("Clear search")
             }
         }
+        .frame(minHeight: 44)
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 6)
         .background(Color.settingsRaised)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
     }
@@ -381,11 +442,14 @@ private struct MemorySearchField: View {
 /// pre-filled with the current content, plus Save/Cancel.
 private struct MemoryEditSheet: View {
     let item: MemoryItem
-    let onSave: (String) -> Void
+    let onSave: (String) async -> String?
     let onCancel: () -> Void
+    @Environment(AppState.self) private var appState
     @State private var content: String
+    @State private var isSaving = false
+    @State private var saveError: String?
 
-    init(item: MemoryItem, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    init(item: MemoryItem, onSave: @escaping (String) async -> String?, onCancel: @escaping () -> Void) {
         self.item = item
         self.onSave = onSave
         self.onCancel = onCancel
@@ -393,39 +457,70 @@ private struct MemoryEditSheet: View {
     }
 
     private var canSave: Bool {
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
     }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
-                VStack(alignment: .leading, spacing: 18) {
+                ScrollView {
+                  VStack(alignment: .leading, spacing: 18) {
+                    if appState.isDemoSession { Text("Sample").font(.caption).foregroundStyle(Color.appMuted) }
                     AppLineField(
                         placeholder: "Remember that…",
                         text: $content,
                         axis: .vertical,
                         lineLimit: 3...10
                     )
-                    Spacer()
+                    .disabled(isSaving)
+                    if let saveError {
+                        Text(saveError).font(.appBody(15)).foregroundStyle(Color.appDestructive)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                  }
+                  .padding(.horizontal, 24)
+                  .padding(.vertical, 20)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
-                        .foregroundStyle(Color.appMuted)
+                        .foregroundStyle(Color.appAccent)
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { onSave(content) }
-                        .foregroundStyle(canSave ? Color.appInk : Color.appMuted)
-                        .disabled(!canSave)
+                    if isSaving {
+                        ProgressView().accessibilityLabel("Saving memory")
+                    } else {
+                        Button("Save") { Task { await save() } }
+                            .foregroundStyle(Color.appAccent)
+                            .disabled(!canSave)
+                    }
                 }
             }
-            .navigationTitle("Edit Memory")
+            .navigationTitle("Edit memory")
             .navigationBarTitleDisplayMode(.inline)
+            #if DEBUG
+            .task {
+                if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_MEMORY"] == "edit-failure" {
+                    content = "Sample revised note to preserve after a save failure."
+                    try? await Task.sleep(for: .milliseconds(600))
+                    await save()
+                }
+            }
+            #endif
         }
+        .interactiveDismissDisabled(isSaving)
+    }
+
+    private func save() async {
+        guard canSave else { return }
+        isSaving = true
+        saveError = nil
+        saveError = await onSave(content)
+        isSaving = false
+        if saveError == nil { onCancel() }
     }
 }
 
@@ -434,7 +529,6 @@ private struct MemoryDropBox: View {
     let isSaving: Bool
     let message: String?
     let onSave: () -> Void
-    var onCollapse: (() -> Void)?
 
     private var canSave: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
@@ -442,25 +536,6 @@ private struct MemoryDropBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                // Sans, matching every other heading in the settings family — the lone
-                // Didot here was the one place the mg dialect borrowed the display serif.
-                Text("Add it once. It's kept for later.")
-                    .font(.appBody(17, weight: .semibold))
-                    .foregroundStyle(Color.appInk)
-                Spacer(minLength: 8)
-                if let onCollapse {
-                    Button(action: onCollapse) {
-                        AppIcon("chevron-up", size: 14)
-                            .foregroundStyle(Color.appMuted)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.appScale)
-                    .accessibilityLabel("Collapse")
-                }
-            }
-
             AppLineField(
                 placeholder: "Remember that…",
                 text: $draft,
@@ -485,9 +560,12 @@ private struct MemoryDropBox: View {
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.appBody(12, weight: .semibold))
-                            .tracking(0.4)
                     }
-                    .foregroundStyle(canSave ? Color.appInk : Color.appMuted)
+                    .foregroundStyle(Color.appOnAction)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 44)
+                    .background(Color.appAction, in: Capsule())
+                    .opacity(canSave ? 1 : 0.45)
                 }
                 .buttonStyle(.appScale)
                 .disabled(!canSave)
@@ -521,6 +599,10 @@ struct MemoryItem: Codable, Identifiable, Equatable {
         if hasWord(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "son", "daughter", "colleague", "cousin", "aunt", "uncle", "grandma", "grandmother", "grandfather", "pookie"]) || hasPhrase(["loved one"]) { return "People" }
         return "About you"
     }
+}
+
+private struct MemoryChangeResponse: Codable {
+    let success: Bool
 }
 
 struct MemoryItemsResponse: Codable {

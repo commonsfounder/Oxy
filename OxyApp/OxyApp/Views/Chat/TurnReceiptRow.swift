@@ -49,7 +49,7 @@ struct TurnReceiptRow: View {
                         stepRow(step)
                     }
                 }
-                .padding(.leading, 22)
+                .padding(.leading, steps.count > 1 ? 22 : 0)
                 .padding(.bottom, 6)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -64,10 +64,10 @@ struct TurnReceiptRow: View {
             if rowState != .success { glyph(for: rowState) }
 
             Text(summaryLine)
-                .font(.appBody(11.5))
-                .foregroundStyle(Color.appMuted.opacity(rowState == .success ? 0.7 : 1))
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .font(.appBody(15, weight: .medium))
+                .foregroundStyle(rowState == .failure ? Color.appDanger : Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
 
             Spacer(minLength: 8)
 
@@ -79,13 +79,16 @@ struct TurnReceiptRow: View {
                 }
                 .foregroundStyle(Color.appTitanium)
             } else if isExpandable {
-                AppIcon("chevron-down", size: 10)
-                    .foregroundStyle(Color.appMuted.opacity(0.75))
+                AppIcon("chevron-down", size: 13)
+                    .foregroundStyle(Color.appMuted)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
         }
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(summaryLine)
@@ -110,41 +113,43 @@ struct TurnReceiptRow: View {
 
     // MARK: Expanded steps
 
+    @ViewBuilder
     private func stepRow(_ step: ReceiptStep) -> some View {
-        Button {
-            if step.action.hasReceiptLink { onOpenAction?(step.action) }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                glyph(for: step.state)
-                VStack(alignment: .leading, spacing: 1) {
+        if step.action.hasReceiptLink {
+            Button { onOpenAction?(step.action) } label: { stepContent(step) }
+                .buttonStyle(.appScale(0.99))
+        } else {
+            stepContent(step)
+        }
+    }
+
+    private func stepContent(_ step: ReceiptStep) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            if steps.count > 1 { glyph(for: step.state) }
+            VStack(alignment: .leading, spacing: 5) {
+                if steps.count > 1 || step.detail == nil {
                     Text(step.fragment.prefix(1).uppercased() + step.fragment.dropFirst())
-                        .font(.appBody(13))
-                        .foregroundStyle(Color.appInk.opacity(0.94))
-                    if let detail = step.detail {
-                        Text(detail)
-                            .font(.appBody(12))
-                            .foregroundStyle(Color.appMuted)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .font(.appBody(15, weight: .medium))
+                        .foregroundStyle(Color.appInk)
                 }
-                Spacer(minLength: 8)
-                if step.action.hasReceiptLink {
-                    HStack(spacing: 3) {
-                        Text("Open")
-                            .font(.appBody(12, weight: .medium))
-                        AppIcon("chevron-right", size: 10)
-                    }
-                    .foregroundStyle(Color.appTitanium)
+                if let detail = step.detail {
+                    Text(detail)
+                        .font(.appBody(15))
+                        .foregroundStyle(Color.appMuted)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            Spacer(minLength: 8)
+            if step.action.hasReceiptLink {
+                AppIcon("chevron-right", size: 13)
+                    .foregroundStyle(Color.appMuted)
+                    .accessibilityLabel("Open")
+            }
         }
-        .buttonStyle(.appScale(0.99))
-        .disabled(!step.action.hasReceiptLink)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: step.action.hasReceiptLink ? 44 : 0, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

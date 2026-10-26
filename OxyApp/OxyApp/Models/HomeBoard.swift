@@ -156,10 +156,14 @@ struct WorkflowEvent: Codable, Equatable, Identifiable, Hashable {
     let summary: String?
     let actor: String?
     let createdAt: String?
+    let refType: String?
+    let refId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, summary, actor
         case createdAt = "created_at"
+        case refType = "ref_type"
+        case refId = "ref_id"
     }
 
     var date: Date? { createdAt.flatMap(Date.oxyParse) }
@@ -172,6 +176,12 @@ struct WorkflowCheckpoint: Codable, Equatable, Identifiable, Hashable {
     let status: String
     let prompt: String
     let options: [BoardChoice]?
+    let expiresAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, status, prompt, options
+        case expiresAt = "expires_at"
+    }
 
     /// Choice checkpoints include options.
     var isChoice: Bool { type == "choice_required" && !(options ?? []).isEmpty }

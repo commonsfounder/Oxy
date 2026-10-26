@@ -16,6 +16,7 @@
 		A10000010000000000000F77 /* HomeFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F77 /* HomeFeedView.swift */; };
 		A10000010000000000000F16 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F16 /* SceneView.swift */; };
 		A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F90 /* PlaceResultsCard.swift */; };
+		A10000010000000000000FA1 /* ResultOptionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000FA1 /* ResultOptionsCard.swift */; };
 		A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F91 /* TravelOptionsCard.swift */; };
 		A10000010000000000000F92 /* CompareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F92 /* CompareSheet.swift */; };
 		A10000010000000000000F15 /* AdamActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F15 /* AdamActivityView.swift */; };
@@ -112,6 +113,7 @@
 		A20000010000000000000F77 /* HomeFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F16 /* SceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneView.swift; sourceTree = "<group>"; };
 		A20000010000000000000F90 /* PlaceResultsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceResultsCard.swift; sourceTree = "<group>"; };
+		A20000010000000000000FA1 /* ResultOptionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultOptionsCard.swift; sourceTree = "<group>"; };
 		A20000010000000000000F91 /* TravelOptionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelOptionsCard.swift; sourceTree = "<group>"; };
 		A20000010000000000000F92 /* CompareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000F15 /* AdamActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdamActivityView.swift; sourceTree = "<group>"; };
@@ -340,6 +342,7 @@
 				AB2000000000000000000002 /* AgentEnvironmentView.swift */,
 				AB2000000000000000000F01 /* CornerReveal.swift */,
 				A20000010000000000000F90 /* PlaceResultsCard.swift */,
+				A20000010000000000000FA1 /* ResultOptionsCard.swift */,
 				A20000010000000000000F91 /* TravelOptionsCard.swift */,
 				A20000010000000000000F92 /* CompareSheet.swift */,
 				A20000010000000000000F11 /* ThreadHeader.swift */,
@@ -651,6 +654,7 @@
 				AB1000000000000000000002 /* AgentEnvironmentView.swift in Sources */,
 				AB1000000000000000000F01 /* CornerReveal.swift in Sources */,
 				A10000010000000000000F90 /* PlaceResultsCard.swift in Sources */,
+				A10000010000000000000FA1 /* ResultOptionsCard.swift in Sources */,
 				A10000010000000000000F91 /* TravelOptionsCard.swift in Sources */,
 				A10000010000000000000F92 /* CompareSheet.swift in Sources */,
 				A10000010000000000000F11 /* ThreadHeader.swift in Sources */,

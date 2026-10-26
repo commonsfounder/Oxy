@@ -8,6 +8,7 @@ struct Message: Identifiable, Equatable {
     let timestamp: Date
     var actions: [ActionResult]
     var isStreaming: Bool
+    var replyWasStopped = false
     /// User turns sent while another request is still running. They stay visible
     /// immediately, then the view model sends them after the active task settles.
     var queuedForActiveTask: Bool
@@ -57,6 +58,7 @@ struct Message: Identifiable, Equatable {
         lhs.id == rhs.id
             && lhs.content == rhs.content
             && lhs.isStreaming == rhs.isStreaming
+            && lhs.replyWasStopped == rhs.replyWasStopped
             && lhs.queuedForActiveTask == rhs.queuedForActiveTask
             && lhs.turnError == rhs.turnError
             && lhs.actions == rhs.actions
@@ -69,6 +71,21 @@ struct Message: Identifiable, Equatable {
 /// The text tags that mark a photo on a user turn: "[Image attached]" while sending and
 /// "[Attached image: photo.jpg]" once the server has stored the turn.
 enum AttachmentTag {
+    private static let fileTag = try! NSRegularExpression(
+        pattern: #"\s*\[File attached: ([^\n]+)\]\s*$"#
+    )
+
+    /// Keeps the stored transport marker out of the conversation's reading text.
+    static func splitFileTag(_ content: String) -> (text: String, name: String?) {
+        let range = NSRange(content.startIndex..., in: content)
+        guard let match = fileTag.firstMatch(in: content, range: range),
+              let tagRange = Range(match.range, in: content),
+              let nameRange = Range(match.range(at: 1), in: content) else {
+            return (content, nil)
+        }
+        return (String(content[..<tagRange.lowerBound]), String(content[nameRange]))
+    }
+
     private static let imageTag = try! NSRegularExpression(
         pattern: #"\s*\[(?:Image attached|Attached image(?::[^\]]*)?)\]\s*$"#
     )
@@ -210,6 +227,21 @@ struct TravelOption: Codable, Equatable, Hashable, Identifiable {
     var id: String { [title, source ?? "", String(price ?? pricePerNight ?? totalPrice ?? 0), quotedFor ?? ""].joined(separator: "|") }
 }
 
+/// One option from a search the user is choosing between: a product, a restaurant, a service.
+struct ResultOption: Codable, Equatable, Hashable, Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String?
+    let price: String?
+    let priceAmount: Double?
+    let rating: Double?
+    let ratingCount: Int?
+    let imageUrl: String?
+    let url: String?
+    let source: String?
+    let note: String?
+}
+
 struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String
@@ -246,6 +278,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let places: [PlaceOption]?
     /// Flights or hotels a search found, best first. Only on travel searches.
     let travelOptions: [TravelOption]?
+    /// Options found for any kind of search, best first. Only from show_results.
+    let results: [ResultOption]?
 
     /// Bounded backend outcomes keep handoffs and review pauses visible without
     /// treating their legacy `success` compatibility flag as a completed effect.
@@ -264,7 +298,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus, clientEffect
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
-        case subject, taskId, selection, scene, places
+        case subject, taskId, selection, scene, places, results
         case travelOptions = "options"
         // Older servers sent these at the top level; decoded into `subject` below.
         case imageUrls, productName, price, total, colorOptions
@@ -298,7 +332,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         selection: ActionSelection? = nil,
         scene: SceneContent? = nil,
         places: [PlaceOption]? = nil,
-        travelOptions: [TravelOption]? = nil
+        travelOptions: [TravelOption]? = nil,
+        results: [ResultOption]? = nil
     ) {
         self.action = action
         self.success = success
@@ -328,6 +363,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.scene = scene
         self.places = places
         self.travelOptions = travelOptions
+        self.results = results
     }
 
     init(native result: NativeLocalActionResult) {
@@ -379,6 +415,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             scene = try result.decodeIfPresent(SceneContent.self, forKey: .scene)
             places = try result.decodeIfPresent([PlaceOption].self, forKey: .places)
             travelOptions = (try? result.decodeIfPresent([TravelOption].self, forKey: .travelOptions)) ?? nil
+            results = (try? result.decodeIfPresent([ResultOption].self, forKey: .results)) ?? nil
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
@@ -407,6 +444,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             scene = try container.decodeIfPresent(SceneContent.self, forKey: .scene)
             places = try container.decodeIfPresent([PlaceOption].self, forKey: .places)
             travelOptions = (try? container.decodeIfPresent([TravelOption].self, forKey: .travelOptions)) ?? nil
+            results = (try? container.decodeIfPresent([ResultOption].self, forKey: .results)) ?? nil
         }
     }
 
@@ -440,6 +478,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(scene, forKey: .scene)
         try container.encodeIfPresent(places, forKey: .places)
         try container.encodeIfPresent(travelOptions, forKey: .travelOptions)
+        try container.encodeIfPresent(results, forKey: .results)
     }
 }
 

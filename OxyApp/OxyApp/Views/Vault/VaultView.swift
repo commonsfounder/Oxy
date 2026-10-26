@@ -2,6 +2,7 @@ import SwiftUI
 import LocalAuthentication
 
 struct VaultView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var systemDismiss
     @Environment(\.revealClose) private var revealClose
     private func dismiss() { if let revealClose { revealClose() } else { systemDismiss() } }
@@ -10,6 +11,9 @@ struct VaultView: View {
     @State private var grants: [VaultGrantSummary] = []
     @State private var uses: [VaultCredentialUse] = []
     @State private var isLoading = true
+    @State private var hasLoaded = false
+    @State private var isRefreshing = false
+    @State private var pendingRemove: VaultCredentialSummary?
     @State private var isUnlocked = false
     @State private var errorMessage: String?
     @State private var showEntrySheet = false
@@ -37,11 +41,18 @@ struct VaultView: View {
                             VStack(alignment: .leading, spacing: 28) {
                                 if let errorMessage {
                                     ErrorBanner(message: errorMessage, onRetry: { Task { await loadAll() } })
+                                        .disabled(isRefreshing)
                                 }
-                                credentialsSection
-                                grantsSection
-                                activitySection
+                                if hasLoaded {
+                                    if errorMessage != nil {
+                                        Text("Last loaded details").font(.appBody(14)).foregroundStyle(Color.appMuted)
+                                    }
+                                    credentialsSection
+                                    grantsSection
+                                    activitySection
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, AppSpacing.margin)
                             .padding(.vertical, 16)
                         }
@@ -52,19 +63,33 @@ struct VaultView: View {
             .toolbar(.hidden, for: .navigationBar)
             .task {
                 #if DEBUG
-                if ProcessInfo.processInfo.environment["OXY_DEBUG_VAULT"] == "1" {
-                    let decoder = JSONDecoder()
-                    credentials = (try? decoder.decode([VaultCredentialSummary].self, from: Data(#"[{"id":"c1","site":"johnlewis.com","label":"John Lewis","username":"chizi@example.com","updated_at":"2026-10-01T10:00:00Z"},{"id":"c2","site":"tesco.com","label":"Tesco","username":"","updated_at":"2026-10-02T10:00:00Z"}]"#.utf8))) ?? []
-                    grants = (try? decoder.decode([VaultGrantSummary].self, from: Data(#"[{"id":"g1","site":"johnlewis.com","scope":"site","max_uses":5,"use_count":1}]"#.utf8))) ?? []
-                    uses = (try? decoder.decode([VaultCredentialUse].self, from: Data(#"[{"id":"u1","site":"johnlewis.com","outcome":"used","created_at":"2026-10-05T09:00:00Z"},{"id":"u2","site":"unknown-shop.example","outcome":"denied","reason":"not_permitted","created_at":"2026-10-05T09:30:00Z"}]"#.utf8))) ?? []
+                if PreviewData.isIsolated,
+                   ["1", "unlocked"].contains(ProcessInfo.processInfo.environment["OXY_DEBUG_VAULT"] ?? "") {
                     isUnlocked = true
-                    isLoading = false
+                    await loadAll()
+                    if let form = ProcessInfo.processInfo.environment["OXY_DEBUG_VAULT_FORM"] {
+                        try? await Task.sleep(for: .milliseconds(400))
+                        showEntrySheet = form == "login"
+                        showGrantSheet = form == "permission"
+                    }
                     return
                 }
                 #endif
                 await authenticateAndLoad()
             }
-            .refreshable { await loadAll() }
+            .refreshable { if isUnlocked { await loadAll() } }
+            .confirmationDialog("Remove saved login?", isPresented: Binding(
+                get: { pendingRemove != nil }, set: { if !$0 { pendingRemove = nil } }
+            ), titleVisibility: .visible) {
+                if let credential = pendingRemove {
+                    Button("Remove \(credential.label)", role: .destructive) {
+                        Task { await removeCredential(credential) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingRemove = nil }
+            } message: {
+                Text("Adam won't be able to use this saved password.")
+            }
             .sheet(isPresented: $showEntrySheet) {
                 VaultCredentialEntrySheet { saved in
                     credentials.removeAll { $0.site == saved.site }
@@ -118,10 +143,15 @@ struct VaultView: View {
         .buttonStyle(.plain)
     }
 
+    private func emptyLine(_ text: String) -> some View {
+        Text(text).font(.appBody(16)).foregroundStyle(Color.appMuted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var credentialsSection: some View {
-        SettingsGroup(title: "Saved sign-ins") {
+        SettingsGroup(title: "Passwords") {
             if credentials.isEmpty {
-                SettingsStatement(text: "No passwords saved", solid: false)
+                emptyLine("No passwords saved")
                     .padding(.horizontal, 4)
             } else {
                 SettingsList {
@@ -132,8 +162,9 @@ struct VaultView: View {
                             subtitle: "\(credential.site) · \(credential.username.isEmpty ? "No username" : credential.username)"
                         ) {
                             quietAction("Remove", role: .appDestructive) {
-                                Task { await removeCredential(credential) }
+                                pendingRemove = credential
                             }
+                            .accessibilityLabel("Remove saved login for \(credential.label)")
                         }
                     }
                 }
@@ -149,7 +180,7 @@ struct VaultView: View {
     private var grantsSection: some View {
         SettingsGroup(title: "Sign-in permissions") {
             if grants.isEmpty {
-                SettingsStatement(text: "Every sign-in is asked for", solid: false)
+                emptyLine("No sign-in permissions")
                     .padding(.horizontal, 4)
             } else {
                 SettingsList {
@@ -160,6 +191,7 @@ struct VaultView: View {
                                 quietAction("Revoke", role: .appDestructive) {
                                     Task { await revokeGrant(grant) }
                                 }
+                                .accessibilityLabel("Revoke sign-in permission for \(grant.site)")
                             }
                         }
                     }
@@ -176,7 +208,7 @@ struct VaultView: View {
     private var activitySection: some View {
         SettingsGroup(title: "Recent sign-in activity") {
             if uses.isEmpty {
-                SettingsStatement(text: "Nothing yet", solid: false)
+                emptyLine("Nothing yet")
                     .padding(.horizontal, 4)
             } else {
                 SettingsList {
@@ -220,62 +252,39 @@ struct VaultView: View {
 
     // MARK: - Networking
 
-    private func loadCredentials() async {
-        await MainActor.run { isLoading = true }
-        do {
-            let data = try await APIClient.shared.request(path: "/vault/credentials")
-            let response = try JSONDecoder().decode(VaultCredentialsResponse.self, from: data)
-            await MainActor.run {
-                credentials = response.credentials
-                errorMessage = nil
-                isLoading = false
-            }
-        } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-                isLoading = false
-            }
-        }
-    }
-
-    // The permissions and the log are read alongside the credentials rather than lazily on
-    // tap: a permission you have to go looking for is not one you will notice is still live.
     private func loadAll() async {
-        await loadCredentials()
-        await loadGrants()
-        await loadUses()
-    }
-
-    private func loadGrants() async {
+        guard isUnlocked, !isRefreshing else { return }
+        isRefreshing = true
         do {
-            let data = try await APIClient.shared.request(path: "/vault/grants")
-            let response = try JSONDecoder().decode(VaultGrantsResponse.self, from: data)
-            await MainActor.run { grants = response.grants }
+            async let credentialData = APIClient.shared.request(path: "/vault/credentials")
+            async let grantData = APIClient.shared.request(path: "/vault/grants")
+            async let useData = APIClient.shared.request(path: "/vault/credential-uses", queryItems: [URLQueryItem(name: "limit", value: "25")])
+            let data = try await (credentialData, grantData, useData)
+            let decoder = JSONDecoder()
+            let loadedCredentials = try decoder.decode(VaultCredentialsResponse.self, from: data.0)
+            let loadedGrants = try decoder.decode(VaultGrantsResponse.self, from: data.1)
+            let loadedUses = try decoder.decode(VaultCredentialUsesResponse.self, from: data.2)
+            await MainActor.run {
+                credentials = loadedCredentials.credentials
+                grants = loadedGrants.grants
+                uses = loadedUses.uses
+                hasLoaded = true
+                errorMessage = nil
+            }
         } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
+            await MainActor.run { errorMessage = "Couldn't load saved logins and permissions." }
         }
-    }
-
-    private func loadUses() async {
-        do {
-            let data = try await APIClient.shared.request(
-                path: "/vault/credential-uses",
-                queryItems: [URLQueryItem(name: "limit", value: "25")]
-            )
-            let response = try JSONDecoder().decode(VaultCredentialUsesResponse.self, from: data)
-            await MainActor.run { uses = response.uses }
-        } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
+        await MainActor.run {
+            isLoading = false
+            isRefreshing = false
         }
     }
 
     private func revokeGrant(_ grant: VaultGrantSummary) async {
         do {
             _ = try await APIClient.shared.request(path: "/vault/grants/\(grant.id)", method: "DELETE")
-            // Refetched rather than removed locally: a revoked permission stays in the list
-            // as revoked, which is the record. Dropping the row would read as "there was
-            // never a permission here".
-            await loadGrants()
+            // Keep revoked permissions visible in the refreshed record.
+            await loadAll()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -284,7 +293,7 @@ struct VaultView: View {
     private func removeCredential(_ credential: VaultCredentialSummary) async {
         do {
             _ = try await APIClient.shared.request(path: "/vault/credentials/\(credential.id)", method: "DELETE")
-            await MainActor.run { withAnimation(.appStandard) { credentials.removeAll { $0.id == credential.id } } }
+            await MainActor.run { withAnimation(reduceMotion ? nil : .appStandard) { credentials.removeAll { $0.id == credential.id } } }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -295,6 +304,7 @@ struct VaultView: View {
 
 private struct VaultCredentialEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onSaved: (VaultCredentialSummary) -> Void
 
     @State private var site = ""
@@ -308,20 +318,21 @@ private struct VaultCredentialEntrySheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Site (e.g. delta.com)", text: $site)
+                    if appState.isDemoSession { Text("Sample").font(.caption).foregroundStyle(Color.appMuted) }
+                    TextField("Website", text: $site, prompt: Text("Website").foregroundStyle(Color.appMuted))
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                    TextField("Label (e.g. Delta SkyMiles)", text: $label)
-                    TextField("Username or email", text: $username)
+                    TextField("Name for this login", text: $label, prompt: Text("Name for this login").foregroundStyle(Color.appMuted))
+                    TextField("Username or email", text: $username, prompt: Text("Username or email").foregroundStyle(Color.appMuted))
                         .textInputAutocapitalization(.never)
                         .textContentType(.username)
-                    SecureField("Password", text: $password)
+                    SecureField("Password", text: $password, prompt: Text("Password").foregroundStyle(Color.appMuted))
                         .textContentType(.password)
                 } footer: {
-                    Text("Encrypted. Used only after you approve sign-in.")
+                    Text("Encrypted. Sign-in requires approval or a permission you set.").foregroundStyle(Color.appMuted)
                 }
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section { Text(errorMessage).foregroundStyle(Color.appDestructive) }
                 }
             }
             .navigationTitle("Add sign-in")
@@ -383,6 +394,7 @@ private struct VaultCredentialEntrySheet: View {
 // on this screen would produce a permission with nothing to attach to.
 private struct VaultGrantEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onGranted: (VaultGrantSummary) -> Void
 
     @State private var site = ""
@@ -416,7 +428,8 @@ private struct VaultGrantEntrySheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Site (e.g. delta.com)", text: $site)
+                    if appState.isDemoSession { Text("Sample").font(.caption).foregroundStyle(Color.appMuted) }
+                    TextField("Website", text: $site, prompt: Text("Website").foregroundStyle(Color.appMuted))
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                     Picker("Expires after", selection: $lifetime) {
@@ -429,10 +442,10 @@ private struct VaultGrantEntrySheet: View {
                         Stepper("At most \(maxUses)", value: $maxUses, in: 1...50)
                     }
                 } footer: {
-                    Text("Adam signs in to this site without asking, until it expires or you revoke it.")
+                    Text("Adam signs in to this site without asking, until it expires or you revoke it.").foregroundStyle(Color.appMuted)
                 }
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section { Text(errorMessage).foregroundStyle(Color.appDestructive) }
                 }
             }
             .navigationTitle("Allow sign-in")
