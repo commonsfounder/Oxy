@@ -198,3 +198,8 @@ test('the browser will not navigate to a private address when blocking is on', a
   const redirected = { goto: async () => { visited += 1; }, url: () => 'http://169.254.169.254/', evaluate: async () => 0 };
   await assert.rejects(gotoBrowserPage(redirected, 'https://example.com/'), /private network/);
 });
+
+test('project checks (which run code the model may have written) wait for approval', () => {
+  const { getActionContract } = require('../../api/action-contracts');
+  assert.equal(getActionContract('project_check').executionMode, 'review');
+});

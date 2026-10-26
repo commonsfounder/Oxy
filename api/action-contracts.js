@@ -1070,7 +1070,8 @@ const ACTION_CONTRACTS = {
   },
   project_check: {
     adapter: { kind: 'inline' },
-    risk: 'low',
+    // Runs the project's own scripts, which the model may just have written, so it waits for a yes.
+    risk: 'medium',
     required: [],
     optional: ['project_ref', 'check'],
     inputExample: { project_ref: 'adam', check: 'test|release' },
@@ -1078,8 +1079,8 @@ const ACTION_CONTRACTS = {
     guidance: 'Run only the configured project check in the isolated task project. Use check=test by default and report failures honestly.',
     successSummary: 'Project check finished',
     failureSummary: 'Project check failed',
-    confirmation: 'none',
-    executionMode: 'direct'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   project_commit: {
     adapter: { kind: 'inline' },
