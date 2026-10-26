@@ -539,12 +539,18 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
   }
 });
 
+function safeEqual(given, expected) {
+  const a = Buffer.from(String(given || ''));
+  const b = Buffer.from(String(expected || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 // Twilio signs every webhook; texts that do not carry a valid signature are dropped. Only enforced once the auth token is set.
 function inboundSmsSignatureOk(req, providerName) {
   const token = process.env.TWILIO_AUTH_TOKEN;
   const provider = (providerName || process.env.MILLIE_PHONE_PROVIDER || 'twilio').toLowerCase();
   if (provider !== 'twilio') return true;
-  if (!token) return true;
+  if (!token) return process.env.NODE_ENV !== 'production';
   const given = String(req.get('x-twilio-signature') || '');
   const url = `https://${req.get('host')}${req.originalUrl}`;
   const data = Object.keys(req.body || {}).sort().reduce((acc, key) => acc + key + req.body[key], url);
@@ -638,7 +644,8 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
 // Adam's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
 app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
-  if (expectedSecret && req.get('X-Telegram-Bot-Api-Secret-Token') !== expectedSecret) {
+  // In production an unset secret rejects everything: a forged update carrying a linked chat id could confirm that user's pending actions.
+  if (expectedSecret ? !safeEqual(req.get('X-Telegram-Bot-Api-Secret-Token'), expectedSecret) : process.env.NODE_ENV === 'production') {
     return res.status(401).end();
   }
   // Ack immediately — Telegram retries the same update on anything but a 2xx, and this work

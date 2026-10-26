@@ -66,9 +66,19 @@ test('the right secret token is accepted (ack is immediate, independent of downs
   }
 });
 
-test('with no secret configured, the webhook is wide open — every deploy must set one', async () => {
+test('with no secret configured, production rejects the webhook and development leaves it open', async () => {
   const originalSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
+  const originalEnv = process.env.NODE_ENV;
   delete process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
+  process.env.NODE_ENV = 'production';
+  try {
+    await withServer(async baseURL => {
+      const res = await fetch(`${baseURL}/webhooks/telegram-bot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ update_id: 1 }) });
+      assert.equal(res.status, 401);
+    });
+  } finally {
+    if (originalEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnv;
+  }
   try {
     await withServer(async baseURL => {
       const res = await fetch(`${baseURL}/webhooks/telegram-bot`, {
