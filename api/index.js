@@ -8265,6 +8265,10 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
     console.error('/chat error:', err.message);
     const safeError = formatProviderFailure(err.message);
+    // Out of provider credit is a capacity problem, not a bug: 503, with a code the owner's tools can read.
+    if (/insufficient_quota|exceeded your current quota/i.test(err.message)) {
+      return res.status(503).json({ error: safeError, text: safeError, code: 'ai_out_of_credit' });
+    }
     res.status(500).json({ error: safeError, text: safeError });
   }
 });

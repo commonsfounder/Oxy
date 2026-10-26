@@ -54,3 +54,9 @@ test('an out-of-credit provider is named as such, not as a rate limit', () => {
   assert.strictEqual(causeOf('OpenAI 429: {"type": "insufficient_quota"}'), 'out_of_credit');
   assert.strictEqual(causeOf('Too many requests, 429'), 'rate_limited');
 });
+
+test('an out-of-credit provider gets its own plain reply for the user', () => {
+  const { formatProviderFailure } = require('../../api/services/user-facing-copy');
+  assert.match(formatProviderFailure('OpenAI 429: {"type":"insufficient_quota"}'), /out of capacity/i);
+  assert.match(formatProviderFailure('something else broke'), /could not answer/i);
+});

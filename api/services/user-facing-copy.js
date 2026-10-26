@@ -74,6 +74,9 @@ function formatProviderFailure(rawError = '') {
   if (/\b(?:404)\b.*model|model.*(?:not found|does not exist|not available)|unsupported model|does not support this model/i.test(error)) {
     return 'Adam needs a model connection before answering. Try again later.';
   }
+  if (/insufficient_quota|exceeded your current quota/i.test(error)) {
+    return 'Adam is out of capacity right now. Try again in a little while.';
+  }
   if (/timeout|timed out|aborted|deadline exceeded/i.test(error)) {
     return 'That took too long. Try again.';
   }
