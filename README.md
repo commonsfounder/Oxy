@@ -9,7 +9,7 @@ The architecture hardcodes **capabilities and safety boundaries, never human tas
 ## What It Does
 
 - **Conversational AI** — Chat via text or voice, with persistent memory of personal facts and preferences that shapes future replies.
-- **Connector system** — 22 pluggable service integrations (see table below): real API actions (send email, check calendar, control smart home, check crypto/stocks, etc.) and handoff/deep-link connectors (Uber, Lyft, Trainline, Spotify, Amazon).
+- **Connector system** — pluggable service integrations (see table below): real API actions (send email, check calendar, control smart home, stocks, etc.) and handoff/deep-link connectors (Uber, Lyft, Trainline, Amazon).
 - **Browser as an environment** — Playwright-backed primitives (`browser_open`, `browser_observe`, `browser_act`, `browser_close`) that let the agent see a real page and choose one step at a time. The same primitives serve cancelling a subscription, filling in an application, changing an account setting, a council portal, and buying something. Payment is a separate general transaction capability with deterministic approval and verification.
 - **Proactive briefings & routines** — Scheduled/interval-based routines and unprompted, context-aware briefings pulled from real calendar/email/search grounding.
 - **Task & entity memory** — Persistent agent tasks with step-level tracing, plus recall of prior entities/tasks so the agent can refer back to "that hotel" or "the order from yesterday."
@@ -41,11 +41,10 @@ The architecture hardcodes **capabilities and safety boundaries, never human tas
 ┌───────▼──────┐ ┌─────▼──────────────────────────────────┐
 │  Supabase    │ │            Connector System              │
 │  (Postgres,  │ │  connectors/ — google, microsoft, uber,  │
-│  RLS)        │ │  telegram, trainline, maps, spotify,     │
-│              │ │  notion, github, monzo, stripe, plaid,   │
-│  22 migra-   │ │  weather, amazon, slack, lyft, strava,   │
-│  tions       │ │  oura, eventbrite, flights, hotels,      │
-│              │ │  stocks                                  │
+│  RLS)        │ │  telegram, trainline, maps, notion,      │
+│              │ │  github, stripe, weather, amazon, slack, │
+│  SQL         │ │  lyft, strava, oura, flights, stocks,    │
+│  migrations  │ │  home-assistant, composio, email/SMS     │
 └──────────────┘ └───────────────────────────────────────────┘
                          │
                  ┌───────▼──────────────┐
@@ -54,13 +53,13 @@ The architecture hardcodes **capabilities and safety boundaries, never human tas
                  │  Playwright (browser  │
                  │    automation)        │
                  │  Google, Microsoft,   │
-                 │  Stripe, Plaid, etc.  │
+                 │  Stripe, etc.         │
                  └───────────────────────┘
 ```
 
 ### iOS Client
 
-The primary client is a native SwiftUI app at `OxyApp/OxyApp.xcodeproj` (scheme `OxyApp`). Key view areas: `Views/Chat`, `Views/Home`, `Views/Connectors`, `Views/Memory`, `Views/Routines`, `Views/Vault`, `Views/Payments`, `Views/Onboarding`, `Views/Auth`, `Views/Settings`.
+The primary client is a native SwiftUI app at `OxyApp/OxyApp.xcodeproj` (scheme `OxyApp`). Key view areas: `Views/Chat`, `Views/Home`, `Views/Connectors`, `Views/Memory`, `Views/Routines`, `Views/Vault`, `Views/Payments`, `Views/Onboarding`, `Views/Auth`, `Views/Settings`, `Views/Workspace`, `Views/Agent`.
 
 ### Backend
 
@@ -83,8 +82,8 @@ Connectors live in `connectors/` and each exports `SUPPORTED_ACTIONS` + `execute
 
 | Category | Connectors |
 |----------|-----------|
-| Real API (server-side actions) | `google`, `microsoft`, `telegram`, `maps`, `notion`, `github`, `monzo`, `stripe`, `plaid`, `weather`, `slack`, `strava`, `oura`, `eventbrite`, `flights`, `hotels`, `stocks` |
-| Handoff / deep-link | `uber`, `trainline`, `spotify`, `lyft`, `amazon` |
+| Real API (server-side actions) | `google`, `microsoft`, `telegram`, `telegram-bot`, `maps`, `notion`, `github`, `stripe`, `weather`, `slack`, `strava`, `oura`, `flights`, `stocks`, `home-assistant`, `composio`, `adam-email-resend`, `adam-sms-twilio` |
+| Handoff / deep-link | `uber`, `trainline`, `lyft`, `amazon` |
 
 ### Browser-Automation Agent
 
@@ -101,13 +100,13 @@ Runs on Playwright (`playwright`, `playwright-extra`, `puppeteer-extra-plugin-st
 
 ### Database (Supabase)
 
-Schema lives across `supabase/migrations/` (22 files as of this writing — base schema, auth, RLS, browser sessions/resume/session-events, routines, task entities/steps, travel, vault credentials, retention, subscriptions, and more). Row-level security is enabled; see `supabase-migration-rls.sql`.
+Schema lives across `supabase/migrations/` (base schema, auth, RLS, browser sessions, routines, task entities/steps, travel, vault credentials, retention, subscriptions, and more). Row-level security is enabled; see `supabase-migration-rls.sql`.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - A Supabase project (free tier works)
 - API keys for the services you want to use
 - Xcode (for the iOS client)
@@ -129,11 +128,11 @@ Schema lives across `supabase/migrations/` (22 files as of this writing — base
    ```bash
    cp .env.example .env
    ```
-See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_KEY`, `OPENAI_API_KEY`, `OXY_BRAIN_PROVIDER`, and `OXY_SESSION_SECRET`. Set matching provider and model values. Optional blocks enable individual connectors (Google, Microsoft, Telegram, Stripe, Plaid, Monzo, etc.) — each connector degrades gracefully if its keys are absent.
+See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_KEY`, `OPENAI_API_KEY`, `OXY_BRAIN_PROVIDER`, and `OXY_SESSION_SECRET`. Set matching provider and model values. Optional blocks enable individual connectors (Google, Microsoft, Telegram, Stripe, etc.) — each connector degrades gracefully if its keys are absent.
 
 4. **Run the database migrations**
 
-   Apply the SQL files in `supabase/migrations/` against your Supabase project in order (via the SQL editor or CLI). `supabase-migration-rls.sql` must be applied for row-level security.
+   Apply the SQL files in `supabase/migrations/` against your Supabase project in order (via the SQL editor or CLI). `supabase-migration-rls.sql` must be applied for row-level security. Afterwards, `npm run check:schema` (tables) and `npm run check:columns` (columns the code queries) compare the live database against what the code expects.
 
 5. **Start the server**
    ```bash
@@ -183,6 +182,8 @@ curl -s https://milgrain-live-2026.fly.dev/health
 npm test              # smoke tests (test/smoke/*.test.js)
 npm run brain:evals   # context-brain evals
 npm run latency       # latency benchmark
+npm run check:schema  # live tables vs the user-data manifest (deploy runs this)
+npm run check:columns # live columns vs the queries in the code
 npm run release:check # syntax check + smoke tests, run before every deploy
 ```
 
@@ -193,17 +194,16 @@ Oxy/
 ├── server.js                # Express entry point (Fly.io listener)
 ├── api/
 │   ├── index.js              # Main API — chat, audio, memory, connectors, auth
-│   ├── proxy.js               # Action dispatch helper
 │   ├── intent-router.js       # Intent routing
 │   ├── action-contracts.js    # Action schema/contracts
 │   ├── geocoding.js           # Google Maps geocoding helper
-│   └── services/              # ~40 domain services (browser automation, agent
+│   └── services/              # domain services (browser automation, agent
 │                               #   orchestration, routines, vault, payments,
 │                               #   entity/task recall, retention, ...)
-├── connectors/                 # 22 connector modules + index.js registry
+├── connectors/                 # connector modules + index.js registry
 ├── OxyApp/                     # Native SwiftUI iOS client
 │   └── OxyApp.xcodeproj        # scheme: OxyApp
-├── supabase/migrations/        # 22 SQL migration files (schema, RLS, etc.)
+├── supabase/migrations/        # SQL migrations (schema, RLS, etc.)
 ├── test/                       # smoke tests, dev e2e runners, benchmarks
 ├── scripts/                    # one-off/maintenance scripts
 ├── mcp-server.js               # Standalone MCP tool server (separate process)
