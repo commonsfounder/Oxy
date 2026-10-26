@@ -6205,6 +6205,7 @@ async function runSavedGoal(userId, {
     state: 'running',
   });
 
+  const { guardMode } = await getChatSettings(supabase, userId);
   const result = await runAgenticLoop({
     userId,
     initialMessage: instruction,
@@ -6214,6 +6215,7 @@ async function runSavedGoal(userId, {
     maxIterations,
     context: {
       autonomy: 'Active',
+      guardMode: guardMode === true,
       modelRoute: route,
       runtimeSessionId: runtimeSession.id,
       taskMetadata: claimedTask.metadata,

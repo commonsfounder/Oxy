@@ -80,3 +80,12 @@ test('password and email-verification routes', async (t) => {
   assert.equal(ok.status, 200);
   assert.equal(tables.password_reset_tokens.find((r) => r.id === 99).used, true);
 });
+
+test('background saved goals, voice and image turns all pass the stored guard mode to the action runner', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../../api/index'), 'utf8');
+  const body = (start) => src.slice(src.indexOf(start), src.indexOf(start) + 2500);
+  assert.match(body('async function runSavedGoal('), /guardMode: guardMode === true/);
+  assert.match(body("app.post('/process-audio'") + src.slice(src.indexOf("app.post('/process-audio'"), src.indexOf("app.post('/pendant/transcribe'")), /guardMode: guardMode === true/);
+  assert.match(src.slice(src.indexOf("app.post('/chat-with-image'"), src.indexOf("app.post('/memory'")), /guardMode: guardMode === true/);
+});
