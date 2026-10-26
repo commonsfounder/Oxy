@@ -395,3 +395,10 @@ test('an old Telegram button cannot approve a newer request', async (t) => {
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(chatCalls, 1);
 });
+
+test('times like "7pm" are understood instead of silently becoming 09:00', () => {
+  const { normalizeTimeOfDay } = require('../../api/services/scheduled-tasks');
+  const cases = { '19:00': '19:00', '7pm': '19:00', '7:30 PM': '19:30', '7': '07:00', '12am': '00:00', '12pm': '12:00', noon: '12:00', '9:05': '09:05' };
+  for (const [input, expected] of Object.entries(cases)) assert.equal(normalizeTimeOfDay(input), expected, input);
+  for (const bad of ['evening', '25:00', '13pm', '7:99', '']) assert.equal(normalizeTimeOfDay(bad), null, bad);
+});

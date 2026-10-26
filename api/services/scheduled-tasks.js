@@ -54,11 +54,28 @@ function weekdayIndexInTimezone(date, timeZone = TIMEZONE) {
   return WEEKDAYS.indexOf(name);
 }
 
+// "19:00", "7pm", "7:30 pm", "7", "noon" -> "HH:MM"; null when it is not a time of day.
+function normalizeTimeOfDay(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  if (text === 'noon') return '12:00';
+  if (text === 'midnight') return '00:00';
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(text);
+  if (!match) return null;
+  let hh = Number(match[1]);
+  const mm = Number(match[2] || 0);
+  if (match[3]) {
+    if (hh < 1 || hh > 12) return null;
+    hh = (hh % 12) + (match[3] === 'pm' ? 12 : 0);
+  }
+  if (hh > 23 || mm > 59) return null;
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
 function parseTimeOfDay(time) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(time || '').trim());
-  if (!match) return { hh: 9, mm: 0 };
-  const hh = Math.min(23, Math.max(0, Number(match[1])));
-  const mm = Math.min(59, Math.max(0, Number(match[2])));
+  const normalized = normalizeTimeOfDay(time);
+  if (!normalized) return { hh: 9, mm: 0 };
+  const [hh, mm] = normalized.split(':').map(Number);
   return { hh, mm };
 }
 
@@ -184,6 +201,10 @@ async function createScheduledTask(userId, {
 }) {
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) return { success: false, error: 'A title is required.' };
+  if (time !== undefined && time !== null && time !== '' && !normalizeTimeOfDay(time)) {
+    return { success: false, error: 'time must be a time of day such as 19:00 or 7pm.' };
+  }
+  time = time ? normalizeTimeOfDay(time) : time;
 
   // Anything carrying watch configuration IS a watch, even when the user's phrasing did not
   // produce a separate condition sentence. Without this, "tell me if the price at <url> drops
@@ -459,7 +480,11 @@ async function updateScheduledTask(userId, { id, title, ...changes } = {}) {
       patch.next_run_at = new Date(Date.now() + (patch.interval_minutes || DEFAULT_POLL_MINUTES) * 60000).toISOString();
     } else {
       patch.recurrence = isRecurringCadence(recurrence) ? recurrence : task.recurrence;
-      if (changes.time) patch.time_of_day = changes.time;
+      if (changes.time) {
+        const normalized = normalizeTimeOfDay(changes.time);
+        if (!normalized) return { success: false, error: 'time must be a time of day such as 19:00 or 7pm.' };
+        patch.time_of_day = normalized;
+      }
       if (changes.day_of_week !== undefined) patch.day_of_week = normalizeDayOfWeek(changes.day_of_week);
       patch.next_run_at = computeNextRun(new Date(), {
         recurrence: patch.recurrence,
@@ -641,6 +666,7 @@ async function advanceScheduledTask(task, now = new Date()) {
 }
 
 module.exports = {
+  normalizeTimeOfDay,
   staleScheduledReason,
   describeSchedule,
   buildScheduledRunInstruction,

@@ -1133,6 +1133,7 @@ const ACTION_CONTRACTS = {
     required: ['title', 'instruction'],
     optional: ['recurrence', 'time', 'day_of_week', 'date', 'due_date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap', 'watch_type', 'threshold', 'comparator', 'notify_rule', 'source_url', 'target_state', 'context_event', 'context_metric', 'context_radius_metres'],
     paramHints: {
+      time: 'time of day as 24-hour HH:MM, so 7pm is 19:00 (defaults to 09:00 when left out)',
       watch_type: 'threshold (a number crossing a line) | state_change (something becomes something else) | recurring_check (re-answer a question on a cadence)',
       threshold: 'the number the user actually named, e.g. 500 for "tell me if it drops below £500"',
       comparator: 'below (default) | above',
