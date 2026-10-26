@@ -314,3 +314,21 @@ test('the saved card is typed into a page only after the payment is approved, ne
   assert.ok(commit.indexOf('authorize(money)') > -1 && commit.indexOf('fillPaymentCard(') > commit.indexOf('authorize(money)'), 'the fill must come after the amount is authorised');
   assert.ok(commit.indexOf('fillPaymentCard(') < commit.indexOf('findAndClickPayButton('), 'and before the pay button is pressed');
 });
+
+test('delegated runs started from the Work screen also honour the saved guard mode', async () => {
+  const { createDelegatedRunStarter } = require('../../api/services/delegated-run-starter');
+  let seen;
+  const task = { id: 't1', goal: 'do it', attempt: 1, metadata: {} };
+  const starter = createDelegatedRunStarter({
+    lifecycle: { get: async () => task, updateControls: async () => task },
+    routeHandlers: { run: async () => ({ status: 200, claimed: task }) },
+    ensureRuntime: async () => ({ id: 's1' }),
+    resolveRoute: async () => ({ provider: 'openai', model: 'm' }),
+    buildSystemPrompt: async () => 'prompt',
+    runLoop: async (options) => { seen = options.context.guardMode; return {}; },
+    executeActions: async () => [],
+    resolveGuardMode: async () => true
+  });
+  await starter.start({ userId: 'u', task, awaitLoop: true });
+  assert.equal(seen, true);
+});

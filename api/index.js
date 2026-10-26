@@ -3198,7 +3198,8 @@ const startDelegatedTaskExecution = createDelegatedRunStarter({
   resolveRoute: resolveAgentTaskRoute,
   buildSystemPrompt: buildBackgroundSystemPrompt,
   runLoop: options => runAgenticLoop(options),
-  executeActions
+  executeActions,
+  resolveGuardMode: async userId => (await getChatSettings(supabase, userId)).guardMode === true
 });
 
 async function getMemory(userId, trace = null, query = '') {
@@ -3863,7 +3864,7 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
       maxIterations: Number.isFinite(claimedTask.checkpoint?.maxIterations) ? claimedTask.checkpoint.maxIterations : 6,
       context: {
         autonomy: claimedTask.autonomy,
-        guardMode: claimedTask.metadata?.guardMode === true,
+        guardMode: claimedTask.metadata?.guardMode === true || (await getChatSettings(supabase, userId)).guardMode === true,
         modelRoute: route,
         useSearch,
         runtimeSessionId

@@ -18,6 +18,8 @@ function createDelegatedRunStarter({
   buildSystemPrompt,
   runLoop,
   executeActions,
+  // The person's saved guard mode also applies to work that was started before they turned it on.
+  resolveGuardMode = async () => false,
   logger = console
 } = {}) {
   if (!lifecycle || typeof lifecycle.get !== 'function' || typeof lifecycle.updateControls !== 'function') {
@@ -97,8 +99,8 @@ function createDelegatedRunStarter({
         return { status: 503, body: { error: 'Could not start the work session.' } };
       }
 
-      const run = Promise.resolve(buildSystemPrompt(userId))
-        .then(dynamicSystemPrompt => runLoop({
+      const run = Promise.all([buildSystemPrompt(userId), Promise.resolve(resolveGuardMode(userId)).catch(() => false)])
+        .then(([dynamicSystemPrompt, savedGuardMode]) => runLoop({
           userId,
           initialMessage: claimedTask.goal,
           dynamicSystemPrompt,
@@ -109,7 +111,7 @@ function createDelegatedRunStarter({
             : 6,
           context: {
             autonomy: claimedTask.autonomy,
-            guardMode: claimedTask.metadata?.guardMode === true,
+            guardMode: claimedTask.metadata?.guardMode === true || savedGuardMode === true,
             modelRoute: route,
             runtimeSessionId: runtimeSession.id
           },
