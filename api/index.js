@@ -1904,7 +1904,10 @@ function isPureContentGenerationTurn(message = '') {
   // summarized opinion — it needs the browser, not a prose answer built from memory.
   const isShoppingComparison = /\bcompar/.test(text) && /\b(price|prices|cost|costs|cheaper|cheapest|deal|deals)\b/.test(text);
 
-  return !(actionOrGoal || isShoppingComparison);
+  // "Compare the tallest building in A and B" needs looked-up facts, not an essay from memory.
+  const needsLiveFacts = /\b(tallest|highest|biggest|largest|longest|fastest|cheapest|newest|latest|most recent|current|currently|right now|population|rated|rating|score|price|prices|cost|costs)\b/.test(text);
+
+  return !(actionOrGoal || isShoppingComparison || needsLiveFacts);
 }
 
 // A plain question about the world — answerable by talking (with search grounding if needed)
@@ -1920,7 +1923,9 @@ function isPlainWorldQuestion(message = '') {
   if (!QUESTION_OPENER.test(text)) return false;
   if (OWN_THINGS.test(text)) return false;          // "what's on my calendar" needs real data
   if (IMPERATIVE_REQUEST.test(text)) return false;  // "can you book..." is a request, not a question
-  return true;
+  // "Who directed X, what is their latest film, and is it rated higher?" needs one lookup after another.
+  const questionClauses = text.split(/[,;?]|\band\b|\bthen\b/).filter(clause => QUESTION_OPENER.test(clause.trim()));
+  return questionClauses.length < 2;
 }
 
 // Every turn gets the think/act/observe loop except the few kinds that do not want one.
