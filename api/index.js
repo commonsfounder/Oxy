@@ -1906,7 +1906,7 @@ function isPureContentGenerationTurn(message = '') {
   const isShoppingComparison = /\bcompar/.test(text) && /\b(price|prices|cost|costs|cheaper|cheapest|deal|deals)\b/.test(text);
 
   // "Compare the tallest building in A and B" needs looked-up facts, not an essay from memory.
-  const needsLiveFacts = /\b(tallest|highest|biggest|largest|longest|fastest|cheapest|newest|latest|most recent|current|currently|right now|population|rated|rating|score|price|prices|cost|costs)\b/.test(text);
+  const needsLiveFacts = /\b(tallest|highest|biggest|largest|longest|fastest|cheapest|newest|latest|most recent|current|currently|right now|population|rated|rating|score|price|prices|cost|costs|train|trains|bus|buses|flight|flights|journey|departure|timetable|walk|weather|forecast|opening hours|open until|news)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s?(?:am|pm)\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)\b/.test(text);
 
   return !(actionOrGoal || isShoppingComparison || needsLiveFacts);
 }

@@ -12,6 +12,7 @@ test('chained questions and live-fact comparisons get the multi-step loop, plain
   const { shouldUseAgenticLoopForMessage: agentic } = require('../../api/index');
   assert.equal(agentic({ message: 'Who directed Paddington 2, what is the most recent film they directed, and is that film rated higher or lower than Paddington 2 on Rotten Tomatoes?' }), true);
   assert.equal(agentic({ message: 'Compare the tallest building in Birmingham with the tallest in Manchester: give both heights.' }), true);
+  assert.equal(agentic({ message: 'I need to be at Manchester Piccadilly by 9:30 on Monday morning, coming from Birmingham New Street. What is the latest train I could catch, how long is the journey, and how long is the walk from Piccadilly station to the Manchester Art Gallery?' }), true);
   assert.equal(agentic({ message: 'Who directed Paddington 2?' }), false);
   assert.equal(agentic({ message: 'Compare cats and dogs as pets' }), false);
 });
