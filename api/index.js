@@ -157,6 +157,7 @@ const failureReport = require('./services/failure-report');
 const connectorState = require('./services/connector-state');
 const clientIp = require('./services/client-ip');
 const usageMeter = require('./services/usage-meter');
+const researchSynthesis = require('./services/research-synthesis');
 const homeModel = require('./services/home-model');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing, lifeBriefingSignature } = require('./services/life-briefing');
@@ -6675,6 +6676,30 @@ function summarizeCompletedActionsConcise(actionResults) {
 // substantial: replacing it with a canned line for a failed or hand-off side step throws away
 // what the user asked for. Pending approvals and simulations still replace it, because the
 // user must see those exactly. A hand-off link is added to the end of the model's answer.
+// Writes the answer to the whole question from a lookup-only turn's results (null if it cannot).
+async function writeUpResearchAnswer({ message, spoken, actionResults, chatProvider, chatModel, dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, trace }) {
+  if (!researchSynthesis.shouldWriteUp(actionResults)) return null;
+  try {
+    const request = buildModernGenerateRequest({
+      dynamicSystemPrompt, useSearch, cachedContentName, baseHistory,
+      userContent: { role: 'user', parts: [{ text: message }] },
+      useAgentTools: false
+    });
+    request.contents.push(
+      { role: 'model', parts: [{ text: spoken || '…' }] },
+      { role: 'user', parts: [{ text: researchSynthesis.researchSynthesisPrompt(message, researchSynthesis.researchResults(actionResults)) }] }
+    );
+    const response = await trace.run('brain.generate.research_write_up', () => generateBrain({
+      provider: chatProvider, model: chatModel, contents: request.contents, config: request.config
+    }));
+    const written = String(parseActions(response.text || '').spoken || '').trim();
+    return written.length >= 20 ? written : null;
+  } catch (error) {
+    trace?.log?.('research_write_up.failed', error.message);
+    return null;
+  }
+}
+
 function reconcileSpokenWithActions(spoken, actionResults) {
   const confirmation = summarizeFinishedActionsForUser(actionResults);
   if (!confirmation) return spoken;
@@ -8067,6 +8092,14 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
+        if (!canUseDirectActionSummary(actionResults) && dataResults.length === 0) {
+          const written = await writeUpResearchAnswer({ message, spoken, actionResults, chatProvider, chatModel, dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, trace });
+          if (written) {
+            spoken = written;
+            sse({ type: 'replace', text: spoken });
+            if (ttsStreamer) ttsStreamer.ingest(spoken);
+          }
+        }
         const actionConfirmation = reconcileSpokenWithActions(spoken, actionResults);
         if (actionConfirmation && actionConfirmation !== spoken) {
           spoken = actionConfirmation;
@@ -8189,6 +8222,10 @@ app.post('/chat', chatUsageMeter, chatRateLimiter, async (req, res) => {
         durationMs: Date.now() - compositionStarted,
         textLength: String(spoken || '').length
       });
+    }
+    if (!canUseDirectActionSummary(actionResults) && dataResults.length === 0) {
+      const written = await writeUpResearchAnswer({ message, spoken, actionResults, chatProvider, chatModel, dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, trace });
+      if (written) spoken = written;
     }
     spoken = reconcileSpokenWithActions(spoken, actionResults) || spoken;
 

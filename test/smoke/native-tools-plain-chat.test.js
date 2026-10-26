@@ -268,10 +268,11 @@ test('neither plain-chat entry point disables native tools', () => {
   const src = require('node:fs').readFileSync(require.resolve('../../api/index.js'), 'utf8');
 
   // The synthesis/compat routes that must STAY tool-free: two data follow-ups (chat streaming
-  // + non-streaming), the voice follow-up, and both /chat-with-image calls.
+  // + non-streaming), the voice follow-up, both /chat-with-image calls, and the research write-up
+  // that turns a lookup-only turn's results into an answer to the whole question.
   assert.equal(
     (src.match(/useAgentTools:\s*false/g) || []).length,
-    5,
+    6,
     'a route changed its tool posture — re-check which one and why'
   );
   assert.equal(
