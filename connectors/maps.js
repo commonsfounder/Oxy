@@ -48,7 +48,9 @@ function distanceLabel(meters) {
 function placeLabel(place, fallback) {
   const name = place?.name || cleanPlaceSearchQuery(fallback);
   const area = shortAddress(place?.formattedAddress || '');
-  if (name && area && !area.toLowerCase().startsWith(name.toLowerCase())) {
+  const lowerName = String(name || '').toLowerCase();
+  const lowerArea = area.toLowerCase();
+  if (name && area && !lowerArea.startsWith(lowerName) && !lowerName.includes(lowerArea)) {
     return `${name}, ${area}`;
   }
   return name || area || fallback;
@@ -114,16 +116,28 @@ function mapsDirectionsFallback(destination, params = {}) {
       }
     };
   }
+  return mapsHandoffResult({ label: cleanedDestination, modeLabel, link, origin: cleanedOrigin });
+}
+
+// No route could be worked out, but Maps can still do it. This is a handoff, not a finished
+// answer, so it must never say directions are "ready" — there is no time or distance to show.
+function mapsHandoffResult({ label, modeLabel, link, origin = '' }) {
   return {
     success: false,
     outcome: 'handoff_required',
     handoffRequired: true,
-    text: `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${cleanedDestination} are ready.`,
-    actionSummary: 'Directions ready',
+    text: `I couldn't work out the ${modeLabel} time or distance to ${label}. The route is open in Maps.`,
+    actionSummary: 'Open in Maps',
     cardText: `Open ${modeLabel} directions in Maps`,
     modelNote: 'This only opens a Maps link: no time or distance was worked out. Give the time yourself from a search and say it in your answer.',
     deepLink: link,
-    webLink: link
+    webLink: link,
+    routeContext: {
+      origin: origin || 'current location',
+      destination: label,
+      mode: modeLabel,
+      reason: 'route_summary_unavailable'
+    }
   };
 }
 
@@ -657,9 +671,10 @@ async function execute(userId, action, params) {
         ? `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
         : `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
       const label = placeLabel(place, destination);
-      const routeText = route?.text || (route?.headline ? `${route.headline}: ${route.detail}` : flag === 'r'
-        ? `I couldn't get a reliable transit route summary to ${label} right now.`
-        : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`);
+      if (!route && flag !== 'r') {
+        return { ...mapsHandoffResult({ label, modeLabel, link, origin: params.origin }), latencyMs: Date.now() - executeStarted };
+      }
+      const routeText = route?.text || (route?.headline ? `${route.headline}: ${route.detail}` : `I couldn't get a reliable transit route summary to ${label} right now.`);
       return {
         success: route || flag !== 'r',
         ...(route || flag !== 'r'

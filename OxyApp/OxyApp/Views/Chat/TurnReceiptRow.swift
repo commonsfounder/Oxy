@@ -272,7 +272,13 @@ private struct ReceiptStep: Identifiable {
     }
 
     private var shortName: String {
-        action.action.replacingOccurrences(of: "_", with: " ")
+        switch action.action {
+        case "create_calendar_event": return "the calendar event"
+        case "get_calendar_events": return "the calendar check"
+        case "get_directions": return "directions"
+        case "browser_sign_in": return "sign-in"
+        default: return action.action.replacingOccurrences(of: "_", with: " ")
+        }
     }
 
     /// A benign "nothing to return" result (no matching emails, no events) —
