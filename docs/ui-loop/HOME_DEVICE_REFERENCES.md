@@ -1,6 +1,6 @@
 # What apps for home devices do — 27 October 2026
 
-App Store screenshots of 14 apps that go with a device in the home (images in shots/home-device-refs-2026-10-27/): Nanit, Owlet, Eight Sleep, Sonos, Tesla, Apple Home, Google Home, Nothing X, Roomba, Philips Hue, ecobee, Ring, Withings, Dyson. Chizi's earlier references (Family, Oura, Gentler Streak, !Boring) are fitness/money/weather apps; their look does not transfer to a home computer.
+App Store screenshots of 14 apps that go with a device in the home (images kept locally in ~/Documents/Adam-reference-screens/, not in this public repo): Nanit, Owlet, Eight Sleep, Sonos, Tesla, Apple Home, Google Home, Nothing X, Roomba, Philips Hue, ecobee, Ring, Withings, Dyson. Chizi's earlier references (Family, Oura, Gentler Streak, !Boring) are fitness/money/weather apps; their look does not transfer to a home computer.
 
 What these apps share:
 
