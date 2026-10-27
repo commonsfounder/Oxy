@@ -104,6 +104,18 @@ final class SoundClipStore {
     }
 
     #if DEBUG
+    /// Debug only (OXY_DEBUG_ALARM=1): a smoke alarm's three-beep pattern heard just now.
+    func seedAlarmNow() {
+        UserDefaults.standard.set(true, forKey: Self.preferenceKey)
+        let rate = 16_000.0
+        let samples = (0..<Int(rate * 3)).map { i -> Float in
+            let t = Double(i) / rate
+            let on = t.truncatingRemainder(dividingBy: 1.0) < 0.5 && Int(t * 4) % 2 == 0
+            return on ? Float(0.4 * sin(2 * .pi * 3_100 * t)) : Float(0.02 * sin(2 * .pi * 90 * t))
+        }
+        save(samples: samples, sampleRate: rate, sound: "smoke", title: "Smoke alarm", at: Date().addingTimeInterval(-40))
+    }
+
     /// Debug only (OXY_DEBUG_YOU=sounds): three short tones standing in for real alerts.
     func seedPreviewClips() {
         UserDefaults.standard.set(true, forKey: Self.preferenceKey)

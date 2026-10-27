@@ -11,6 +11,8 @@ struct ThreadHeader: View {
     var showsStatus = true
     /// Set while in the conversation: the way back to Home.
     var onHome: (() -> Void)? = nil
+    /// On Home: the line under the title, with its colour.
+    var homeStatus: (text: String, color: Color)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
@@ -36,14 +38,22 @@ struct ThreadHeader: View {
                 .buttonStyle(.appScale)
                 .accessibilityLabel("Back to Home")
             } else {
-                titleLayout {
-                    Text(isIncognito ? "Private" : "Adam")
-                        .font(.role(.body, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                    if isDemo {
-                        Text("Sample")
-                            .font(.role(.caption, weight: .medium))
-                            .foregroundStyle(Color.appMuted)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                        Text(isIncognito ? "Private" : "Home")
+                            .font(.role(.title, weight: .bold))
+                            .foregroundStyle(Color.appInk)
+                        if isDemo {
+                            Text("Sample").font(.role(.caption, weight: .medium)).foregroundStyle(Color.appMuted)
+                        }
+                    }
+                    if let homeStatus, !isIncognito {
+                        HStack(spacing: 7) {
+                            Circle().fill(homeStatus.color).frame(width: 7, height: 7)
+                                .overlay(Circle().stroke(homeStatus.color.opacity(0.25), lineWidth: 3))
+                            Text(homeStatus.text).font(.role(.footnote, weight: .medium)).foregroundStyle(Color.appMuted)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }

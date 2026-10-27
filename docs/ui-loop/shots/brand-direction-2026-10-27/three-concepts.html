@@ -1,0 +1,160 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:SF;src:url(file:///System/Library/Fonts/SFNS.ttf);font-weight:100 900}
+@font-face{font-family:SFR;src:url(file:///System/Library/Fonts/SFNSRounded.ttf);font-weight:100 900}
+@font-face{font-family:SFM;src:url(file:///System/Library/Fonts/SFNSMono.ttf);font-weight:100 900}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#d9d6d0;display:flex;gap:40px;padding:40px;font-family:SF;-webkit-font-smoothing:antialiased;color:#111}
+.col{display:flex;flex-direction:column;gap:14px;align-items:center}
+.cap{font:600 20px SFR;color:#333}
+.cap span{display:block;font:400 14px SF;color:#666;margin-top:4px;text-align:center;max-width:390px}
+.phone{width:390px;height:844px;position:relative;overflow:hidden;border-radius:46px;box-shadow:0 30px 60px rgba(0,0,0,.18)}
+.sb{height:50px;display:flex;justify-content:space-between;align-items:flex-end;padding:0 34px 6px 40px;font:600 16px SF;position:relative;z-index:3}
+.sb i{font-style:normal;letter-spacing:1px}
+
+/* ---------- A: Adam the character ---------- */
+.A{background:linear-gradient(180deg,#FFB36B 0%,#FFD3A1 38%,#FFF1E2 62%,#FFF1E2 100%)}
+.A .top{display:flex;justify-content:space-between;align-items:center;padding:8px 22px 0}
+.A .wheel{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.55);display:grid;place-items:center;font:800 18px SFR;color:#5a2a00}
+.A .who{font:700 17px SFR;color:#5a2a00}
+.pebble{width:178px;height:178px;margin:22px auto 0;border-radius:44% 56% 52% 48%/52% 46% 54% 48%;background:radial-gradient(60% 55% at 35% 28%,#fff6ec 0%,#FF9F45 38%,#E5681A 100%);box-shadow:0 26px 40px rgba(173,74,10,.35),inset -14px -20px 30px rgba(140,50,0,.25);position:relative;display:grid;place-items:center}
+.pebble:after{content:"";position:absolute;bottom:-34px;left:30px;right:30px;height:18px;border-radius:50%;background:rgba(160,70,10,.18);filter:blur(6px)}
+.eyes{display:flex;gap:30px;margin-top:-8px}
+.eyes b{width:16px;height:26px;border-radius:9px;background:#3b1800}
+.A .say{text-align:center;margin-top:36px;font:800 34px/1.05 SFR;color:#3b1800;letter-spacing:-.5px}
+.A .say small{display:block;font:500 16px SF;color:#8a4a17;margin-top:8px;letter-spacing:0}
+.A .card{position:absolute;left:14px;right:14px;top:470px;background:#fff;border-radius:30px;padding:20px 20px 18px;box-shadow:0 14px 34px rgba(150,70,10,.16)}
+.A .row{display:flex;align-items:center;gap:12px}
+.A .ic{width:44px;height:44px;border-radius:14px;background:#FFE7CF;display:grid;place-items:center}
+.A .t{font:700 17px SF}
+.A .s{font:400 14px SF;color:#7b6f66;margin-top:2px}
+.A .amt{margin-left:auto;font:800 30px SFR;letter-spacing:-.5px}
+.A .btns{display:flex;gap:10px;margin-top:18px}
+.A .yes{flex:1;height:52px;border-radius:26px;background:#E5681A;color:#fff;font:700 17px SFR;display:grid;place-items:center}
+.A .no{width:116px;height:52px;border-radius:26px;background:#F4EEE8;color:#5a4a3c;font:600 17px SFR;display:grid;place-items:center}
+.A .more{position:absolute;left:14px;right:14px;top:668px;display:flex;gap:10px}
+.A .chip{flex:1;border-radius:22px;padding:12px 14px;font:600 14px SF;color:#2c2622}
+.A .chip small{display:block;font:500 12px SF;opacity:.7;margin-top:3px}
+.A .talk{position:absolute;bottom:26px;left:50%;margin-left:-0px}
+
+/* ---------- B: your home as objects ---------- */
+.B{background:#F7F6F3}
+.B .top{display:flex;justify-content:space-between;align-items:center;padding:8px 22px 0}
+.B h2{font:800 34px SFR;letter-spacing:-.6px;padding:10px 22px 0}
+.B .sub{font:500 16px SF;color:#7a7670;padding:4px 22px 0}
+.B .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:18px 16px 0}
+.tile{border-radius:26px;height:150px;padding:16px;position:relative;color:#fff;overflow:hidden}
+.tile .g{width:36px;height:36px}
+.tile .n{position:absolute;left:16px;bottom:38px;font:700 17px SFR;letter-spacing:-.2px}
+.tile .v{position:absolute;left:16px;bottom:16px;font:500 14px SF;opacity:.85}
+.tile .dot{position:absolute;right:16px;top:18px;width:10px;height:10px;border-radius:50%}
+.tile.wide{grid-column:span 2;height:168px}
+.big{font:800 46px SFR;letter-spacing:-1px;position:absolute;right:18px;bottom:12px}
+.bar{position:absolute;left:16px;right:16px;bottom:16px;height:8px;border-radius:4px;background:rgba(255,255,255,.3)}
+.bar i{display:block;height:100%;width:40%;border-radius:4px;background:#fff}
+.B h3{font:700 22px SFR;padding:22px 22px 10px;letter-spacing:-.3px}
+.circles{display:flex;gap:18px;padding:0 22px}
+.circ{display:flex;flex-direction:column;align-items:center;gap:8px;font:600 14px SF}
+.circ b{width:72px;height:72px;border-radius:50%;display:grid;place-items:center}
+
+/* ---------- C: instrument ---------- */
+.C{background:radial-gradient(120% 60% at 50% 0%,#1E3A5F 0%,#0E1B2E 55%,#070B12 100%);color:#EAF1FA}
+.C .top{display:flex;justify-content:space-between;align-items:center;padding:8px 22px 0}
+.C .brand{font:600 20px SF;letter-spacing:.32em}
+.rings{display:flex;gap:10px;padding:22px 16px 0;justify-content:space-between}
+.ring{width:84px;height:84px;border-radius:50%;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring svg{position:absolute;inset:0}
+.ring b{font:600 26px SF;letter-spacing:-.5px;position:relative}
+.ring span{font:500 11px SF;opacity:.75;position:relative;margin-top:1px}
+.C h2{font:400 32px SF;letter-spacing:-.4px;padding:26px 22px 12px}
+.focus{margin:0 14px;border-radius:30px;padding:22px;background:linear-gradient(160deg,#F29D52 0%,#D9653B 55%,#A8432C 100%);position:relative;overflow:hidden;color:#fff}
+.focus:before{content:"";position:absolute;right:-40px;top:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.1)}
+.focus .lbl{font:600 13px SF;letter-spacing:.14em;opacity:.85}
+.focus .num{font:300 76px SF;letter-spacing:-3px;margin-top:6px}
+.focus .q{font:600 19px SF;margin-top:2px}
+.focus .facts{display:flex;justify-content:space-between;margin-top:18px;font:500 13px SF;opacity:.9}
+.focus .facts b{display:block;font:600 17px SF;margin-top:3px}
+.focus .act{display:flex;gap:10px;margin-top:18px}
+.focus .act div{height:46px;border-radius:23px;display:grid;place-items:center;font:600 16px SF}
+.ctrl{position:absolute;left:0;right:0;bottom:0;height:150px;background:#05080D;border-top:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;padding:0 34px 18px}
+.shutter{width:78px;height:78px;border-radius:50%;border:4px solid #EAF1FA;display:grid;place-items:center}
+.shutter i{width:62px;height:62px;border-radius:50%;background:#EAF1FA;display:grid;place-items:center}
+.side{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.08);display:grid;place-items:center;font:600 12px SF}
+.next{margin:14px 14px 0;display:flex;gap:10px}
+.next div{flex:1;border-radius:20px;background:rgba(255,255,255,.07);padding:12px 14px;font:500 13px SF}
+.next b{display:block;font:600 22px SF;margin-bottom:2px;letter-spacing:-.4px}
+</style></head><body>
+
+<!-- A -->
+<div class="col">
+<div class="phone A">
+  <div class="sb"><span>9:41</span><i>▪▪▪ ◔ ▮</i></div>
+  <div class="top"><span class="who">Adam</span><span class="wheel">A</span></div>
+  <div class="pebble"><div class="eyes"><b></b><b></b></div></div>
+  <div class="say">One thing needs you<small>Kitchen display is offline · 1 job running</small></div>
+  <div class="card">
+    <div class="row"><div class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E5681A" stroke-width="2" stroke-linecap="round"><path d="M5 8h14l-1.5 11h-11z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg></div>
+      <div><div class="t">Washing-up liquid, bin bags</div><div class="s">Card 4242 · arrives tomorrow</div></div><div class="amt">£8.40</div></div>
+    <div class="btns"><div class="yes">Order it</div><div class="no">Not now</div></div>
+  </div>
+  <div class="more">
+    <div class="chip" style="background:#D7EEDC">Finding a plumber<small>2 of 5 steps</small></div>
+    <div class="chip" style="background:#DCE7F6">Parcel in the porch<small>00:07</small></div>
+  </div>
+  <div style="position:absolute;bottom:22px;left:0;right:0;display:flex;justify-content:center"><div style="width:66px;height:66px;border-radius:50%;background:#3b1800;display:grid;place-items:center;box-shadow:0 10px 20px rgba(60,24,0,.3)"><svg width="20" height="28" viewBox="0 0 16 22" fill="none" stroke="#FFF1E2" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></div></div>
+</div>
+<div class="cap">A · Adam, the character<span>Adam is a friendly object whose colour and face show its mood. One thing at a time, with the answer buttons right there. Hold to talk.</span></div>
+</div>
+
+<!-- B -->
+<div class="col">
+<div class="phone B">
+  <div class="sb"><span>9:41</span><i>▪▪▪ ◔ ▮</i></div>
+  <div class="top"><span style="width:44px"></span><span style="width:44px;height:44px;border-radius:50%;background:#ECEAE5;display:grid;place-items:center;font:800 18px SFR">A</span></div>
+  <h2>Home</h2>
+  <div class="sub">Tuesday · 2 displays · 1 needs you</div>
+  <div class="grid">
+    <div class="tile wide" style="background:#FF7A2F">
+      <svg class="g" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M5 8h14l-1.5 11h-11z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>
+      <div class="big" style="top:12px;bottom:auto">£8.40</div><div class="n" style="bottom:42px">Order washing-up liquid?</div><div class="v">Needs you · arrives tomorrow</div></div>
+    <div class="tile" style="background:#1F8A5B"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/></svg><span class="dot" style="background:#9BF0C4;box-shadow:0 0 10px #9BF0C4"></span><div class="n">Living room</div><div class="v">On</div></div>
+    <div class="tile" style="background:#2B2B2E"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" opacity=".6"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/></svg><span class="dot" style="border:2px solid #777"></span><div class="n">Kitchen</div><div class="v">Offline since 23:19</div></div>
+    <div class="tile" style="background:#2F6BFF"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M14 4l6 6-9 9H5v-6z"/></svg><div class="n" style="bottom:60px">Finding a plumber</div><div class="v" style="bottom:34px">2 of 5 steps</div><div class="bar"><i></i></div></div>
+    <div class="tile" style="background:#FFC531;color:#3a2a00"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="#3a2a00" stroke-width="2" stroke-linejoin="round"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><div class="n">Parcel in porch</div><div class="v">00:07 · Royal Mail</div></div>
+  </div>
+  <h3>Watching</h3>
+  <div class="circles">
+    <div class="circ"><b style="background:#E9DBFF"><svg width="30" height="30" viewBox="0 0 24 24" fill="#6B3FD6"><path d="M21 15.5v-1.8l-8-5V3.4a1.4 1.4 0 0 0-2.8 0v5.3l-8 5v1.8l8-2.4v4.7l-2 1.5v1.4l3.4-1 3.4 1v-1.4l-2-1.5v-4.7z"/></svg></b>Flights</div>
+    <div class="circ"><b style="background:#FFE0E0"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#D63F3F" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></b>Bins</div>
+    <div class="circ"><b style="background:#DDF3E6;border:2px dashed #9cc9ae"><span style="font:300 30px SF;color:#1F8A5B">+</span></b>Add</div>
+  </div>
+</div>
+<div class="cap">B · Your home as objects<span>Like Family: everything Adam handles is a coloured object with its own identity. Displays, the thing to approve, the job running, the parcel. Tap one to open it.</span></div>
+</div>
+
+<!-- C -->
+<div class="col">
+<div class="phone C">
+  <div class="sb"><span>9:41</span><i>▪▪▪ ◔ ▮</i></div>
+  <div class="top"><span class="side">☰</span><span class="brand">ADAM</span><span class="side">●</span></div>
+  <div class="rings">
+    <div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="38" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="3"/><circle cx="42" cy="42" r="38" fill="none" stroke="#7FE0A8" stroke-width="3" stroke-dasharray="120 239" stroke-linecap="round" transform="rotate(-90 42 42)"/></svg><b>1/2</b><span>Displays</span></div>
+    <div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="38" fill="none" stroke="#F2A65A" stroke-width="3"/></svg><b>1</b><span>Needs you</span></div>
+    <div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="38" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="3"/><circle cx="42" cy="42" r="38" fill="none" stroke="#7FB6FF" stroke-width="3" stroke-dasharray="96 239" stroke-linecap="round" transform="rotate(-90 42 42)"/></svg><b>2/5</b><span>Plumber</span></div>
+    <div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="38" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="3"/></svg><b>3</b><span>Noticed</span></div>
+  </div>
+  <h2>Right now</h2>
+  <div class="focus">
+    <div class="lbl">NEEDS YOUR YES</div>
+    <div class="num">£8.40</div>
+    <div class="q">Washing-up liquid and bin bags</div>
+    <div class="facts"><div>Card<b>•••• 4242</b></div><div>Arrives<b>Tomorrow</b></div><div>Shop<b>Ocado</b></div></div>
+    <div class="act"><div style="flex:1;background:#fff;color:#A8432C">Order it</div><div style="width:110px;background:rgba(255,255,255,.18)">Not now</div></div>
+  </div>
+  <div class="next"><div><b>00:07</b>Parcel left in the porch</div><div><b>Thu</b>Boiler service booked</div></div>
+  <div class="ctrl"><div class="side" style="width:52px;height:52px;border-radius:14px">Mute</div><div class="shutter"><i><svg width="20" height="28" viewBox="0 0 16 22" fill="none" stroke="#05080D" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></i></div><div class="side" style="width:52px;height:52px;border-radius:14px">Chat</div></div>
+</div>
+<div class="cap">C · The instrument<span>Like Oura and Halide: rings for what matters, one big focal card for right now, and a control zone at the bottom with a big talk button and mute, like a camera's shutter.</span></div>
+</div>
+</body></html>

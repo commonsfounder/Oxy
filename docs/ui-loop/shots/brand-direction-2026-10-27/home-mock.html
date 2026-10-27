@@ -1,0 +1,117 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0C0C0D;--raise:#141415;--raise2:#1E1E20;--line:#2A2A2E;--ink:#F2EDE4;--muted:#9A9590;--dim:#6E6A66;--pcb:#1B4D2E;--go:#5FBF7F;--warn:#E7B45A}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#333;display:flex;gap:28px;padding:28px;font-family:"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
+.phone{width:390px;height:844px;background:var(--bg);color:var(--ink);position:relative;overflow:hidden;border-radius:0}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(242,237,228,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(242,237,228,.035) 1px,transparent 1px);background-size:39px 39px;background-position:-1px 0;pointer-events:none}
+.sb{height:47px;display:flex;justify-content:space-between;align-items:center;padding:0 30px 0 34px;font:600 16px "Helvetica Neue",Helvetica,sans-serif}
+.head{display:flex;justify-content:space-between;align-items:center;padding:6px 24px 0;height:56px;position:relative}
+.word{font:400 24px "Instrument Serif";letter-spacing:-.01em}
+.hub{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;position:relative;background:var(--raise)}
+.hub:before{content:"";position:absolute;inset:4px;border-radius:50%;border:1px dashed rgba(242,237,228,.18)}
+.hub b{font:400 20px "Instrument Serif"}
+.hub i{position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 2px var(--bg)}
+.mono{font-family:"Fragment Mono",monospace;text-transform:uppercase;letter-spacing:.12em;font-size:11px;color:var(--dim)}
+.wrap{padding:0 24px;position:relative}
+.date{margin-top:18px}
+h1{font:400 46px/0.98 "Instrument Serif";letter-spacing:-.025em;margin-top:10px}
+h1 em{font-style:italic}
+.obj{margin-top:22px;display:flex;gap:10px}
+.dev{flex:1;border:1px solid var(--line);border-radius:14px;padding:12px 12px 11px;background:linear-gradient(var(--raise),var(--bg))}
+.screen{height:44px;border-radius:7px;border:1px solid var(--line);background:#0f0f10;position:relative;overflow:hidden}
+.screen.on{background:radial-gradient(120% 90% at 50% 0%,rgba(95,191,127,.18),transparent 70%),#0f1110}
+.screen.on:after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:var(--go);box-shadow:0 0 12px 3px rgba(95,191,127,.55)}
+.screen.off:after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;border:1px solid var(--dim)}
+.dev .n{font:500 14px "Helvetica Neue",Helvetica,sans-serif;margin-top:10px}
+.dev .s{margin-top:3px;font-size:10px}
+.rule{display:flex;align-items:center;gap:10px;margin:30px 0 14px}
+.rule:after{content:"";flex:1;height:1px;background:var(--line)}
+.amt{font:400 64px/0.9 "Instrument Serif";letter-spacing:-.03em}
+.amt small{font:12px "Fragment Mono";letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-left:8px;vertical-align:14px}
+.q{font:400 25px/1.1 "Instrument Serif";margin-top:10px;letter-spacing:-.01em}
+.kv{display:flex;align-items:baseline;gap:8px;margin-top:12px;font:15px "Helvetica Neue",Helvetica,sans-serif;color:var(--ink)}
+.kv .k{font:11px "Fragment Mono";letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.kv .dots{flex:1;border-bottom:1px dotted #3a3a3e;transform:translateY(-4px)}
+.btn{margin-top:18px;display:inline-flex;align-items:center;height:46px;padding:0 24px;border-radius:23px;background:var(--ink);color:#0C0C0D;font:600 15px "Helvetica Neue",Helvetica,sans-serif}
+.work{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.work .t{font:400 22px/1.12 "Instrument Serif"}
+.stop{font:600 14px "Helvetica Neue",Helvetica,sans-serif;color:var(--ink);border:1px solid var(--line);border-radius:20px;padding:9px 15px;white-space:nowrap}
+.ladder{display:flex;gap:4px;margin-top:14px}
+.ladder span{flex:1;height:3px;border-radius:2px;background:var(--line)}
+.ladder span.d{background:var(--ink)}
+.ladder span.c{background:linear-gradient(90deg,var(--ink) 40%,var(--line) 40%)}
+.steps{margin-top:8px}
+.line{display:grid;grid-template-columns:52px 1fr;gap:10px;margin-top:12px;font:15px/1.3 "Helvetica Neue",Helvetica,sans-serif}
+.line .tm{font:12px "Fragment Mono";color:var(--dim);padding-top:2px}
+.line .d{color:var(--muted)}
+.comp{position:absolute;left:0;right:0;bottom:0;padding:12px 20px 30px;background:linear-gradient(transparent,var(--bg) 30%);display:flex;gap:10px;align-items:center}
+.field{flex:1;height:48px;border-radius:24px;border:1px solid var(--line);background:var(--raise);display:flex;align-items:center;padding:0 18px;color:var(--dim);font:16px "Helvetica Neue",Helvetica,sans-serif}
+.mic{width:48px;height:48px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
+.mic i{width:10px;height:16px;border:2px solid #0C0C0D;border-radius:6px}
+.plus{width:40px;height:48px;display:grid;place-items:center;color:var(--muted);font:300 28px "Helvetica Neue",Helvetica,sans-serif}
+.quiet h1{font-size:52px}
+.sub{font:17px/1.4 "Helvetica Neue",Helvetica,sans-serif;color:var(--muted);margin-top:14px}
+</style></head><body>
+
+<!-- A: needs you -->
+<div class="phone"><div class="grid"></div>
+<div class="sb"><span>00:32</span><span>●●● ▮</span></div>
+<div class="head"><span class="word">Adam</span><span class="hub"><b>A</b><i></i></span></div>
+<div class="wrap">
+  <div class="mono date">Tue 27 Oct · 00:32</div>
+  <h1>One thing<br><em>needs you.</em></h1>
+  <div class="obj">
+    <div class="dev"><div class="screen on"></div><div class="n">Living room</div><div class="mono s">Online</div></div>
+    <div class="dev"><div class="screen off"></div><div class="n">Kitchen</div><div class="mono s">Seen 23:19</div></div>
+  </div>
+  <div class="rule mono">Needs you</div>
+  <div class="amt">£8.40<small>at most</small></div>
+  <div class="q">Order washing-up liquid and bin bags?</div>
+  <div class="kv"><span class="k">Card</span><span class="dots"></span><span>•••• 4242</span></div>
+  <div class="kv"><span class="k">Arrives</span><span class="dots"></span><span>Tomorrow</span></div>
+  <div class="btn">Review</div>
+  <div class="rule mono">In progress</div>
+  <div class="work"><div class="t">Finding a plumber for the kitchen tap</div><div class="stop">Stop</div></div>
+  <div class="ladder"><span class="d"></span><span class="d"></span><span class="c"></span><span></span><span></span></div>
+  <div class="mono steps">2 of 5 steps</div>
+</div>
+<div class="comp"><div class="plus">+</div><div class="field">Ask Adam</div><div class="mic"><svg width="16" height="22" viewBox="0 0 16 22" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></div></div>
+</div>
+
+<!-- B: quiet -->
+<div class="phone quiet"><div class="grid"></div>
+<div class="sb"><span>00:32</span><span>●●● ▮</span></div>
+<div class="head"><span class="word">Adam</span><span class="hub"><b>A</b></span></div>
+<div class="wrap">
+  <div class="mono date">Tue 27 Oct · 00:32</div>
+  <h1>All quiet<br><em>at home.</em></h1>
+  <div class="obj">
+    <div class="dev"><div class="screen on"></div><div class="n">Living room</div><div class="mono s">Online</div></div>
+    <div class="dev"><div class="screen on"></div><div class="n">Kitchen</div><div class="mono s">Online</div></div>
+  </div>
+  <div class="rule mono">Noticed</div>
+  <div class="line"><span class="tm">00:07</span><span>Parcel left in the porch<br><span class="d">Royal Mail</span></span></div>
+  <div class="line"><span class="tm">MON</span><span>Booked the boiler service<br><span class="d">Thursday 09:00</span></span></div>
+  <div class="rule mono">Watching</div>
+  <div class="line"><span class="tm">○</span><span>Flight price check<br><span class="d">Tell me when the price drops</span></span></div>
+</div>
+<div class="comp"><div class="plus">+</div><div class="field">Ask Adam</div><div class="mic"><svg width="16" height="22" viewBox="0 0 16 22" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></div></div>
+</div>
+
+<!-- C: not set up -->
+<div class="phone quiet"><div class="grid"></div>
+<div class="sb"><span>00:32</span><span>●●● ▮</span></div>
+<div class="head"><span class="word">Adam</span><span class="hub"><b>A</b></span></div>
+<div class="wrap">
+  <div class="mono date">Tue 27 Oct · 00:32</div>
+  <h1>Adam isn’t<br><em>home yet.</em></h1>
+  <div class="sub">Pair a display and this screen shows what’s happening at home.</div>
+  <div class="obj"><div class="dev" style="border-style:dashed;background:none"><div class="screen" style="border-style:dashed;background:none"></div><div class="n" style="color:var(--muted)">No display</div><div class="mono s">Not paired</div></div><div style="flex:1"></div></div>
+  <div class="btn">Add a display</div>
+</div>
+<div class="comp"><div class="plus">+</div><div class="field">Ask Adam</div><div class="mic"><svg width="16" height="22" viewBox="0 0 16 22" fill="none" stroke="#0C0C0D" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></div></div>
+</div>
+</body></html>

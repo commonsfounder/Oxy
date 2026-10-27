@@ -11,44 +11,44 @@ extension Color {
     static let appBackground = Color(UIColor { trait in
         if let chosen = ThreadBackground.current.uiColor { return chosen }
         return trait.userInterfaceStyle == .dark
-            ? UIColor(red: 0.075, green: 0.09, blue: 0.08, alpha: 1)
+            ? UIColor(red: 0.043, green: 0.047, blue: 0.047, alpha: 1)
             : UIColor(red: 0.98, green: 0.976, blue: 0.961, alpha: 1)
     })
 
     static let appSurface = appDynamicColor(
-        dark: Color(red: 0.12, green: 0.14, blue: 0.13),
+        dark: Color(red: 0.082, green: 0.086, blue: 0.09),
         light: Color.white
     )
 
     static let appSurface2 = appDynamicColor(
-        dark: Color(red: 0.17, green: 0.19, blue: 0.18),
+        dark: Color(red: 0.114, green: 0.122, blue: 0.125),
         light: Color(red: 0.93, green: 0.93, blue: 0.91)
     )
 
     static let appHairline = appDynamicColor(
-        dark: Color.white.opacity(0.08),
+        dark: Color(red: 0.165, green: 0.173, blue: 0.18),
         light: Color.black.opacity(0.07)
     )
 
     /// Warm near-black ink (17:1 on the canvas) and a warm grey for secondary text (5.3:1).
     static let appInk = appDynamicColor(
-        dark: Color(red: 0.949, green: 0.945, blue: 0.925),   // #F2F1EC
+        dark: Color(red: 0.949, green: 0.929, blue: 0.894),   // #F2EDE4, the ivory of Adam's site
         light: Color(red: 0.086, green: 0.086, blue: 0.075)   // #161613
     )
 
     static let appMuted = appDynamicColor(
-        dark: Color(red: 0.66, green: 0.68, blue: 0.66),      // #A8ADA9
+        dark: Color(red: 0.604, green: 0.584, blue: 0.565),   // #9A9590
         light: Color(red: 0.420, green: 0.404, blue: 0.373)   // #6B675F
     )
 
     static let appAccent = appDynamicColor(
-        dark: Color(red: 0.72, green: 0.84, blue: 0.76),
+        dark: Color(red: 0.949, green: 0.929, blue: 0.894),
         light: Color(red: 0.07, green: 0.22, blue: 0.16)
     )
 
     /// Each appearance pairs the action colour with contrasting ink.
     static let appOnAccent = appDynamicColor(
-        dark: Color(red: 0.035, green: 0.10, blue: 0.06),
+        dark: Color(red: 0.043, green: 0.047, blue: 0.047),
         light: Color.white
     )
 
@@ -68,11 +68,11 @@ extension Color {
 
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = appDynamicColor(
-        dark: Color(red: 0.30, green: 0.75, blue: 0.50),
+        dark: Color(red: 0.435, green: 0.827, blue: 0.604),
         light: Color(red: 0.08, green: 0.44, blue: 0.27)
     )
     static let appWarning = appDynamicColor(
-        dark: Color(red: 0.95, green: 0.70, blue: 0.25),
+        dark: Color(red: 0.941, green: 0.714, blue: 0.353),
         light: Color(red: 0.55, green: 0.34, blue: 0.035)
     )
     static let appAttention = appWarning
@@ -96,7 +96,7 @@ extension Color {
     /// Adam's side of the conversation: message bubbles and cards.
     /// The same raised surface as every card (Settings, board, Activity), so a thread has one grey, not two.
     static let appReceivedBubble = appDynamicColor(
-        dark: Color.white.opacity(0.07),
+        dark: Color(red: 0.082, green: 0.086, blue: 0.09),
         light: Color.white
     )
 
@@ -113,7 +113,7 @@ extension Color {
     static let appDone = appSuccess
     /// Thin outline for thread cards.
     static let appCardOutline = appDynamicColor(
-        dark: Color.white.opacity(0.14),
+        dark: Color(red: 0.2, green: 0.21, blue: 0.22),
         light: Color(red: 0.063, green: 0.090, blue: 0.129).opacity(0.13)
     )
 }
@@ -1214,17 +1214,17 @@ enum ThreadBackground: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .automatic: return "Automatic"
+        case .automatic: return "Adam"
         case .warm: return "Warm"
         case .sea: return "Sea"
         case .night: return "Night"
         }
     }
 
-    /// nil follows the phone's light or dark setting.
+    /// Adam's own look is dark, like the device and its site; Warm and Sea are the light choices.
     var scheme: ColorScheme? {
         switch self {
-        case .automatic: return nil
+        case .automatic: return .dark
         case .warm, .sea: return .light
         case .night: return .dark
         }

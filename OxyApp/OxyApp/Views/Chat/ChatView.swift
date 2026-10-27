@@ -17,6 +17,7 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
+    @State private var alarmClip: SoundClipStore.Clip?
     @State private var wheelOpen = false
     /// The app opens on Home; the conversation is a place you go to and come back from.
     @State private var overviewSelected = true
@@ -402,6 +403,7 @@ struct ChatView: View {
                                 isComposing: isInputFocused,
                                 showsStatus: !showsOverview,
                                 onHome: showsOverview ? nil : { withAnimation(.appStandard) { overviewSelected = true } },
+                                homeStatus: showsOverview ? HomeNowView.status(boardModel) : nil,
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
                             )
@@ -497,7 +499,7 @@ struct ChatView: View {
                                     exchangeSection(exchange)
                                 }
 
-                                ThreadBoardCards(model: boardModel, askedInThread: askedInThread, sections: [.decisions, .work])
+                                HomeMomentCards(model: boardModel)
                                     .padding(.horizontal, AppSpacing.chatMargin)
                                     .padding(.top, boardModel.isEmpty ? 0 : 14)
 
@@ -732,6 +734,20 @@ struct ChatView: View {
             }
             #endif
             .modifier(ThreadLayers(reaction: reactionOverlay, wheel: wheelOverlay, heldID: heldMessage?.message.id, displayText: $displayText))
+            .fullScreenCover(item: $alarmClip) { clip in
+                HomeAlarmView(clip: clip) { alarmClip = nil }
+            }
+            .task {
+                #if DEBUG
+                if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_ALARM"] == "1" {
+                    SoundClipStore.shared.seedAlarmNow()
+                }
+                #endif
+                while !Task.isCancelled {
+                    if alarmClip == nil, let clip = HomeAlarm.current() { alarmClip = clip }
+                    try? await Task.sleep(for: .seconds(3))
+                }
+            }
             .task {
                 while !Task.isCancelled {
                     await boardModel.refresh()

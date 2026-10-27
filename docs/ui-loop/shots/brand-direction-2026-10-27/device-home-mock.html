@@ -1,0 +1,151 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:SF;src:url(file:///System/Library/Fonts/SFNS.ttf);font-weight:100 900}
+@font-face{font-family:SFM;src:url(file:///System/Library/Fonts/SFNSMono.ttf);font-weight:100 900}
+:root{--bg:#0B0C0C;--raise:#151617;--raise2:#1D1F20;--line:#2A2C2E;--ink:#F2EDE4;--muted:#9A9590;--dim:#6E6A66;--go:#6FD39A;--amber:#F0B65A}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#cfccc6;display:flex;gap:36px;padding:36px;font-family:SF;-webkit-font-smoothing:antialiased}
+.col{display:flex;flex-direction:column;gap:12px}
+.cap{font:600 17px SF;color:#2b2b2b}
+.cap span{display:block;font:400 13px SF;color:#555;margin-top:3px;max-width:390px}
+.phone{width:390px;height:844px;background:var(--bg);color:var(--ink);position:relative;overflow:hidden;border-radius:46px;box-shadow:0 30px 60px rgba(0,0,0,.25)}
+.sb{height:50px;display:flex;justify-content:space-between;align-items:flex-end;padding:0 34px 6px 40px;font:600 16px SF}
+.head{display:flex;justify-content:space-between;align-items:center;padding:10px 20px 0}
+.head .t{font:700 22px SF;letter-spacing:-.3px}
+.head .st{display:flex;align-items:center;gap:7px;font:500 13px SF;color:var(--muted);margin-top:3px}
+.live{width:7px;height:7px;border-radius:50%;background:var(--go);box-shadow:0 0 0 3px rgba(111,211,154,.18)}
+.hub{width:44px;height:44px;border-radius:50%;background:var(--raise2);display:grid;place-items:center;font:700 17px SF;border:1px solid var(--line)}
+.map{height:268px;position:relative;margin-top:4px}
+.map svg{position:absolute;inset:0}
+.tag{position:absolute;font:500 12px SF;color:var(--ink);line-height:1.25}
+.tag small{display:block;font:500 11px SFM;color:var(--muted);letter-spacing:.02em}
+.sec{padding:0 20px}
+.brief{margin:6px 20px 0;padding:16px 16px 14px;border-radius:20px;background:var(--raise)}
+.brief .h{display:flex;align-items:center;gap:8px;font:600 13px SF;color:var(--muted)}
+.brief p{font:400 15px/1.42 SF;color:#DCD7CE;margin-top:8px}
+.work{margin:12px 20px 0;padding:16px;border-radius:20px;background:var(--raise);display:flex;align-items:center;gap:14px}
+.work .i{flex:1}
+.work .a{font:600 16px SF}
+.work .b{font:400 13px SF;color:var(--muted);margin-top:3px}
+.rb{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--raise2);border:1px solid var(--line)}
+.rb.k{background:var(--ink)}
+.prog{height:3px;border-radius:2px;background:var(--line);margin-top:10px;overflow:hidden}
+.prog i{display:block;height:100%;width:40%;background:var(--ink)}
+.act{margin:18px 20px 0}
+.act .h{font:600 13px SF;color:var(--muted);margin-bottom:4px}
+.ev{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.ev .g{width:30px;height:30px;border-radius:9px;background:var(--raise2);display:grid;place-items:center}
+.ev .x{flex:1;font:500 15px SF}
+.ev .x small{display:block;font:400 13px SF;color:var(--muted);margin-top:1px}
+.ev .tm{font:500 12px SFM;color:var(--dim)}
+.talk{position:absolute;left:16px;right:16px;bottom:24px;height:56px;border-radius:28px;background:rgba(29,31,32,.92);border:1px solid var(--line);display:flex;align-items:center;padding:0 6px 0 20px;font:400 16px SF;color:var(--muted);backdrop-filter:blur(10px)}
+.talk .m{margin-left:auto;width:44px;height:44px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
+.ask{margin:6px 20px 0;padding:16px;border-radius:22px;background:var(--raise);border:1px solid #3a3326}
+.ask .top{display:flex;gap:14px;align-items:flex-start}
+.ask .pic{width:64px;height:64px;border-radius:14px;background:linear-gradient(160deg,#F7F1E4,#E2D7C2);display:grid;place-items:center;flex:none}
+.ask .q{font:600 17px/1.25 SF}
+.ask .f{font:400 13px SF;color:var(--muted);margin-top:4px}
+.ask .amt{font:700 28px SF;letter-spacing:-.6px;margin-top:14px}
+.ask .amt small{font:500 13px SF;color:var(--muted);letter-spacing:0;margin-left:6px}
+.ask .btn{margin-top:14px;height:50px;border-radius:25px;background:var(--ink);color:#0B0C0C;display:grid;place-items:center;font:600 16px SF}
+.ask .sec2{margin-top:8px;height:46px;border-radius:23px;border:1px solid var(--line);display:grid;place-items:center;font:600 15px SF;color:var(--ink)}
+.alarm{background:radial-gradient(120% 70% at 50% 25%,#C2341F 0%,#7A170C 60%,#3C0904 100%)}
+.alarm .big{padding:30px 24px 0;font:700 40px/1.04 SF;letter-spacing:-.8px}
+.alarm .sub{padding:12px 24px 0;font:500 17px/1.35 SF;color:rgba(255,236,228,.85)}
+.wave{margin:34px 24px 0;height:96px;display:flex;align-items:center;gap:3px}
+.wave i{flex:1;border-radius:2px;background:rgba(255,236,228,.75)}
+.alarm .when{padding:10px 24px 0;font:500 12px SFM;color:rgba(255,236,228,.65);letter-spacing:.04em}
+.alarm .btns{position:absolute;left:20px;right:20px;bottom:40px;display:flex;flex-direction:column;gap:10px}
+.alarm .b1{height:56px;border-radius:28px;background:#FFF3EE;color:#7A170C;display:grid;place-items:center;font:700 17px SF}
+.alarm .b2{height:52px;border-radius:26px;background:rgba(255,255,255,.14);display:grid;place-items:center;font:600 16px SF}
+.alarm .b3{height:44px;display:grid;place-items:center;font:600 15px SF;color:rgba(255,236,228,.8)}
+</style></head><body>
+
+<div class="col"><div class="phone" id="p1">
+  <div class="sb"><span>21:14</span><span>▪▪▪ ◔ ▮</span></div>
+  <div class="head"><div><div class="t">Home</div><div class="st"><span class="live"></span>Listening in the living room</div></div><div class="hub">A</div></div>
+  <div class="map" id="m1"></div>
+  <div class="brief"><div class="h">This evening</div><p>Quiet since you got in at 18:40. A parcel was left in the porch at 19:02. The kitchen display dropped off Wi-Fi at 20:55.</p></div>
+  <div class="work"><div class="i"><div class="a">Finding a plumber</div><div class="b">For the kitchen tap · 2 of 5 steps</div><div class="prog"><i></i></div></div>
+    <div class="rb"><svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" rx="2" fill="#F2EDE4"/></svg></div></div>
+  <div class="act"><div class="h">Earlier</div>
+    <div class="ev"><div class="g">📦</div><div class="x">Parcel left in the porch<small>Royal Mail</small></div><div class="tm">19:02</div></div>
+    <div class="ev"><div class="g"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#9A9590" stroke-width="1.6"><path d="M2 7.5l3 3 7-7"/></svg></div><div class="x">Boiler service booked<small>Thursday 09:00</small></div><div class="tm">17:30</div></div>
+  </div>
+  <div class="talk">Ask Adam<div class="m"><svg width="16" height="22" viewBox="0 0 16 22" fill="none" stroke="#0B0C0C" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10a6.5 6.5 0 0 0 13 0M8 16.5V21"/></svg></div></div>
+</div><div class="cap">1 · An ordinary evening<span>Your home drawn as a map with where Adam is. A short written summary of the evening. Work in progress with Stop. Ask Adam at the bottom.</span></div></div>
+
+<div class="col"><div class="phone" id="p2">
+  <div class="sb"><span>21:14</span><span>▪▪▪ ◔ ▮</span></div>
+  <div class="head"><div><div class="t">Home</div><div class="st"><span class="live" style="background:var(--amber);box-shadow:0 0 0 3px rgba(240,182,90,.18)"></span>One thing needs you</div></div><div class="hub">A</div></div>
+  <div class="map" id="m2" style="height:220px"></div>
+  <div class="ask">
+    <div class="top"><div class="pic"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#6b5a3a" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h14l-1.5 12h-11z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg></div>
+      <div><div class="q">You're low on washing-up liquid and bin bags. Order more?</div><div class="f">Ocado · arrives tomorrow · card 4242</div></div></div>
+    <div class="amt">£8.40<small>at most</small></div>
+    <div class="btn">Review and order</div>
+    <div class="sec2">Not now</div>
+  </div>
+  <div class="act"><div class="h">Earlier</div>
+    <div class="ev"><div class="g">📦</div><div class="x">Parcel left in the porch<small>Royal Mail</small></div><div class="tm">19:02</div></div>
+  </div>
+</div><div class="cap">2 · Something needs you<span>Shaped like Roomba's "time to replace the brush": what it is, why, the cost, one clear button and a way out.</span></div></div>
+
+<div class="col"><div class="phone alarm">
+  <div class="sb"><span>21:14</span><span>▪▪▪ ◔ ▮</span></div>
+  <div class="big">Smoke alarm<br>in the kitchen</div>
+  <div class="sub">Adam heard it on the kitchen display. It's still sounding.</div>
+  <div class="wave" id="w"></div>
+  <div class="when">HEARD 21:13 · 46 SECONDS AGO</div>
+  <div class="btns"><div class="b1">I'm dealing with it</div><div class="b2">Play what Adam heard</div><div class="b3">It's a false alarm</div></div>
+</div><div class="cap">3 · An alarm takes over<span>Like Owlet: the whole screen changes. What was heard, where, when, the sound itself, and what you can do.</span></div></div>
+
+<script>
+const S=22, c=Math.cos(Math.PI/6), s=Math.sin(Math.PI/6);
+function P(x,y,z,ox,oy){return [ox+(x-y)*c*S, oy+(x+y)*s*S - z*S]}
+function poly(pts){return pts.map(p=>p.join(',')).join(' ')}
+function room(svg,x,y,w,d,lit,ox,oy){
+  const f=[P(x,y,0,ox,oy),P(x+w,y,0,ox,oy),P(x+w,y+d,0,ox,oy),P(x,y+d,0,ox,oy)];
+  const h=0.55, wl=[P(x,y,0,ox,oy),P(x+w,y,0,ox,oy),P(x+w,y,h,ox,oy),P(x,y,h,ox,oy)], wr=[P(x,y,0,ox,oy),P(x,y+d,0,ox,oy),P(x,y+d,h,ox,oy),P(x,y,h,ox,oy)];
+  svg+=`<polygon points="${poly(f)}" fill="${lit?'#1B231E':'#151617'}" stroke="#34383a" stroke-width="1"/>`;
+  svg+=`<polygon points="${poly(wl)}" fill="${lit?'#222b25':'#1a1b1c'}" stroke="#34383a" stroke-width="1"/>`;
+  svg+=`<polygon points="${poly(wr)}" fill="${lit?'#1f2722':'#18191a'}" stroke="#34383a" stroke-width="1"/>`;
+  return svg;
+}
+function speaker(svg,x,y,ox,oy,on){
+  const b=P(x,y,0,ox,oy);
+  if(on) svg+=`<ellipse cx="${b[0]}" cy="${b[1]}" rx="46" ry="23" fill="url(#glow)"/>`;
+  svg+=`<rect x="${b[0]-11}" y="${b[1]-30}" width="22" height="30" rx="9" fill="#2b2d2f" stroke="#4a4d50"/>`;
+  svg+=`<ellipse cx="${b[0]}" cy="${b[1]-30}" rx="11" ry="4" fill="#3a3d40"/>`;
+  svg+=`<circle cx="${b[0]}" cy="${b[1]-30}" r="2.4" fill="${on?'#6FD39A':'#555'}"/>`;
+  return svg;
+}
+function display(svg,x,y,ox,oy,on){
+  const b=P(x,y,0,ox,oy);
+  svg+=`<rect x="${b[0]-13}" y="${b[1]-22}" width="26" height="19" rx="3" fill="${on?'#24302a':'#1c1d1e'}" stroke="#4a4d50"/>`;
+  svg+=`<circle cx="${b[0]}" cy="${b[1]-12.5}" r="2.2" fill="none" stroke="${on?'#6FD39A':'#777'}"/>`;
+  return svg;
+}
+function lead(svg,x1,y1,x2,y2){return svg+`<path d="M${x1} ${y1} L${x2} ${y2}" stroke="#6E6A66" stroke-width="1"/><circle cx="${x1}" cy="${y1}" r="2" fill="#9A9590"/>`}
+function draw(id,small){
+  const el=document.getElementById(id), W=390, H=el.offsetHeight, ox=small?150:156, oy=small?52:64;
+  let svg=`<svg width="${W}" height="${H}"><defs><radialGradient id="glow"><stop offset="0" stop-color="#6FD39A" stop-opacity=".35"/><stop offset="1" stop-color="#6FD39A" stop-opacity="0"/></radialGradient></defs>`;
+  svg=room(svg,0,0,5.2,4.4,true,ox,oy);    // living room
+  svg=room(svg,5.2,0,3.4,4.4,false,ox,oy); // kitchen
+  svg=room(svg,0,4.4,8.6,1.4,false,ox,oy); // hall
+  svg=speaker(svg,2.4,2.0,ox,oy,true);
+  svg=display(svg,7.0,1.8,ox,oy,false);
+  const sp=P(2.4,2.0,1.4,ox,oy), dp=P(7.0,1.8,1.0,ox,oy);
+  svg=lead(svg,sp[0],sp[1],60,sp[1]-26);
+  svg=lead(svg,dp[0],dp[1],W-34,dp[1]-34);
+  svg+='</svg>';
+  el.innerHTML=svg+
+   `<div class="tag" style="left:24px;top:${sp[1]-58}px">Living room<small>SPEAKER · ON</small></div>`+
+   `<div class="tag" style="right:24px;top:${dp[1]-68}px;text-align:right">Kitchen<small>DISPLAY · OFF 20:55</small></div>`+
+   `<div class="tag" style="left:${P(4.3,5.1,0,ox,oy)[0]-20}px;top:${P(4.3,5.1,0,ox,oy)[1]+8}px;color:#6E6A66">Hall<small>NOT COVERED</small></div>`;
+}
+draw('m1');draw('m2',true);
+const w=document.getElementById('w');let h='';for(let i=0;i<54;i++){const v=i%6<3?0.85:0.25;h+=`<i style="height:${Math.round((v*(0.7+0.3*Math.sin(i*1.7)))*90)+6}px"></i>`}w.innerHTML=h;
+</script>
+</body></html>
