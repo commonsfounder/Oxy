@@ -17,8 +17,10 @@ struct HomeNowView: View {
             if let home {
                 if devices.isEmpty {
                     HomeMapEmpty(onSetUp: onSetUp)
-                } else {
+                } else if devices.contains(where: \.online) {
                     HomeMap(rooms: HomeMap.rooms(from: home), compact: !model.needsYou.isEmpty)
+                } else {
+                    HomeOfflineDisplays(devices: devices, onFix: onSetUp)
                 }
             } else if model.refreshFailed {
                 Text("Couldn't reach Adam.").font(.role(.body)).foregroundStyle(Color.appMuted)
@@ -90,7 +92,8 @@ struct HomeNowView: View {
     /// Up to three of today's facts, newest first, as plain sentences. Nothing is inferred or invented.
     private var summary: String? {
         var facts: [(Date, String)] = []
-        for device in devices where !device.online {
+        // When every display is off, the card above already says so.
+        for device in devices where !device.online && devices.contains(where: \.online) {
             if let seen = device.lastSeenAt.flatMap(DisplayTimestampParser.date(from:)), Calendar.current.isDateInToday(seen) {
                 facts.append((seen, "The \(device.name.lowercasedFirst) went offline at \(Self.clock(seen))."))
             }
@@ -154,7 +157,7 @@ struct HomeMap: View {
     struct Room: Identifiable {
         let name: String
         let devices: [HomeModel.Device]
-        var id: String { name }
+        var id: String { "\(name)-\(devices.map(\.id).joined())" }
         var lit: Bool { devices.contains(where: \.online) }
     }
 
@@ -169,7 +172,8 @@ struct HomeMap: View {
             rooms = byRoom.keys.sorted().map { Room(name: $0, devices: byRoom[$0] ?? []) }
         }
         let loose = home.unassignedDevices.isEmpty ? home.devices.filter { $0.room == nil } : home.unassignedDevices
-        if !loose.isEmpty { rooms.append(Room(name: "No room", devices: loose)) }
+        // A display not placed in a room yet is labelled by its own name.
+        rooms += loose.map { Room(name: $0.name, devices: [$0]) }
         let ordered = rooms.sorted { a, b in
             a.lit != b.lit ? a.lit : a.devices.count > b.devices.count
         }
@@ -233,7 +237,7 @@ struct HomeMap: View {
                         var line = Path()
                         line.move(to: tag.anchor)
                         line.addLine(to: tag.end)
-                        context.stroke(line, with: .color(Color.appMuted.opacity(0.5)), lineWidth: 0.75)
+                        context.stroke(line, with: .color(Color.appMuted.opacity(0.7)), lineWidth: 1)
                         context.fill(Path(ellipseIn: CGRect(x: tag.anchor.x - 2, y: tag.anchor.y - 2, width: 4, height: 4)),
                                      with: .color(Color.appMuted))
                     }
@@ -241,7 +245,7 @@ struct HomeMap: View {
                 ForEach(tags) { tag in
                     VStack(alignment: tag.trailing ? .trailing : .leading, spacing: 1) {
                         Text(tag.title).font(.role(.footnote, weight: .medium)).foregroundStyle(Color.appInk)
-                        Text(tag.state).font(.reading(.caption, weight: .medium)).tracking(0.4)
+                        Text(tag.state).font(.role(.caption, weight: .medium))
                             .foregroundStyle(tag.online ? Color.appSuccess : Color.appMuted)
                     }
                     .fixedSize()
@@ -268,38 +272,31 @@ struct HomeMap: View {
         let floor = [g.point(r.minX, r.minY), g.point(r.maxX, r.minY), g.point(r.maxX, r.maxY), g.point(r.minX, r.maxY)]
         let back = [g.point(r.minX, r.minY), g.point(r.maxX, r.minY), g.point(r.maxX, r.minY, h), g.point(r.minX, r.minY, h)]
         let side = [g.point(r.minX, r.minY), g.point(r.minX, r.maxY), g.point(r.minX, r.maxY, h), g.point(r.minX, r.minY, h)]
-        let edge = Color.appInk.opacity(0.16)
+        let edge = Color.appInk.opacity(lit ? 0.42 : 0.3)
         let faces: [([CGPoint], Color)] = [
-            (floor, lit ? Color.appSuccess.opacity(0.07) : Color.appInk.opacity(0.025)),
-            (back, Color.appInk.opacity(lit ? 0.06 : 0.035)),
-            (side, Color.appInk.opacity(lit ? 0.05 : 0.03)),
+            (floor, lit ? Color.appSuccess.opacity(0.12) : Color.appInk.opacity(0.05)),
+            (back, Color.appInk.opacity(lit ? 0.1 : 0.07)),
+            (side, Color.appInk.opacity(lit ? 0.08 : 0.055)),
         ]
         for (points, fill) in faces {
             var path = Path()
             path.addLines(points)
             path.closeSubpath()
             context.fill(path, with: .color(fill))
-            context.stroke(path, with: .color(edge), lineWidth: 0.75)
+            context.stroke(path, with: .color(edge), lineWidth: 1)
         }
     }
 
     private func drawDevice(at base: CGPoint, online: Bool, g: Iso, context: inout GraphicsContext) {
-        let w = g.scale * 1.15, h = g.scale * 0.85
         if online {
             let glow = CGRect(x: base.x - g.scale * 2.2, y: base.y - g.scale * 1.1, width: g.scale * 4.4, height: g.scale * 2.2)
             context.fill(Path(ellipseIn: glow), with: .radialGradient(
                 Gradient(colors: [Color.appSuccess.opacity(0.32), Color.appSuccess.opacity(0)]),
                 center: base, startRadius: 0, endRadius: g.scale * 2.2))
         }
-        let body = CGRect(x: base.x - w / 2, y: base.y - h - g.scale * 0.35, width: w, height: h)
-        let stand = CGRect(x: base.x - w * 0.12, y: body.maxY, width: w * 0.24, height: g.scale * 0.35)
-        context.fill(Path(roundedRect: stand, cornerRadius: 1), with: .color(Color.appInk.opacity(0.25)))
-        context.fill(Path(roundedRect: body, cornerRadius: 3),
-                     with: .color(online ? Color.appSuccess.opacity(0.18) : Color.appSurface2))
-        context.stroke(Path(roundedRect: body, cornerRadius: 3), with: .color(Color.appInk.opacity(0.3)), lineWidth: 0.75)
-        let dot = CGRect(x: base.x - 2.5, y: body.midY - 2.5, width: 5, height: 5)
-        if online { context.fill(Path(ellipseIn: dot), with: .color(Color.appSuccess)) }
-        else { context.stroke(Path(ellipseIn: dot), with: .color(Color.appMuted), lineWidth: 1) }
+        let size = CGSize(width: g.scale * 1.5, height: g.scale * 1.15)
+        DisplayGlyph.draw(in: CGRect(x: base.x - size.width / 2, y: base.y - size.height, width: size.width, height: size.height),
+                          online: online, context: &context)
     }
 
     private struct Tag: Identifiable {
@@ -334,13 +331,103 @@ struct HomeMap: View {
     }
 
     private func state(for room: Room) -> String {
-        let noun = room.devices.count == 1 ? "DISPLAY" : "\(room.devices.count) DISPLAYS"
-        if room.devices.allSatisfy(\.online) { return "\(noun) · ON" }
-        let seen = room.devices.compactMap { $0.lastSeenAt.flatMap(DisplayTimestampParser.date(from:)) }.max()
-        guard let seen else { return "\(noun) · NOT CONNECTED" }
-        let when = Calendar.current.isDateInToday(seen)
-            ? HomeNowView.clock(seen) : seen.formatted(.dateTime.weekday(.abbreviated)).uppercased()
-        return "\(noun) · OFF \(when)"
+        let on = room.devices.filter(\.online).count
+        if on == room.devices.count { return on == 1 ? "On" : "\(on) displays on" }
+        if on > 0 { return "\(on) of \(room.devices.count) on" }
+        return DisplayGlyph.offline(room.devices)
+    }
+}
+
+/// A small screen on a speaker base, the shape of Adam's display. No lens, so it never reads as a camera.
+struct DisplayGlyph: View {
+    var online: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            Self.draw(in: CGRect(origin: .zero, size: size), online: online, context: &context)
+        }
+        .aspectRatio(1.3, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+
+    static func draw(in rect: CGRect, online: Bool, context: inout GraphicsContext) {
+        let screen = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * 0.74)
+        let corner = screen.height * 0.16
+        let edge = Color.appInk.opacity(online ? 0.75 : 0.5)
+        context.fill(Path(roundedRect: screen, cornerRadius: corner, style: .continuous),
+                     with: .color(online ? Color.appSuccess.opacity(0.22) : Color.appSurface2))
+        context.stroke(Path(roundedRect: screen.insetBy(dx: 0.5, dy: 0.5), cornerRadius: corner, style: .continuous),
+                       with: .color(edge), lineWidth: 1)
+        if online {
+            let inset = screen.width * 0.16
+            for (n, share) in [0.5, 0.32].enumerated() {
+                let bar = CGRect(x: screen.minX + inset, y: screen.minY + screen.height * (0.34 + CGFloat(n) * 0.2),
+                                 width: (screen.width - inset * 2) * share, height: max(1.5, screen.height * 0.08))
+                context.fill(Path(roundedRect: bar, cornerRadius: bar.height / 2), with: .color(Color.appInk.opacity(0.7)))
+            }
+        }
+        var base = Path()
+        base.move(to: CGPoint(x: rect.midX - rect.width * 0.22, y: screen.maxY))
+        base.addLine(to: CGPoint(x: rect.midX + rect.width * 0.22, y: screen.maxY))
+        base.addLine(to: CGPoint(x: rect.midX + rect.width * 0.3, y: rect.maxY))
+        base.addLine(to: CGPoint(x: rect.midX - rect.width * 0.3, y: rect.maxY))
+        base.closeSubpath()
+        context.fill(base, with: .color(Color.appInk.opacity(online ? 0.4 : 0.26)))
+    }
+
+    /// "Off since 20:55", "Off since Mon", or "Not set up yet" when it has never connected.
+    static func offline(_ devices: [HomeModel.Device]) -> String {
+        let seen = devices.compactMap { $0.lastSeenAt.flatMap(DisplayTimestampParser.date(from:)) }.max()
+        guard let seen else { return "Not set up yet" }
+        let when = Calendar.current.isDateInToday(seen) ? HomeNowView.clock(seen) : seen.formatted(.dateTime.weekday(.wide))
+        return "Off since \(when)"
+    }
+}
+
+/// Every display is off: say so plainly, say what to check, and give the one button that fixes it.
+private struct HomeOfflineDisplays: View {
+    let devices: [HomeModel.Device]
+    var onFix: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var neverConnected: Bool { devices.allSatisfy { $0.lastSeenAt == nil } }
+
+    private func title(_ device: HomeModel.Device) -> String {
+        guard let room = device.room, !device.name.localizedCaseInsensitiveContains(room) else { return device.name }
+        return "\(room) display"
+    }
+
+    var body: some View {
+        HomePanel {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                VStack(spacing: AppSpacing.md) {
+                    ForEach(devices.prefix(3)) { device in
+                        let row = typeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: AppSpacing.sm))
+                            : AnyLayout(HStackLayout(spacing: AppSpacing.md))
+                        row {
+                            DisplayGlyph(online: false).frame(width: 40)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(title(device)).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(DisplayGlyph.offline([device])).font(.role(.footnote)).foregroundStyle(Color.appMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                Text(neverConnected
+                     ? "Finish setting it up so Adam can hear and show things at home."
+                     : devices.count == 1
+                        ? "Adam can't hear or show anything until it's back. Check it's plugged in and on your Wi\u{2011}Fi."
+                        : "Adam can't hear or show anything until they're back. Check they're plugged in and on your Wi\u{2011}Fi.")
+                    .font(.role(.callout)).foregroundStyle(Color.appInk.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+                HomeButton(title: neverConnected ? "Finish setting up" : "Reconnect", primary: true, action: onFix)
+            }
+        }
     }
 }
 
@@ -540,66 +627,140 @@ private struct HomeSummary: View {
     }
 }
 
-/// Work running now: what, how far, and a round Stop.
+/// Work running now: that it is live, what it's doing this moment, how far along, and what you can do about it.
 struct HomeWorkCard: View {
     let item: BoardItem
     var model: ThreadBoardModel
     var open: (String) -> Void
 
-    private var detail: String {
-        var parts: [String] = []
-        if let d = item.detail, !d.isEmpty, d != item.title { parts.append(d) }
-        if let p = item.progress, p.total > 0 { parts.append("\(min(p.done, p.total)) of \(p.total) steps") }
-        else if item.waitingExternal == true { parts.append("Waiting for a reply") }
-        return parts.joined(separator: " · ")
+    private var waiting: Bool { item.waitingExternal == true }
+
+    /// The step happening now. A trailing ellipsis reads as cut-off text, and the live dot already says "ongoing".
+    private var step: String? {
+        guard let d = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty, d != item.title else { return nil }
+        var text = d
+        while text.hasSuffix("…") || text.hasSuffix(".") { text.removeLast() }
+        return text
+    }
+
+    private func liveLine(_ now: Date) -> String {
+        let lead = waiting ? "Waiting for a reply" : "Working"
+        guard let date = item.date else { return lead }
+        let minutes = Int(now.timeIntervalSince(date) / 60)
+        let when = minutes < 1 ? "just now" : minutes < 60 ? "\(minutes) min ago" : "at \(HomeNowView.clock(date))"
+        return "\(lead) · last step \(when)"
     }
 
     var body: some View {
         HomePanel {
-            HStack(alignment: .center, spacing: AppSpacing.md) {
-                Button {
-                    if let id = item.workflowId { open(id) }
-                } label: {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text(item.title).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if !detail.isEmpty {
-                            Text(detail).font(.role(.footnote)).foregroundStyle(Color.appMuted)
-                        }
-                        if let p = item.progress, p.total > 0 {
-                            Capsule().fill(Color.appInk.opacity(0.12)).frame(height: 3)
-                                .overlay(alignment: .leading) {
-                                    GeometryReader { geo in
-                                        Capsule().fill(Color.appInk).frame(width: geo.size.width * p.fraction)
-                                    }
-                                }
-                                .padding(.top, AppSpacing.xs)
-                                .accessibilityHidden(true)
-                        }
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    HStack(spacing: AppSpacing.sm) {
+                        LiveDot(active: !waiting)
+                        Text(liveLine(context.date)).font(.role(.footnote, weight: .medium))
+                            .foregroundStyle(waiting ? Color.appMuted : Color.appSuccess)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .disabled(item.workflowId == nil)
-                if item.taskId != nil {
-                    let stopping = model.stopping.contains(item.id)
-                    Button { Task { await model.stop(item) } } label: {
-                        Group {
-                            if stopping { ProgressView().tint(Color.appInk) }
-                            else { RoundedRectangle(cornerRadius: 2).fill(Color.appInk).frame(width: 12, height: 12) }
-                        }
-                        .frame(width: 48, height: 48)
-                        .background(Color.appSurface2, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.appCardOutline, lineWidth: 1))
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(item.title).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let step {
+                        Text(step).font(.role(.callout)).foregroundStyle(Color.appInk.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.appScale(0.94))
+                }
+                .accessibilityElement(children: .combine)
+                if let p = item.progress, p.total > 0 {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Capsule().fill(Color.appInk.opacity(0.14)).frame(height: 4)
+                            .overlay(alignment: .leading) {
+                                GeometryReader { geo in
+                                    Capsule().fill(Color.appInk).frame(width: max(4, geo.size.width * p.fraction))
+                                }
+                            }
+                        Text("Step \(min(p.done + 1, p.total)) of \(p.total)").font(.role(.footnote)).monospacedDigit()
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    .accessibilityElement(children: .combine)
+                } else if !waiting {
+                    WorkingBar()
+                }
+                actions
+            }
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        let stopping = model.stopping.contains(item.id)
+        if item.workflowId != nil || item.taskId != nil {
+            HStack(spacing: AppSpacing.sm) {
+                if let id = item.workflowId {
+                    HomeButton(title: "See progress", primary: false) { open(id) }
+                }
+                if item.taskId != nil {
+                    Button { Task { await model.stop(item) } } label: {
+                        HStack(spacing: AppSpacing.sm) {
+                            if stopping { ProgressView().tint(Color.appInk) }
+                            else { RoundedRectangle(cornerRadius: 2).fill(Color.appInk).frame(width: 10, height: 10) }
+                            Text(stopping ? "Stopping" : "Stop").font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                        }
+                        .padding(.horizontal, AppSpacing.lg)
+                        .frame(minWidth: 104, minHeight: 50)
+                        .background(Color.appSurface2, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1))
+                    }
+                    .buttonStyle(.appScale(0.97))
                     .disabled(stopping)
                     .accessibilityLabel("Stop \(item.title)")
                 }
             }
         }
+    }
+}
+
+/// A small green light that breathes while work is running. Holds still with Reduce Motion.
+private struct LiveDot: View {
+    var active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            if active && !reduceMotion {
+                Circle().fill(Color.appSuccess.opacity(0.35))
+                    .scaleEffect(pulse ? 2.2 : 1).opacity(pulse ? 0 : 1)
+            }
+            Circle().fill(active ? Color.appSuccess : Color.appMuted)
+        }
+        .frame(width: 7, height: 7)
+        .accessibilityHidden(true)
+        .onAppear {
+            guard active, !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
+        }
+    }
+}
+
+/// For work with no step count: a slow sweep that says "still going" without inventing a percentage.
+private struct WorkingBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
+
+    var body: some View {
+        Capsule().fill(Color.appInk.opacity(0.14)).frame(height: 4)
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    Capsule().fill(Color.appSuccess.opacity(0.85))
+                        .frame(width: geo.size.width * 0.28)
+                        .offset(x: reduceMotion ? 0 : (sweep ? geo.size.width * 0.72 : 0))
+                }
+            }
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { sweep = true }
+            }
     }
 }
 

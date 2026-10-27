@@ -14,6 +14,12 @@ test('activity titles keep the actual request subject but never become a transcr
   );
 });
 
+test('activity titles speak to the person, not about "the user"', () => {
+  assert.equal(activityTitle("Sign in to the user's Mercor account"), 'Sign in to your Mercor account');
+  assert.equal(activityTitle('The user is moving house; find a removals firm'), 'You are moving house; find a removals firm');
+  assert.equal(activityTitle('Remind the user about the boiler'), 'Remind you about the boiler');
+});
+
 test('channel-bound chat tasks stay in conversation history, not Home', () => {
   assert.equal(isConversationalTask({ metadata: { channel: 'telegram_bot' } }), true);
   assert.equal(isConversationalTask({ metadata: { channel: '  telegram_bot  ' } }), true);

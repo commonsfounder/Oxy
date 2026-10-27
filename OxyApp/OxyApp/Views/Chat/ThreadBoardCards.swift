@@ -34,7 +34,7 @@ final class ThreadBoardModel {
 
     private var isSample: Bool {
         #if DEBUG
-        PreviewData.isIsolated && ["1", "quiet"].contains(ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] ?? "")
+        PreviewData.isIsolated && ["1", "quiet", "working"].contains(ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] ?? "")
         #else
         false
         #endif
@@ -84,10 +84,12 @@ final class ThreadBoardModel {
             refreshFailed = false
             return
         }
-        if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "quiet" {
+        if PreviewData.isIsolated, let mode = ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"], ["quiet", "working"].contains(mode) {
             let sample = Self.sampleBoard
-            board = HomeBoard(generatedAt: nil, lastSeenAt: nil, needsYou: [], handling: sample.handling,
-                              changed: sample.changed, completed: sample.completed, counts: sample.counts)
+            let handling = mode == "working" ? Self.sampleLongTask : sample.handling
+            board = HomeBoard(generatedAt: nil, lastSeenAt: nil, needsYou: [], handling: handling,
+                              changed: mode == "working" ? [] : sample.changed,
+                              completed: mode == "working" ? [] : sample.completed, counts: sample.counts)
             home = Self.sampleHome
             hasLoaded = true
             refreshFailed = false
@@ -196,8 +198,21 @@ final class ThreadBoardModel {
         case "empty": return .empty
         case "offline": return YourHomeView.sampleOffline
         case "online": return YourHomeView.sampleOnline
+        case "unplaced":
+            let display = HomeModel.Device(id: "d-new", name: "Adam display", kind: "display", room: nil, online: false, lastSeenAt: nil)
+            return HomeModel(presence: .init(state: "unknown", homeConfigured: false), devices: [display], rooms: [],
+                             unassignedDevices: [display], watches: [], observations: [])
         default: return YourHomeView.sampleConnected
         }
+    }
+
+    /// A long-running task with no step count, as a real browser task looks.
+    static var sampleLongTask: [BoardItem] {
+        let at = ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-240))
+        let json = """
+        [{"id":"h9","kind":"task","title":"Sign in to your Mercor account and find the TaskRecorder download link","detail":"Finding the TaskRecorder link…","workflowId":"w9","taskId":"t9","at":"\(at)"}]
+        """
+        return (try? JSONDecoder().decode([BoardItem].self, from: Data(json.utf8))) ?? []
     }
 
     static let sampleBoard: HomeBoard = {

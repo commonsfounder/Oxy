@@ -99,7 +99,16 @@ function lastActivityOf(workflow) {
 // A workflow's one-line subtitle. The pending question wins when there is one, because
 // it is the only line that asks the user for anything.
 function detailFor(workflow, pendingPrompt) {
-  return pendingPrompt || workflow.next_action || workflow.current_step || '';
+  return addressUser(pendingPrompt || workflow.next_action || workflow.current_step || '');
+}
+
+// Goals and steps are often written by the model about "the user"; the person reading them is that user.
+function addressUser(text) {
+  const keepCase = (match, word) => (match[0] === 'T' ? word[0].toUpperCase() + word.slice(1) : word);
+  return String(text || '')
+    .replace(/\bthe user(?:'|’)s\b/gi, m => keepCase(m, 'your'))
+    .replace(/\bthe user (is|was|has)\b/gi, (m, verb) => keepCase(m, `you ${{ is: 'are', was: 'were', has: 'have' }[verb.toLowerCase()]}`))
+    .replace(/\bthe user\b/gi, m => keepCase(m, 'you'));
 }
 
 // Activity is a glanceable record, not a transcript title. The durable goal is
@@ -107,7 +116,7 @@ function detailFor(workflow, pendingPrompt) {
 // the request in one short line. This is deliberately deterministic: it never
 // invents a summary or changes the task the user asked Adam to perform.
 function activityTitle(goal, maxLength = 72) {
-  const firstThought = String(goal || '')
+  const firstThought = addressUser(goal)
     .replace(/\s+/g, ' ')
     .trim()
     .split(/(?<=[.!?])\s|\n/, 1)[0]
