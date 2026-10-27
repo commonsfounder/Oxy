@@ -69,9 +69,12 @@ struct HomeNowView: View {
         let needs = model.needsYou.count
         if needs == 1 { return ("One thing needs you", .appNeedsYou) }
         if needs > 1 { return ("\(needs) things need you", .appNeedsYou) }
-        if home.devices.isEmpty { return ("No display paired", .appMuted) }
-        if model.working.count == 1 { return ("Working on one thing", .appSuccess) }
-        if model.working.count > 1 { return ("Working on \(model.working.count) things", .appSuccess) }
+        if home.devices.isEmpty { return ("No display yet", .appMuted) }
+        let stuck = model.working.filter { $0.stalled == true }.count
+        let running = model.working.count - stuck
+        if running == 1 { return ("Working on one thing", .appSuccess) }
+        if running > 1 { return ("Working on \(running) things", .appSuccess) }
+        if stuck > 0 { return (stuck == 1 ? "One thing is stuck" : "\(stuck) things are stuck", .appNeedsYou) }
         let on = home.devices.filter(\.online)
         if on.isEmpty { return (home.devices.count == 1 ? "Display offline" : "Displays offline", .appMuted) }
         let rooms = Set(on.compactMap(\.room))
@@ -375,10 +378,10 @@ struct DisplayGlyph: View {
         context.fill(base, with: .color(Color.appInk.opacity(online ? 0.4 : 0.26)))
     }
 
-    /// "Off since 20:55", "Off since Mon", or "Not set up yet" when it has never connected.
+    /// "Off since 20:55", "Off since Mon", or "Never connected" when it has never connected.
     static func offline(_ devices: [HomeModel.Device]) -> String {
         let seen = devices.compactMap { $0.lastSeenAt.flatMap(DisplayTimestampParser.date(from:)) }.max()
-        guard let seen else { return "Not set up yet" }
+        guard let seen else { return "Never connected" }
         let when = Calendar.current.isDateInToday(seen) ? HomeNowView.clock(seen) : seen.formatted(.dateTime.weekday(.wide))
         return "Off since \(when)"
     }
@@ -408,7 +411,7 @@ private struct HomeOfflineDisplays: View {
                         row {
                             DisplayGlyph(online: false).frame(width: 40)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(title(device)).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                                Text(title(device)).font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appInk)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Text(DisplayGlyph.offline([device])).font(.role(.footnote)).foregroundStyle(Color.appMuted)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -419,13 +422,13 @@ private struct HomeOfflineDisplays: View {
                     }
                 }
                 Text(neverConnected
-                     ? "Finish setting it up so Adam can hear and show things at home."
+                     ? "It hasn't come online yet. Plug it in and connect it to your Wi\u{2011}Fi."
                      : devices.count == 1
                         ? "Adam can't hear or show anything until it's back. Check it's plugged in and on your Wi\u{2011}Fi."
                         : "Adam can't hear or show anything until they're back. Check they're plugged in and on your Wi\u{2011}Fi.")
-                    .font(.role(.callout)).foregroundStyle(Color.appInk.opacity(0.85))
+                    .font(.role(.footnote)).foregroundStyle(Color.appMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                HomeButton(title: neverConnected ? "Finish setting up" : "Reconnect", primary: true, action: onFix)
+                HomeButton(title: neverConnected ? "Connect it" : "Reconnect", primary: true, action: onFix)
             }
         }
     }
@@ -448,8 +451,8 @@ private struct HomeMapEmpty: View {
             }
             .frame(maxWidth: .infinity, minHeight: 210)
             .accessibilityElement(children: .combine)
-            Text("Pair a display and Adam shows each room and what it hears there.")
-                .font(.role(.body)).foregroundStyle(Color.appMuted)
+            Text("Add a display and Home shows each room, and whether Adam can hear it.")
+                .font(.role(.footnote)).foregroundStyle(Color.appMuted)
                 .fixedSize(horizontal: false, vertical: true)
             HomeButton(title: "Add a display", primary: true, action: onSetUp)
         }
@@ -517,13 +520,13 @@ struct HomeAskCard: View {
         return HomePanel(outline: Color.appNeedsYou.opacity(0.3)) {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 lead {
-                    AppIcon(facts.amount != nil ? "card" : "person-check", size: 22)
+                    AppIcon(facts.amount != nil ? "card" : "person-check", size: 18)
                         .foregroundStyle(Color.appNeedsYou)
-                        .frame(width: 52, height: 52)
+                        .frame(width: 40, height: 40)
                         .background(Color.appNeedsYou.opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text(question).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                        Text(question).font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appInk)
                             .fixedSize(horizontal: false, vertical: true)
                         if !factLine.isEmpty {
                             Text(factLine).font(.role(.footnote)).foregroundStyle(Color.appMuted)
@@ -533,7 +536,7 @@ struct HomeAskCard: View {
                 }
                 if let amount = facts.amount {
                     HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                        Text(amount).font(.system(.largeTitle).weight(.bold)).monospacedDigit()
+                        Text(amount).font(.system(.title).weight(.bold)).monospacedDigit()
                             .tracking(-0.6).foregroundStyle(Color.appInk)
                         if let qualifier = facts.qualifier {
                             Text(qualifier.lowercased() == "up to" ? "at most" : qualifier.lowercased())
@@ -546,7 +549,7 @@ struct HomeAskCard: View {
                     HStack(spacing: AppSpacing.sm) {
                         ProgressView().tint(Color.appMuted)
                         Text(model.submittingDecisions.contains(item.id) ? "Sending your answer" : "Waiting for confirmation")
-                            .font(.role(.callout)).foregroundStyle(Color.appMuted)
+                            .font(.role(.footnote)).foregroundStyle(Color.appMuted)
                     }
                     .frame(minHeight: 44)
                 } else {
@@ -594,11 +597,11 @@ struct HomeButton: View {
             action()
         } label: {
             Text(title)
-                .font(.role(.body, weight: .semibold))
+                .font(.role(.callout, weight: .semibold))
                 .foregroundStyle(primary ? (ink ?? Color.appOnAction) : Color.appInk)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, AppSpacing.lg)
-                .frame(maxWidth: .infinity, minHeight: 50)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background {
                     if primary { Capsule().fill(Color.appAction) }
                     else { Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1) }
@@ -617,9 +620,9 @@ private struct HomeSummary: View {
     var body: some View {
         HomePanel {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                Text(title).font(.role(.footnote, weight: .semibold)).foregroundStyle(Color.appMuted)
+                Text(title).font(.role(.caption, weight: .semibold)).foregroundStyle(Color.appMuted)
                     .accessibilityAddTraits(.isHeader)
-                Text(text).font(.role(.body)).foregroundStyle(Color.appInk.opacity(0.9))
+                Text(text).font(.role(.callout)).foregroundStyle(Color.appInk.opacity(0.9))
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -634,6 +637,8 @@ struct HomeWorkCard: View {
     var open: (String) -> Void
 
     private var waiting: Bool { item.waitingExternal == true }
+    private var stalled: Bool { item.stalled == true }
+    private var canStop: Bool { item.taskId != nil || item.canStop == true }
 
     /// The step happening now. A trailing ellipsis reads as cut-off text, and the live dot already says "ongoing".
     private var step: String? {
@@ -643,34 +648,52 @@ struct HomeWorkCard: View {
         return text
     }
 
-    private func liveLine(_ now: Date) -> String {
-        let lead = waiting ? "Waiting for a reply" : "Working"
-        guard let date = item.date else { return lead }
+    private func when(_ date: Date, now: Date) -> String {
         let minutes = Int(now.timeIntervalSince(date) / 60)
-        let when = minutes < 1 ? "just now" : minutes < 60 ? "\(minutes) min ago" : "at \(HomeNowView.clock(date))"
-        return "\(lead) · last step \(when)"
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes) min ago" }
+        if Calendar.current.isDate(date, inSameDayAs: now) { return "at \(HomeNowView.clock(date))" }
+        return date.formatted(.dateTime.weekday(.wide))
     }
+
+    private func liveLine(_ now: Date) -> String {
+        if stalled {
+            guard let date = item.date else { return "Stuck" }
+            return "Stuck · nothing new since \(when(date, now: now).replacingOccurrences(of: "at ", with: ""))"
+        }
+        let lead = waiting ? "Waiting for a reply" : "Working on it"
+        guard let date = item.date else { return lead }
+        return "\(lead) · updated \(when(date, now: now))"
+    }
+
+    private var lineColor: Color { stalled ? Color.appNeedsYou : (waiting ? Color.appMuted : Color.appSuccess) }
 
     var body: some View {
         HomePanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     HStack(spacing: AppSpacing.sm) {
-                        LiveDot(active: !waiting)
-                        Text(liveLine(context.date)).font(.role(.footnote, weight: .medium))
-                            .foregroundStyle(waiting ? Color.appMuted : Color.appSuccess)
+                        LiveDot(active: !waiting && !stalled, color: lineColor)
+                        Text(liveLine(context.date)).font(.role(.caption, weight: .medium))
+                            .foregroundStyle(lineColor)
                     }
                 }
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text(item.title).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title).font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let step {
-                        Text(step).font(.role(.callout)).foregroundStyle(Color.appInk.opacity(0.8))
+                    if stalled {
+                        Text("It stopped partway and isn't doing anything now. Stop it, or ask Adam to try again.")
+                            .font(.role(.footnote)).foregroundStyle(Color.appMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let step {
+                        Text(step).font(.role(.footnote)).foregroundStyle(Color.appMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .accessibilityElement(children: .combine)
-                if let p = item.progress, p.total > 0 {
+                if stalled {
+                    EmptyView()
+                } else if let p = item.progress, p.total > 0 {
                     VStack(alignment: .leading, spacing: AppSpacing.xs) {
                         Capsule().fill(Color.appInk.opacity(0.14)).frame(height: 4)
                             .overlay(alignment: .leading) {
@@ -692,20 +715,20 @@ struct HomeWorkCard: View {
 
     @ViewBuilder private var actions: some View {
         let stopping = model.stopping.contains(item.id)
-        if item.workflowId != nil || item.taskId != nil {
+        if item.workflowId != nil || canStop {
             HStack(spacing: AppSpacing.sm) {
                 if let id = item.workflowId {
-                    HomeButton(title: "See progress", primary: false) { open(id) }
+                    HomeButton(title: "What it's done", primary: false) { open(id) }
                 }
-                if item.taskId != nil {
+                if canStop {
                     Button { Task { await model.stop(item) } } label: {
                         HStack(spacing: AppSpacing.sm) {
                             if stopping { ProgressView().tint(Color.appInk) }
-                            else { RoundedRectangle(cornerRadius: 2).fill(Color.appInk).frame(width: 10, height: 10) }
-                            Text(stopping ? "Stopping" : "Stop").font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                            else { RoundedRectangle(cornerRadius: 2).fill(Color.appInk).frame(width: 9, height: 9) }
+                            Text(stopping ? "Stopping" : "Stop").font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appInk)
                         }
                         .padding(.horizontal, AppSpacing.lg)
-                        .frame(minWidth: 104, minHeight: 50)
+                        .frame(minWidth: 96, minHeight: 44)
                         .background(Color.appSurface2, in: Capsule())
                         .overlay(Capsule().strokeBorder(Color.appCardOutline, lineWidth: 1))
                     }
@@ -721,16 +744,17 @@ struct HomeWorkCard: View {
 /// A small green light that breathes while work is running. Holds still with Reduce Motion.
 private struct LiveDot: View {
     var active: Bool
+    var color: Color = .appSuccess
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
     var body: some View {
         ZStack {
             if active && !reduceMotion {
-                Circle().fill(Color.appSuccess.opacity(0.35))
+                Circle().fill(color.opacity(0.35))
                     .scaleEffect(pulse ? 2.2 : 1).opacity(pulse ? 0 : 1)
             }
-            Circle().fill(active ? Color.appSuccess : Color.appMuted)
+            Circle().fill(color)
         }
         .frame(width: 7, height: 7)
         .accessibilityHidden(true)
@@ -792,11 +816,11 @@ private struct HomeEarlier: View {
                 .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text(line.title).font(.role(.callout, weight: .medium)).foregroundStyle(Color.appInk)
+                Text(line.title).font(.role(.footnote, weight: .medium)).foregroundStyle(Color.appInk)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = line.detail, !detail.isEmpty {
-                    Text(detail).font(.role(.footnote)).foregroundStyle(Color.appMuted)
+                    Text(detail).font(.role(.caption)).foregroundStyle(Color.appMuted)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -827,9 +851,9 @@ private struct HomeWatching: View {
                         .background(Color.appSuccess.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(watch.title).font(.role(.callout, weight: .medium)).foregroundStyle(Color.appInk)
+                        Text(watch.title).font(.role(.footnote, weight: .medium)).foregroundStyle(Color.appInk)
                         if let detail = watch.detail, !detail.isEmpty {
-                            Text(detail).font(.role(.footnote)).foregroundStyle(Color.appMuted)
+                            Text(detail).font(.role(.caption)).foregroundStyle(Color.appMuted)
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)

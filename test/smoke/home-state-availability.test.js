@@ -46,3 +46,24 @@ test('a failed task read does not become a successful empty task list', async ()
   const board = await getHomeState(database({ failedTable: 'agent_tasks' }), 'test-user');
   assert.deepEqual(board.unavailableSources, ['tasks']);
 });
+
+test('work left at "working" with no live run shows as stalled, and can always be stopped', async () => {
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const fresh = new Date().toISOString();
+  const board = await getHomeState(database({
+    rows: {
+      workflows: [
+        { id: 'w-dead', status: 'working', goal: "Sign in to the user's Mercor account", updated_at: old },
+        { id: 'w-live', status: 'working', goal: 'Find a plumber', updated_at: old },
+        { id: 'w-new', status: 'working', goal: 'Order bin bags', updated_at: fresh }
+      ],
+      agent_tasks: [{ id: 't-live', workflow_id: 'w-live', status: 'running', heartbeat_at: fresh }]
+    }
+  }), 'test-user');
+  const byId = Object.fromEntries(board.handling.map(item => [item.workflowId, item]));
+  assert.equal(byId['w-dead'].stalled, true);
+  assert.equal(byId['w-dead'].title, 'Sign in to your Mercor account');
+  assert.equal(byId['w-live'].stalled, false);
+  assert.equal(byId['w-new'].stalled, false);
+  assert.ok(board.handling.filter(item => item.workflowId).every(item => item.canStop));
+});

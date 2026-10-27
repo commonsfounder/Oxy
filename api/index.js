@@ -10064,6 +10064,22 @@ app.get('/workflows', requireSessionAuth, async (req, res) => {
   }
 });
 
+app.post('/workflows/:id/stop', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const wf = require('./services/workflows');
+    const workflow = await wf.stopWorkflow(supabase, userId, req.params.id, {
+      cancelTask: taskId => delegatedRunRouteHandlers.cancel({ userId, taskId })
+    });
+    res.json({ workflow });
+  } catch (e) {
+    const missing = /not found/i.test(e.message);
+    if (!missing) log('warn', 'workflow.stop.failed', { userId, workflowId: req.params.id, error: e.message });
+    res.status(missing ? 404 : 503).json({ error: missing ? e.message : 'Could not stop that right now.' });
+  }
+});
+
 // Answering the question that stopped the work, from the phone, without opening chat.
 app.post('/workflows/:id/checkpoints/:checkpointId/resolve', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);

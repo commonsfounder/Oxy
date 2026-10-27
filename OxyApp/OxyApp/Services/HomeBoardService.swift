@@ -24,6 +24,10 @@ enum HomeBoardService {
         return try JSONDecoder().decode(WorkflowDetail.self, from: data)
     }
 
+    static func stopWorkflow(id: String) async throws {
+        _ = try await APIClient.shared.request(path: "/workflows/\(id)/stop", method: "POST", body: [String: Any]())
+    }
+
     /// Answers the question that stopped the work, without leaving the screen.
     static func resolveCheckpoint(
         workflowId: String,

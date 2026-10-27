@@ -209,8 +209,10 @@ final class ThreadBoardModel {
     /// A long-running task with no step count, as a real browser task looks.
     static var sampleLongTask: [BoardItem] {
         let at = ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-240))
+        let old = ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-3 * 3600))
         let json = """
-        [{"id":"h9","kind":"task","title":"Sign in to your Mercor account and find the TaskRecorder download link","detail":"Finding the TaskRecorder link…","workflowId":"w9","taskId":"t9","at":"\(at)"}]
+        [{"id":"h9","kind":"general","title":"Sign in to your Mercor account and find the TaskRecorder download link","detail":"Finding the TaskRecorder link…","workflowId":"w9","canStop":true,"stalled":true,"at":"\(old)"},
+         {"id":"h8","kind":"task","title":"Compare boiler service quotes","detail":"Reading the British Gas page…","workflowId":"w8","taskId":"t8","at":"\(at)"}]
         """
         return (try? JSONDecoder().decode([BoardItem].self, from: Data(json.utf8))) ?? []
     }
@@ -230,11 +232,17 @@ final class ThreadBoardModel {
     #endif
 
     func stop(_ item: BoardItem) async {
-        guard let taskId = item.taskId, !stopping.contains(item.id) else { return }
+        guard item.taskId != nil || item.canStop == true, !stopping.contains(item.id) else { return }
         stopping.insert(item.id)
         HapticManager.shared.impact(.medium)
         do {
-            if !isSample { try await AgentTasksService.stopTask(id: taskId) }
+            if !isSample {
+                if let workflowId = item.workflowId, item.canStop == true {
+                    try await HomeBoardService.stopWorkflow(id: workflowId)
+                } else if let taskId = item.taskId {
+                    try await AgentTasksService.stopTask(id: taskId)
+                }
+            }
             stopping.remove(item.id)
             stopped.insert(item.id)
             await refresh()

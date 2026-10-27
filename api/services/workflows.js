@@ -240,6 +240,18 @@ async function getWorkflowContext(supabase, userId, workflowId) {
   };
 }
 
+// The person said stop: cancel any run still attached, then close the work as cancelled.
+async function stopWorkflow(supabase, userId, workflowId, { cancelTask } = {}) {
+  const workflow = await getWorkflow(supabase, userId, workflowId);
+  if (TERMINAL_STATUSES.includes(workflow.status)) return workflow;
+  const { data: runs } = await supabase.from('agent_tasks').select('id, status')
+    .eq('user_id', userId).eq('workflow_id', workflowId).in('status', ['running', 'paused', 'queued', 'pending']);
+  for (const run of runs || []) {
+    if (cancelTask) await cancelTask(run.id);
+  }
+  return updateWorkflow(supabase, userId, workflowId, { status: 'cancelled' }, { summary: 'You stopped this', actor: 'user' });
+}
+
 async function listActiveWorkflows(supabase, userId) {
   const { data } = await supabase.from('workflows').select('*')
     .eq('user_id', userId).order('updated_at', { ascending: false });
@@ -284,6 +296,7 @@ module.exports = {
   saveBrowserState,
   resumeBrowserState,
   getWorkflowContext,
+  stopWorkflow,
   listActiveWorkflows,
   summarizeForUser
 };

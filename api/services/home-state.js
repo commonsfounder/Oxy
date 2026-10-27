@@ -25,6 +25,8 @@ const COMPLETED_WINDOW_MS = 72 * 60 * 60 * 1000;
 const DEFAULT_CHANGED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const MAX_PER_LANE = 12;
+// Same window task-manager uses to call a run dead.
+const STALLED_AFTER_MS = 15 * 60 * 1000;
 
 // A channel-bound chat turn has a durable transcript in Conversations. It is not a piece
 // of household work and must not be promoted into Home's changed/completed lanes. The
@@ -158,6 +160,17 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
     }
   }
 
+  // A workflow left at 'working' after its run died must not read as running forever.
+  const liveRunFor = new Map();
+  if (activeIds.length) {
+    const { data: runs } = await supabase.from('agent_tasks').select('id, workflow_id, status, heartbeat_at')
+      .in('workflow_id', activeIds).eq('status', 'running');
+    for (const run of runs || []) {
+      const beat = run.heartbeat_at ? new Date(run.heartbeat_at).getTime() : 0;
+      if (run.workflow_id && run.status === 'running' && now.getTime() - beat < STALLED_AFTER_MS) liveRunFor.set(run.workflow_id, run.id);
+    }
+  }
+
   for (const workflow of active) {
     const checkpoint = pendingByWorkflow.get(workflow.id) || null;
     const blocked = !!checkpoint || workflow.status === 'waiting_for_user';
@@ -182,7 +195,10 @@ async function buildFromWorkflows(supabase, userId, { since, now }) {
         ...item,
         // "Waiting on someone else" is not the same as "running", and a person reads the
         // difference immediately. Nothing is required of them either way.
-        waitingExternal: workflow.status === 'waiting_external'
+        waitingExternal: workflow.status === 'waiting_external',
+        canStop: true,
+        stalled: workflow.status !== 'waiting_external' && !liveRunFor.has(workflow.id)
+          && now.getTime() - new Date(lastActivityOf(workflow) || 0).getTime() > STALLED_AFTER_MS
       });
     }
   }

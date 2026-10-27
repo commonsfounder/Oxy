@@ -40,6 +40,9 @@ struct BoardItem: Codable, Identifiable, Equatable, Hashable {
     var failed: Bool?
     /// Work is waiting on someone else.
     var waitingExternal: Bool?
+    /// Marked running, but nothing has happened for a while and no run is attached.
+    var stalled: Bool?
+    var canStop: Bool?
     var progress: BoardProgress?
 
     var date: Date? { at.flatMap(Date.oxyParse) }
