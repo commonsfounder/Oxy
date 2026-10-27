@@ -109,11 +109,45 @@ final class EnvironmentMonitor {
 struct LiveWorkPreview: View {
     let taskID: String
     var compact = false
+    /// In the thread, show the screen only when there is one to look at.
+    var hidesWhenEmpty = false
     @State private var monitor = EnvironmentMonitor()
     @State private var open = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        Group {
+            if hidesWhenEmpty && monitor.image == nil { Color.clear.frame(height: 0) }
+            else { previewButton }
+        }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { date in
+            if scenePhase != .background { monitor.clock = date }
+        }
+        .fullScreenCover(isPresented: $open) { AgentEnvironmentView(taskID: taskID, monitor: monitor) }
+        #if DEBUG
+        .task {
+            if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_WORKSPACE"] != nil {
+                open = true
+            }
+        }
+        #endif
+        .task {
+            await monitor.refreshFrame(taskID: taskID)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                if scenePhase != .background { await monitor.refreshFrame(taskID: taskID) }
+            }
+        }
+        .task {
+            await monitor.refreshActivity(taskID: taskID)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                if scenePhase != .background { await monitor.refreshActivity(taskID: taskID) }
+            }
+        }
+    }
+
+    private var previewButton: some View {
         Button { open = true } label: {
             VStack(alignment: .leading, spacing: 0) {
                 if !compact, let image = monitor.image {
@@ -140,31 +174,6 @@ struct LiveWorkPreview: View {
         }
         .buttonStyle(.appScale(0.98))
         .accessibilityLabel("Open workspace for \(monitor.task(taskID)?.displayGoal ?? "this task")")
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { date in
-            if scenePhase != .background { monitor.clock = date }
-        }
-        .fullScreenCover(isPresented: $open) { AgentEnvironmentView(taskID: taskID, monitor: monitor) }
-        #if DEBUG
-        .task {
-            if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_WORKSPACE"] != nil {
-                open = true
-            }
-        }
-        #endif
-        .task {
-            await monitor.refreshFrame(taskID: taskID)
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                if scenePhase != .background { await monitor.refreshFrame(taskID: taskID) }
-            }
-        }
-        .task {
-            await monitor.refreshActivity(taskID: taskID)
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(6)) } catch { return }
-                if scenePhase != .background { await monitor.refreshActivity(taskID: taskID) }
-            }
-        }
     }
 }
 

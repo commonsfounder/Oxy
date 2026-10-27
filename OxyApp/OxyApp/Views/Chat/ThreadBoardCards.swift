@@ -26,6 +26,9 @@ final class ThreadBoardModel {
     private var refreshing = false
     /// True when a paired Adam device has checked in within the last few minutes.
     private(set) var deviceOnline = false
+    /// What Adam knows about the home (devices, watches, things noticed). Nil until the first read.
+    private(set) var home: HomeModel?
+    var offlineDevices: [HomeModel.Device] { home?.devices.filter { !$0.online } ?? [] }
 
     private static let seenKey = "adam_thread_seen_finished"
 
@@ -74,9 +77,17 @@ final class ThreadBoardModel {
             refreshFailed = false
             return
         }
+        if PreviewData.isIsolated, ProcessInfo.processInfo.environment["OXY_DEBUG_HOME"] != nil, !isSample {
+            board = .empty
+            home = Self.sampleHome
+            hasLoaded = true
+            refreshFailed = false
+            return
+        }
         if isSample || (PreviewData.isIsolated && ProcessInfo.processInfo.environment["OXY_DEBUG_BOARD"] == "decision-failure") {
             board = Self.sampleBoard
             deviceOnline = true
+            home = Self.sampleHome
             hasLoaded = true
             refreshFailed = false
             absorbFinished()
@@ -98,6 +109,7 @@ final class ThreadBoardModel {
                 return Date().timeIntervalSince(seen) < 180
             }
         } else { deviceOnline = false }
+        if let fetched = try? await HomeService.fetch() { home = fetched }
     }
 
     private func verifyDecisionReplies() async {
@@ -169,14 +181,24 @@ final class ThreadBoardModel {
     }
 
     #if DEBUG
+    static var sampleHome: HomeModel {
+        switch ProcessInfo.processInfo.environment["OXY_DEBUG_HOME"] {
+        case "empty": return .empty
+        case "offline": return YourHomeView.sampleOffline
+        case "online": return YourHomeView.sampleOnline
+        default: return YourHomeView.sampleConnected
+        }
+    }
+
     static let sampleBoard: HomeBoard = {
         let failedOutcome = ProcessInfo.processInfo.environment["OXY_DEBUG_OUTCOME_FAILURE"] == "1"
-        let outcomeTitle = failedOutcome ? "Compare headphone prices" : "Compared headphone prices"
-        let outcomeDetail = failedOutcome ? "The source was unavailable" : "Lowest price £54.20"
+        let outcomeTitle = failedOutcome ? "Book the boiler service" : "Booked the boiler service"
+        let outcomeDetail = failedOutcome ? "British Gas had no slots this week" : "Thursday 09:00"
+        let stamp = { (seconds: Double) in ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-seconds)) }
         let json = """
-        {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Place the order?","detail":"Up to £60 · Card ending 4242 · Arrives Thursday","workflowId":"w1","checkpointId":"c1"}],
-         "handling":[{"id":"h1","kind":"watch","title":"Message Arina at 16:04","workflowId":"w2"},{"id":"h2","kind":"task","title":"Booking a haircut","workflowId":"w3","taskId":"t3","progress":{"done":2,"total":3}}],
-         "changed":[{"id":"u1","kind":"notice","title":"A parcel is out for delivery","detail":"Due this afternoon","at":"\(ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-600)))"}],"completed":[{"id":"workflow-x","workflowId":"w9","kind":"purchase","title":"\(outcomeTitle)","detail":"\(outcomeDetail)","failed":\(failedOutcome),"at":"\(ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-1800)))"}],"counts":{"needsYou":1,"handling":2,"changed":1,"completed":1}}
+        {"needsYou":[{"id":"n1","kind":"checkpoint","title":"Order washing-up liquid and bin bags?","detail":"Up to £8.40 · Card ending 4242 · Arrives tomorrow","workflowId":"w1","checkpointId":"c1"}],
+         "handling":[{"id":"h2","kind":"task","title":"Finding a plumber for the kitchen tap","workflowId":"w3","taskId":"t3","progress":{"done":2,"total":5}}],
+         "changed":[{"id":"u1","kind":"notice","title":"Parcel left in the porch","detail":"Royal Mail","at":"\(stamp(600))"}],"completed":[{"id":"workflow-x","workflowId":"w9","kind":"booking","title":"\(outcomeTitle)","detail":"\(outcomeDetail)","failed":\(failedOutcome),"at":"\(stamp(5400))"}],"counts":{"needsYou":1,"handling":1,"changed":1,"completed":1}}
         """
         return (try? JSONDecoder().decode(HomeBoard.self, from: Data(json.utf8))) ?? .empty
     }()
@@ -287,105 +309,51 @@ struct ApprovalFacts: Equatable {
     }
 }
 
-/// Approval and progress cards that sit at the end of the thread.
+/// The parts of what Adam knows that a surface can show.
+enum BoardSection: CaseIterable {
+    case devices, decisions, work, noticed, watching
+}
+
+/// What Adam knows right now. Each kind of information has its own form: a device is a sentence,
+/// an approval is a receipt, work in progress is a ladder of steps, a happening is a timed line.
 struct ThreadBoardCards: View {
     var model: ThreadBoardModel
     var askedInThread: [String] = []
-    var isOverview = false
+    var sections: Set<BoardSection> = Set(BoardSection.allCases)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var openWorkflow: OpenWorkflow?
-    @Namespace private var handoff
 
-    /// The same piece of work keeps one identity while it is being done and while it waits for a yes.
-    private func handoffID(_ item: BoardItem) -> String { item.workflowId ?? item.id }
+    private var large: Bool { typeSize.isAccessibilitySize }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if isOverview && model.refreshFailed {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(model.hasLoaded ? "Couldn't refresh work" : "Couldn't load work")
-                        .font(.appBody(17, weight: .semibold)).foregroundStyle(Color.appInk)
-                    if model.hasLoaded && !model.isEmpty {
-                        Text("Showing saved work").font(.appBody(14)).foregroundStyle(Color.appMuted)
-                    }
-                    Button("Try again") { Task { await model.refresh() } }
-                        .font(.appBody(15, weight: .semibold)).foregroundStyle(Color.appAccent)
-                        .frame(minHeight: 44)
-                }
-            } else if isOverview && !model.hasLoaded {
-                ProgressView("Loading work").font(.appBody(15)).foregroundStyle(Color.appMuted)
-            }
-            if isOverview && model.hasUnavailableSources {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Some work is unavailable").font(.appBody(17, weight: .semibold)).foregroundStyle(Color.appInk)
-                    Button("Try again") { Task { await model.refresh() } }
-                        .font(.appBody(15, weight: .semibold)).foregroundStyle(Color.appAccent).frame(minHeight: 44)
+        VStack(alignment: .leading, spacing: AppSpacing.xxl) {
+            if sections.contains(.devices), !model.offlineDevices.isEmpty {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    ForEach(model.offlineDevices) { device in deviceSentence(device) }
                 }
             }
-            if !model.needsYou.isEmpty {
+            if sections.contains(.decisions) {
                 ForEach(model.needsYou.prefix(3)) { item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        needsYouCard(item)
-                            .id("board-decision-\(item.id)")
-                            .matchedGeometryEffect(id: handoffID(item), in: handoff)
-                        if let taskID = item.taskId { LiveWorkPreview(taskID: taskID) }
-                    }.transition(.opacity)
-                }
-            }
-            if !model.working.isEmpty {
-                if isOverview {
-                    VStack(alignment: .leading, spacing: 4) {
-                        sectionTitle("In progress").padding(.bottom, 8)
-                        ForEach(model.working.prefix(3)) { item in
-                            workingOverviewRow(item)
-                                .id("board-work-\(item.id)")
-                                .matchedGeometryEffect(id: handoffID(item), in: handoff)
-                                .transition(.opacity)
-                        }
-                    }
-                    .padding(.top, model.needsYou.isEmpty ? 0 : 16)
-                    .id("board-work")
-                } else {
-                    ForEach(model.working.prefix(3)) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            workingChip(item)
-                                .matchedGeometryEffect(id: handoffID(item), in: handoff)
-                            if let taskID = item.taskId { LiveWorkPreview(taskID: taskID) }
-                        }.transition(.opacity)
+                    VStack(alignment: .leading, spacing: AppSpacing.md) {
+                        decision(item).id("board-decision-\(item.id)")
+                        if let taskID = item.taskId { LiveWorkPreview(taskID: taskID, hidesWhenEmpty: true) }
                     }
                 }
             }
-            let outcomes = model.finished.filter { !ThreadBoardModel.isEchoOfThread($0, asked: askedInThread) }.suffix(3)
-            if !outcomes.isEmpty {
-                if isOverview { sectionTitle("Recent outcomes").padding(.top, 8).id("board-outcomes") }
-                ForEach(outcomes) { item in
-                    Group {
-                        if isOverview { outcomeOverviewRow(item) }
-                        else {
-                            FinishedCard(item: item, onOpen: { id in openWorkflow = OpenWorkflow(id: id) }, onSeen: { model.markFinishedSeen(item) })
-                        }
-                    }.transition(.opacity)
-                }
+            if sections.contains(.work) {
+                ForEach(model.working.prefix(3)) { item in work(item).id("board-work-\(item.id)") }
             }
-            if !model.board.changed.isEmpty {
-                if isOverview { sectionTitle("Updates").padding(.top, 8).id("board-updates") }
-                ForEach(model.board.changed.prefix(3)) { item in
-                    updateRow(item)
-                }
+            if sections.contains(.noticed), !noticed.isEmpty { noticedList }
+            if sections.contains(.watching), let watches = model.home?.watches, !watches.isEmpty {
+                watchingList(watches)
             }
-            if isOverview && model.hasLoaded && !model.refreshFailed && !model.hasUnavailableSources && model.isEmpty {
-                HStack(spacing: 14) {
-                    AppIcon("check", size: 22).foregroundStyle(Color.appMuted)
-                    Text("No work waiting")
-                        .font(.appBody(17, weight: .medium)).foregroundStyle(Color.appInk)
-                }
-                .padding(.vertical, 12)
+            if model.refreshFailed && !model.isEmpty {
+                Text("Couldn't refresh. Showing what was saved.")
+                    .font(.role(.footnote)).foregroundStyle(Color.appMuted)
             }
             if let message = model.errorMessage {
-                Text(message)
-                    .font(.appBody(13))
-                    .foregroundStyle(Color.appMuted)
+                Text(message).font(.role(.footnote)).foregroundStyle(Color.appMuted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -396,40 +364,147 @@ struct ThreadBoardCards: View {
         }
     }
 
-    private func updateRow(_ item: BoardItem) -> some View {
-        Group {
-            if let workflowID = item.workflowId {
-                Button { openWorkflow = OpenWorkflow(id: workflowID) } label: { updateContent(item) }
-                    .buttonStyle(.plain)
-            } else {
-                updateContent(item)
-            }
-        }
+    private func groupLabel(_ text: String) -> some View {
+        Text(text).font(.role(.footnote, weight: .semibold)).foregroundStyle(Color.appMuted)
+            .accessibilityAddTraits(.isHeader)
     }
 
-    private func updateContent(_ item: BoardItem) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            AppIcon("wheel-activity", size: 22).foregroundStyle(Color.appMuted)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(item.title).font(.appBody(17, weight: .medium)).foregroundStyle(Color.appInk)
-                if let detail = item.detail, !detail.isEmpty {
-                    Text(detail).font(.appBody(14)).foregroundStyle(Color.appMuted)
-                }
-                if let date = item.date {
-                    Text(date.formatted(date: .abbreviated, time: .shortened))
-                        .font(.appBody(12)).foregroundStyle(Color.appMuted)
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if item.workflowId != nil { AppIcon("chevron-right", size: 13).foregroundStyle(Color.appMuted) }
+    // MARK: Device: a sentence with a status dot
+
+    private func deviceSentence(_ device: HomeModel.Device) -> some View {
+        let seen = device.lastSeenAt.flatMap(DisplayTimestampParser.date(from:))
+        let text = seen.map { "\(device.name) is offline. Last seen \(Self.when($0))." }
+            ?? "\(device.name) hasn't connected yet."
+        return HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+            StatusDot(color: Color.appMuted.opacity(0.45))
+            Text(text).font(.role(.body)).foregroundStyle(Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(.sectionTitle).foregroundStyle(Color.appInk)
-            .accessibilityAddTraits(.isHeader)
+    /// Short enough for the time column: 14:05 today, otherwise the day.
+    static func column(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+            : date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    static func when(_ date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return time }
+        if calendar.isDateInYesterday(date) { return "yesterday \(time)" }
+        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
+    // MARK: Approval: a receipt
+
+    @ViewBuilder
+    private func decision(_ item: BoardItem) -> some View {
+        if model.submittingDecisions.contains(item.id) {
+            decisionStatus(item, sending: true)
+        } else if model.acknowledged[item.id] != nil {
+            decisionStatus(item, sending: false)
+        } else {
+            receipt(item)
+        }
+    }
+
+    private func decisionStatus(_ item: BoardItem, sending: Bool) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.md) {
+                ProgressView().tint(Color.appAccent)
+                Text(sending ? "Sending your answer" : "Waiting for confirmation")
+                    .font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+            }
+            Text(acknowledgedLine(item)).font(.role(.callout)).foregroundStyle(Color.appMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            if !sending && (model.refreshFailed || model.decisionReadbackErrors.contains(item.id)) {
+                Text("Answer sent. Status unavailable.").font(.role(.callout)).foregroundStyle(Color.appMuted)
+                Button("Check status") { Task { await model.refresh() } }
+                    .font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appAccent)
+                    .frame(minHeight: 44)
+            }
+        }
+        .padding(.top, AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Color.appInk.frame(height: 1.5) }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func acknowledgedLine(_ item: BoardItem) -> String {
+        let facts = ApprovalFacts(detail: item.detail)
+        guard let amount = facts.amount else { return title(for: item) }
+        return "\(amount) · \(title(for: item))"
+    }
+
+    private func receipt(_ item: BoardItem) -> some View {
+        let facts = ApprovalFacts(detail: item.detail == title(for: item) ? nil : item.detail)
+        return VStack(alignment: .leading, spacing: AppSpacing.md) {
+            if let amount = facts.amount {
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                    Text(amount)
+                        .font(.system(size: large ? 34 : 44, weight: .bold)).tracking(-1.2).monospacedDigit()
+                        .foregroundStyle(Color.appInk).minimumScaleFactor(0.6).lineLimit(1)
+                    if let qualifier = facts.qualifier {
+                        Text(qualifier.lowercased() == "up to" ? "at most" : qualifier.lowercased())
+                            .font(.role(.callout, weight: .medium)).foregroundStyle(Color.appMuted)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Text(title(for: item))
+                .font(.role(.title))
+                .foregroundStyle(Color.appInk)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                if let digits = facts.card { receiptLine("Card", "ending \(digits)") }
+                ForEach(facts.others, id: \.self) { line in
+                    let pair = Self.keyValue(line)
+                    receiptLine(pair.key, pair.value)
+                }
+            }
+            if let error = model.decisionErrors[item.id] {
+                Text(error).font(.role(.callout)).foregroundStyle(Color.appDanger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let workflowID = item.workflowId {
+                pill("Review", primary: true) { openWorkflow = OpenWorkflow(id: workflowID) }
+                    .disabled(model.refreshFailed)
+                    .opacity(model.refreshFailed ? 0.45 : 1)
+            } else {
+                actions(for: item)
+            }
+        }
+        .padding(.top, AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Color.appInk.frame(height: 1.5) }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "Arrives tomorrow" reads as a fact with a name; anything else stays one line.
+    private static func keyValue(_ line: String) -> (key: String?, value: String) {
+        let keys = ["Arrives", "Delivery", "Due", "From", "To", "Starts", "Ends", "Renews"]
+        for key in keys where line.hasPrefix(key + " ") {
+            return (key, String(line.dropFirst(key.count + 1)))
+        }
+        return (nil, line)
+    }
+
+    private func receiptLine(_ label: String?, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            if let label {
+                Text(label).font(.role(.callout)).foregroundStyle(Color.appMuted)
+                Spacer(minLength: AppSpacing.md)
+                Text(value).font(.role(.callout)).foregroundStyle(Color.appInk).multilineTextAlignment(.trailing)
+            } else {
+                Text(value).font(.role(.callout)).foregroundStyle(Color.appInk)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.vertical, AppSpacing.sm + 2)
+        .overlay(alignment: .top) { Color.appHairline.frame(height: 0.5) }
     }
 
     private func title(for item: BoardItem) -> String {
@@ -442,217 +517,9 @@ struct ThreadBoardCards: View {
     }
 
     @ViewBuilder
-    private func needsYouCard(_ item: BoardItem) -> some View {
-        if submittingState(item) {
-            decisionStatusCard(item, sending: true)
-        } else if model.acknowledged[item.id] != nil {
-            decisionStatusCard(item, sending: false)
-        } else if isOverview {
-            decisionFocalCard(item)
-        } else {
-            openCard(item)
-        }
-    }
-
-    private func submittingState(_ item: BoardItem) -> Bool {
-        model.submittingDecisions.contains(item.id)
-    }
-
-    private func decisionStatusCard(_ item: BoardItem, sending: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                ProgressView().tint(Color.appAccent)
-                    .frame(width: 32, height: 32)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(sending ? "Sending answer" : "Updating")
-                        .font(.appBody(16, weight: .medium))
-                        .foregroundStyle(Color.appInk)
-                    Text(acknowledgedLine(item))
-                        .font(.appBody(13))
-                        .foregroundStyle(Color.appMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            if !sending && (model.refreshFailed || model.decisionReadbackErrors.contains(item.id)) {
-                Text("Answer sent. Status unavailable.")
-                    .font(.appBody(14)).foregroundStyle(Color.appMuted)
-                Button("Check status") { Task { await model.refresh() } }
-                    .font(.appBody(15, weight: .semibold)).foregroundStyle(Color.appAccent)
-                    .frame(minHeight: 44)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(radius: 22)
-        .accessibilityElement(children: .contain)
-    }
-
-    private func acknowledgedLine(_ item: BoardItem) -> String {
-        let facts = ApprovalFacts(detail: item.detail)
-        guard let amount = facts.amount else { return title(for: item) }
-        return "\(amount) · \(title(for: item))"
-    }
-
-    private func decisionFocalCard(_ item: BoardItem) -> some View {
-        let facts = ApprovalFacts(detail: item.detail == title(for: item) ? nil : item.detail)
-        return VStack(alignment: .leading, spacing: 12) {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 16))
-            layout {
-                Text(title(for: item))
-                    .font(typeSize.isAccessibilitySize ? .headline : .title2.weight(.bold))
-                    .tracking(typeSize.isAccessibilitySize ? 0 : -0.45)
-                    .foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let amount = facts.amount {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let qualifier = facts.qualifier {
-                            Text(qualifier).font(.appBody(13, weight: .medium))
-                        }
-                        Text(amount).font(typeSize.isAccessibilitySize ? .headline : .title3.weight(.bold)).monospacedDigit()
-                    }
-                    .foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            if facts.card != nil || !facts.others.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let digits = facts.card {
-                        HStack(spacing: 8) {
-                            AppIcon("card", size: 17).accessibilityHidden(true)
-                            Text("•••• \(digits)").font(.appBody(15, weight: .medium))
-                        }
-                    }
-                    ForEach(facts.others, id: \.self) { line in
-                        Text(line).font(.appBody(14))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .foregroundStyle(Color.appInk)
-                .accessibilityElement(children: .combine)
-            }
-            if let error = model.decisionErrors[item.id] {
-                Text(error).font(.appBody(14)).foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let workflowID = item.workflowId {
-                Button { openWorkflow = OpenWorkflow(id: workflowID) } label: {
-                    HStack(spacing: 12) {
-                        Text("Review decision").font(.appBody(16, weight: .semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                        AppIcon("arrow-up-right", size: 18)
-                    }
-                    .foregroundStyle(Color.appOnAccent)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .frame(minHeight: 48, alignment: .leading)
-                    .background(Color.appAccent, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.appScale)
-                .disabled(model.refreshFailed)
-                .opacity(model.refreshFailed ? 0.45 : 1)
-            } else {
-                actions(for: item)
-            }
-        }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func openCard(_ item: BoardItem) -> some View {
-        let facts = ApprovalFacts(detail: item.detail == title(for: item) ? nil : item.detail)
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !isOverview {
-                        Text("Needs your approval")
-                            .font(.appBody(12, weight: .semibold))
-                            .foregroundStyle(Color.appNeedsYou)
-                    }
-                    Text(title(for: item))
-                        .font(typeSize.isAccessibilitySize ? .headline : .appRounded(24, weight: .semibold, relativeTo: .title2))
-                        .foregroundStyle(Color.appInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                if !typeSize.isAccessibilitySize { AdamActivityMark(state: .waiting, size: 40) }
-            }
-            if !facts.isEmpty { receipt(facts) }
-            if let error = model.decisionErrors[item.id] {
-                Text(error).font(.appBody(14)).foregroundStyle(Color.appDanger)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if isOverview, let workflowID = item.workflowId {
-                pill("Review decision", primary: true) { openWorkflow = OpenWorkflow(id: workflowID) }
-                    .disabled(model.refreshFailed)
-                    .opacity(model.refreshFailed ? 0.45 : 1)
-            } else {
-                actions(for: item)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .accessibilityElement(children: .contain)
-    }
-
-    /// What would be spent and from what: the amount large, the rest quietly beneath.
-    private func receipt(_ facts: ApprovalFacts) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let amount = facts.amount {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let qualifier = facts.qualifier {
-                        Text(qualifier)
-                            .font(.appBody(12, weight: .medium))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                    Text(amount)
-                        .font(.appRounded(34, weight: .semibold, relativeTo: .title1))
-                        .foregroundStyle(Color.appInk)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(1)
-                }
-            }
-            if facts.card != nil || !facts.others.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let digits = facts.card {
-                        HStack(spacing: 8) {
-                            AppIcon("card", size: 15).foregroundStyle(Color.appMuted)
-                            Text("•••• \(digits)")
-                                .font(.appBody(14, weight: .medium))
-                                .foregroundStyle(Color.appInk)
-                        }
-                    }
-                    ForEach(facts.others, id: \.self) { line in
-                        Text(line)
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) { Color.appHairline.frame(height: 0.5) }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func openCardLabel(_ item: BoardItem) -> String {
-        var parts = ["Needs your approval", title(for: item)]
-        if let detail = item.detail, !detail.isEmpty, detail != title(for: item) { parts.append(detail) }
-        return parts.joined(separator: ". ")
-    }
-
-    @ViewBuilder
     private func actions(for item: BoardItem) -> some View {
         if item.hasDecision, let options = item.options, !options.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 ForEach(options) { option in
                     pill(option.label, primary: option.id == options.first?.id) {
                         Task { await model.decide(item, approved: true, choice: option.id) }
@@ -660,9 +527,9 @@ struct ThreadBoardCards: View {
                 }
             }
         } else if item.hasDecision {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(spacing: 8))
+            let layout = large
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: AppSpacing.sm))
+                : AnyLayout(HStackLayout(spacing: AppSpacing.sm))
             layout {
                 pill("Approve", primary: true) { Task { await model.decide(item, approved: true) } }
                 pill("Decline", primary: false) { Task { await model.decide(item, approved: false) } }
@@ -678,338 +545,241 @@ struct ThreadBoardCards: View {
             action()
         } label: {
             Text(label)
-                .font(.appBody(15, weight: .medium))
+                .font(.role(.callout, weight: .semibold))
                 .foregroundColor(primary ? Color.appOnAction : Color.appInk)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 18)
-                .padding(.vertical, typeSize.isAccessibilitySize ? 12 : 0)
-                .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, minHeight: 44, alignment: typeSize.isAccessibilitySize ? .leading : .center)
-                .background {
-                    if typeSize.isAccessibilitySize {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(primary ? Color.appAction : Color.appInk.opacity(0.10))
-                    } else {
-                        Capsule().fill(primary ? Color.appAction : Color.appInk.opacity(0.10))
-                    }
-                }
+                .padding(.horizontal, AppSpacing.xl)
+                .padding(.vertical, large ? AppSpacing.md : 0)
+                .frame(maxWidth: large ? .infinity : nil, minHeight: 48, alignment: large ? .leading : .center)
+                .background(
+                    RoundedRectangle(cornerRadius: large ? AppRadius.control : 24, style: .continuous)
+                        .fill(primary ? Color.appAction : Color.appInk.opacity(0.08))
+                )
         }
         .buttonStyle(.appScale(0.97))
     }
 
-    private func workingOverviewRow(_ item: BoardItem) -> some View {
-        let isStopping = model.stopping.contains(item.id)
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-        return VStack(alignment: .leading, spacing: 4) {
-        layout {
-            Group {
-                if let workflowID = item.workflowId {
-                    Button { openWorkflow = OpenWorkflow(id: workflowID) } label: { workingOverviewContent(item) }
-                        .buttonStyle(.plain)
-                } else {
-                    workingOverviewContent(item)
-                }
-            }
-            if item.taskId != nil {
-                Button { Task { await model.stop(item) } } label: {
-                    Text(isStopping ? "Stopping…" : "Stop")
-                        .font(.appBody(14, weight: .medium)).foregroundStyle(Color.appInk)
-                        .padding(.horizontal, 14).frame(minHeight: 44)
-                        .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.appScale)
-                .disabled(isStopping)
-                .accessibilityLabel("Stop \(title(for: item))")
-            }
+    // MARK: Work: a ladder of steps with Stop
+
+    @ViewBuilder
+    private func work(_ item: BoardItem) -> some View {
+        if item.taskId == nil && item.progress == nil {
+            sentenceRow(item)
+        } else {
+            ladder(item)
         }
-            if let taskID = item.taskId {
-                LiveWorkPreview(taskID: taskID, compact: true)
-                    .padding(.leading, typeSize.isAccessibilitySize ? 0 : 44)
-            }
-        }
-        .padding(.vertical, 10)
-        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
     }
 
-    private func outcomeOverviewRow(_ item: BoardItem) -> some View {
-        let failed = item.failed == true
-        return Group {
-            if let workflowID = item.workflowId {
-                Button { openWorkflow = OpenWorkflow(id: workflowID) } label: {
-                    outcomeOverviewContent(item, failed: failed)
-                }.buttonStyle(.appScale)
-            } else {
-                outcomeOverviewContent(item, failed: failed)
-            }
-        }
-        .id("board-outcome-\(item.id)")
-        .onAppear { model.markFinishedSeen(item) }
-    }
-
-    private func outcomeOverviewContent(_ item: BoardItem, failed: Bool) -> some View {
-        Group {
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        outcomeMark(failed: failed)
-                        Spacer(minLength: 0)
-                        if item.workflowId != nil {
-                            AppIcon("arrow-up-right", size: 16).foregroundStyle(Color.appMuted)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    outcomeFacts(item, failed: failed)
-                }
-            } else {
-                HStack(alignment: .top, spacing: 14) {
-                    outcomeMark(failed: failed)
-                    outcomeFacts(item, failed: failed)
-                    if item.workflowId != nil {
-                        AppIcon("arrow-up-right", size: 16).foregroundStyle(Color.appMuted)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-
-    private func outcomeMark(failed: Bool) -> some View {
-        AppIcon(failed ? "alert-circle" : "check", size: 20)
-            .foregroundStyle(failed ? Color.appDanger : Color.appSuccess)
-            .frame(width: 32, height: 32)
-            .background((failed ? Color.appDanger : Color.appSuccess).opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 10))
-            .accessibilityHidden(true)
-    }
-
-    private func outcomeFacts(_ item: BoardItem, failed: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-                if failed {
-                    Text("Couldn't finish").font(.appBody(14, weight: .semibold)).foregroundStyle(Color.appDanger)
-                }
-                Text(item.title).font(.appBody(17, weight: .semibold)).foregroundStyle(Color.appInk)
+    private func sentenceRow(_ item: BoardItem) -> some View {
+        Button {
+            if let id = item.workflowId { openWorkflow = OpenWorkflow(id: id) }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                StatusDot(color: Color.appWorking, hollow: true)
+                Text(title(for: item)).font(.role(.body)).foregroundStyle(Color.appInk)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                if let detail = item.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(detail).font(.appBody(20, weight: .medium)).foregroundStyle(Color.appInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let date = item.date {
-                    Text(date.formatted(date: .abbreviated, time: .shortened))
-                        .font(.appBody(12)).foregroundStyle(Color.appMuted)
-                }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func workingOverviewContent(_ item: BoardItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            AppIcon(item.waitingExternal == true ? "clock" : "wheel-activity", size: 22)
-                .foregroundStyle(Color.appWorking)
-                .frame(width: 32, height: 44)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title(for: item)).font(.appBody(17, weight: .medium)).foregroundStyle(Color.appInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let detail = item.detail, !detail.isEmpty, detail != title(for: item) {
-                    Text(detail).font(.appBody(14)).foregroundStyle(Color.appMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let progress = item.progress, progress.total > 0 {
-                    ProgressView(value: progress.fraction).tint(Color.appWorking)
-                        .accessibilityLabel("Progress")
-                }
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            if item.workflowId != nil {
-                AppIcon("chevron-right", size: 12).foregroundStyle(Color.appMuted).frame(minHeight: 44)
-            }
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .disabled(item.workflowId == nil)
+        .accessibilityLabel("Working on \(title(for: item))")
     }
 
-    private func workingChip(_ item: BoardItem) -> some View {
+    private func ladder(_ item: BoardItem) -> some View {
         let isStopping = model.stopping.contains(item.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                AdamActivityMark(state: .working, size: 26)
-                Text(title(for: item))
-                    .font(.appBody(14, weight: .medium))
-                    .foregroundStyle(Color.appWorking)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                Button {
+                    if let id = item.workflowId { openWorkflow = OpenWorkflow(id: id) }
+                } label: {
+                    Text(title(for: item)).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(item.workflowId == nil)
                 if item.taskId != nil {
-                    Button {
-                        Task { await model.stop(item) }
-                    } label: {
+                    Button { Task { await model.stop(item) } } label: {
                         Text(isStopping ? "Stopping…" : "Stop")
-                            .font(.appBody(13, weight: .semibold))
-                            .foregroundStyle(Color.appInk)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 44)
-                            .background(Capsule().fill(Color.appBackground))
+                            .font(.role(.callout, weight: .semibold)).foregroundStyle(Color.appInk)
+                            .padding(.horizontal, AppSpacing.lg).frame(minHeight: 44)
+                            .overlay(Capsule().stroke(Color.appCardOutline, lineWidth: 1))
                     }
                     .buttonStyle(.appScale(0.95))
                     .disabled(isStopping)
                     .accessibilityLabel("Stop \(title(for: item))")
                 }
             }
-            if let progress = item.progress {
-                ProgressView(value: progress.fraction)
-                    .tint(Color.appWorking)
+            if let progress = item.progress, progress.total > 0 {
+                StepLadder(done: progress.done, total: progress.total)
+            } else if item.waitingExternal == true {
+                Text("Waiting for a reply").font(.role(.callout)).foregroundStyle(Color.appMuted)
+            }
+            if let detail = item.detail, !detail.isEmpty, detail != title(for: item) {
+                Text(detail).font(.role(.callout)).foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let taskID = item.taskId { LiveWorkPreview(taskID: taskID, hidesWhenEmpty: true) }
+        }
+    }
+
+    // MARK: Noticed: timed lines
+
+    private struct Line: Identifiable {
+        let id: String
+        let date: Date?
+        let title: String
+        let detail: String?
+        var failed = false
+        var workflowID: String?
+        var finished: BoardItem?
+    }
+
+    /// Everything that happened, newest first: what devices sensed, finished work, updates and sounds heard.
+    private var noticed: [Line] {
+        let outcomes = model.finished.filter { !ThreadBoardModel.isEchoOfThread($0, asked: askedInThread) }.suffix(4)
+        var lines = outcomes.map {
+            Line(id: "o-\($0.id)", date: $0.date, title: $0.title, detail: $0.detail,
+                 failed: $0.failed == true, workflowID: $0.workflowId, finished: $0)
+        }
+        lines += model.board.changed.prefix(4).map {
+            Line(id: "c-\($0.id)", date: $0.date, title: $0.title, detail: $0.detail, workflowID: $0.workflowId)
+        }
+        lines += (model.home?.observations ?? []).prefix(6).map {
+            Line(id: "s-\($0.id)", date: DisplayTimestampParser.date(from: $0.at), title: $0.summary, detail: $0.room)
+        }
+        if SoundClipStore.shared.isEnabled {
+            let dayAgo = Date().addingTimeInterval(-86_400)
+            lines += SoundClipStore.shared.clips.filter { $0.heardAt > dayAgo }.prefix(3).map {
+                Line(id: "h-\($0.id)", date: $0.heardAt, title: "Heard \($0.title.lowercased())", detail: nil)
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, item.taskId != nil ? 4 : 14)
-        .padding(.vertical, item.taskId != nil ? 2 : 10)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.appWorking.opacity(0.10)))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let workflowId = item.workflowId { openWorkflow = OpenWorkflow(id: workflowId) }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Working on \(title(for: item))")
-        .accessibilityAddTraits(item.workflowId != nil ? .isButton : [])
-    }
-}
-
-/// A finished piece of work: the tick draws, then the detail settles in under the title.
-private struct FinishedCard: View {
-    let item: BoardItem
-    var onOpen: (String) -> Void
-    var onSeen: () -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var detailShown = false
-
-    private var failed: Bool { item.failed == true }
-    private var detail: String? {
-        guard let text = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
-        return text
+        return Array(lines.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }.prefix(6))
     }
 
-    var body: some View {
-        Button {
-            if let id = item.workflowId { onOpen(id) }
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                if failed {
-                    Circle().fill(Color.appDanger.opacity(0.14))
-                        .frame(width: 32, height: 32)
-                        .overlay(Text("!").font(.appBody(16, weight: .semibold)).foregroundStyle(Color.appDanger))
-                } else {
-                    CheckBadge()
+    private var noticedList: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            groupLabel("Noticed").id("board-noticed")
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                ForEach(noticed) { line in
+                    timedLine(line)
+                        .id("board-outcome-\(line.id)")
+                        .onAppear { if let item = line.finished { model.markFinishedSeen(item) } }
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(failed ? "Couldn't finish" : item.title)
-                        .font(.appBody(16, weight: .medium))
-                        .foregroundStyle(Color.appInk)
+            }
+        }
+    }
+
+    private func timedLine(_ line: Line) -> some View {
+        let layout = large
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: AppSpacing.xs))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: AppSpacing.md))
+        let content = layout {
+            Text(line.date.map(Self.column) ?? "")
+                .font(.reading(.footnote)).foregroundStyle(Color.appMuted)
+                .lineLimit(1)
+                .frame(width: large ? nil : 48, alignment: .leading)
+                .accessibilityLabel(line.date.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
+            VStack(alignment: .leading, spacing: 2) {
+                if line.failed {
+                    Text("Couldn't finish").font(.role(.footnote, weight: .semibold)).foregroundStyle(Color.appDanger)
+                }
+                Text(line.title).font(.role(.callout, weight: .medium)).foregroundStyle(Color.appInk)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail = line.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
+                    Text(detail).font(.role(.callout)).foregroundStyle(Color.appMuted)
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    if failed {
-                        Text(item.title)
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                    }
-                    if let detail {
-                        Text(detail)
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .opacity(detailShown ? 1 : 0)
-                            .offset(y: detailShown || reduceMotion ? 0 : 6)
-                    }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .settingsSurface(radius: 22)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.appScale(0.99))
-        .disabled(item.workflowId == nil)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .onAppear {
-            onSeen()
-            if failed { HapticManager.shared.warning() } else { HapticManager.shared.success() }
-            if reduceMotion { detailShown = true; return }
-            withAnimation(.appSpring.delay(0.4)) { detailShown = true }
+        return Group {
+            if let id = line.workflowID {
+                Button { openWorkflow = OpenWorkflow(id: id) } label: { content }.buttonStyle(.plain)
+            } else {
+                content
+            }
+        }
+    }
+
+    // MARK: Watching: one sentence per standing request
+
+    private func watchingList(_ watches: [HomeModel.Watch]) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            groupLabel("Watching")
+            ForEach(watches.prefix(4)) { watch in
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                    StatusDot(color: Color.appWorking, hollow: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(watch.title).font(.role(.callout, weight: .medium)).foregroundStyle(Color.appInk)
+                        if let detail = watch.detail, !detail.isEmpty {
+                            Text(detail).font(.role(.callout)).foregroundStyle(Color.appMuted)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
         }
     }
 }
 
-/// A green circle whose tick draws itself.
-private struct CheckBadge: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var drawn = false
+/// A status dot that sits on the text's x-height at every type size.
+struct StatusDot: View {
+    var color: Color
+    var hollow = false
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 8
+    @ScaledMetric(relativeTo: .body) private var lift: CGFloat = 0.5
 
     var body: some View {
-        ZStack {
-            Circle().fill(Color.appDone)
-            CheckShape()
-                .trim(from: 0, to: drawn ? 1 : 0)
-                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
-                .padding(9)
+        Group {
+            if hollow { Circle().strokeBorder(color, lineWidth: 1.5) } else { Circle().fill(color) }
         }
-        .frame(width: 32, height: 32)
-        .scaleEffect(drawn || reduceMotion ? 1 : 0.6)
-        .onAppear {
-            if reduceMotion { drawn = true; return }
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.7)) { drawn = true }
-        }
+        .frame(width: size, height: size)
+        .alignmentGuide(.firstTextBaseline) { $0[.bottom] + lift }
         .accessibilityHidden(true)
     }
 }
 
-private struct CheckShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY + rect.height * 0.05))
-        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY - rect.height * 0.12))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.12))
-        return path
+/// How far a piece of work has got: one segment per step, finished ones filled.
+private struct StepLadder: View {
+    let done: Int
+    let total: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if total <= 12 {
+                HStack(spacing: 4) {
+                    ForEach(0..<total, id: \.self) { index in
+                        Capsule()
+                            .fill(index < done ? Color.appWorking
+                                  : index == done ? Color.appWorking.opacity(0.35) : Color.appHairline)
+                            .frame(height: 5)
+                    }
+                }
+                .accessibilityHidden(true)
+            } else {
+                ProgressView(value: Double(done), total: Double(total)).tint(Color.appWorking)
+                    .accessibilityHidden(true)
+            }
+            Text(done >= total ? "All \(total) steps done" : "\(done) of \(total) steps done")
+                .font(.role(.footnote)).foregroundStyle(Color.appMuted)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
 private struct OpenWorkflow: Identifiable {
     let id: String
-}
-
-/// Lays out children left to right and wraps onto new lines.
-private struct FlowRow: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrange(width: bounds.width, subviews: subviews)
-        for (index, origin) in result.origins.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
-        }
-    }
-
-    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
-        var origins: [CGPoint] = []
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            origins.append(CGPoint(x: x, y: y))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-            maxX = max(maxX, x - spacing)
-        }
-        return (CGSize(width: maxX, height: y + rowHeight), origins)
-    }
 }

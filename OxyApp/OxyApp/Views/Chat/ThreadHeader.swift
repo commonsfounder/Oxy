@@ -9,6 +9,8 @@ struct ThreadHeader: View {
     var isDemo = false
     var isComposing = false
     var showsStatus = true
+    /// Set while in the conversation: the way back to Home.
+    var onHome: (() -> Void)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
     @Binding var wheelOpen: Bool
     @Binding var hubCenter: CGPoint
@@ -18,21 +20,31 @@ struct ThreadHeader: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+            if let onHome {
+                Button {
+                    HapticManager.shared.impact(.light)
+                    onHome()
+                } label: {
+                    HStack(spacing: AppSpacing.xs) {
+                        AppIcon("chevron-left", size: 15)
+                        Text("Home").font(.role(.body, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.appAccent)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.appScale)
+                .accessibilityLabel("Back to Home")
+            } else {
                 titleLayout {
-                    Text(isDemo && typeSize.isAccessibilitySize ? "Sample" : (isIncognito ? "Private" : "Adam"))
-                        .font(typeSize.isAccessibilitySize ? .headline : .appRounded(26, relativeTo: .title2))
+                    Text(isIncognito ? "Private" : "Adam")
+                        .font(.role(.body, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                    if isDemo && !typeSize.isAccessibilitySize {
+                    if isDemo {
                         Text("Sample")
-                            .font(.caption2.weight(.medium))
+                            .font(.role(.caption, weight: .medium))
                             .foregroundStyle(Color.appMuted)
                     }
-                }
-                if showsStatus, let status = visibleStatus {
-                    Text(status)
-                        .font(.appBody(13, weight: .medium))
-                        .foregroundStyle(activity == .waiting ? Color.appNeedsYou : Color.appMuted)
                 }
             }
             Spacer(minLength: 8)
@@ -43,7 +55,7 @@ struct ThreadHeader: View {
                 HStack(spacing: 8) {
                     if !typeSize.isAccessibilitySize {
                         Text("Menu")
-                            .font(.appBody(13, weight: .medium))
+                            .font(.role(.footnote, weight: .medium))
                             .foregroundStyle(Color.appMuted)
                     }
                     WheelHub(progress: 0, incognito: isIncognito)
@@ -60,6 +72,7 @@ struct ThreadHeader: View {
             .accessibilityLabel("Menu")
             .accessibilityValue(isIncognito ? "Private mode on" : (visibleStatus ?? ""))
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .padding(.horizontal, AppSpacing.chatMargin)
         .padding(.vertical, 8)
         .frame(minHeight: 60)

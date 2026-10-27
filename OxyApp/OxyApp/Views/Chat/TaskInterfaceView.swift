@@ -124,46 +124,103 @@ struct TaskInterfaceView: View {
         }
     }
 
+    /// Options to pick from: plain rows with hairlines, so they read as choices and not as more facts.
     private func choices(_ block: TaskInterfaceBlock) -> some View {
-        VStack(spacing: 8) {
-            ForEach(Array((block.items ?? []).enumerated()), id: \.offset) { _, item in
+        let items = block.items ?? []
+        return VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 Button { send(item.ask ?? "") } label: {
                     HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(item.title ?? "").font(.rowTitle).foregroundStyle(Color.appInk)
                             if let detail = item.detail { Text(detail).font(.rowSecondary).foregroundStyle(Color.appMuted) }
                         }
                         Spacer(minLength: 8)
-                        AppIcon("arrow-up-right", size: 14).foregroundStyle(Color.appMuted)
+                        AppIcon("chevron-right", size: 13).foregroundStyle(Color.appMuted)
                     }
-                    .padding(14).frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                    .settingsSurface(radius: 16)
+                    .padding(.vertical, 12).frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .top) { if index > 0 { Color.appHairline.frame(height: 0.5) } }
                 }
-                .buttonStyle(.appScale(0.98))
+                .buttonStyle(.appScale(0.99))
                 .accessibilityIdentifier("interface-choice-\(block.id)")
             }
         }
+        .overlay(alignment: .top) { Color.appHairline.frame(height: 0.5) }
+        .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
     }
 
+    /// Options side by side with their facts on shared rows, so a number can be read straight across.
+    @ViewBuilder
     private func comparison(_ block: TaskInterfaceBlock) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(Array((block.items ?? []).enumerated()), id: \.offset) { _, item in
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(item.title ?? "").font(.sectionTitle).foregroundStyle(Color.appInk)
-                        ForEach(Array((item.facts ?? []).enumerated()), id: \.offset) { _, fact in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(fact.label).font(.fineprint).foregroundStyle(Color.appMuted)
-                                Text(fact.value).font(.bodyText).foregroundStyle(Color.appInk)
-                            }
-                        }
-                        if let ask = item.ask { requestButton("Choose \(item.title ?? "option")", request: ask) }
+        let items = block.items ?? []
+        let labels = items.first?.facts?.map(\.label) ?? []
+        let aligned = (2...3).contains(items.count) && !labels.isEmpty
+            && items.allSatisfy { ($0.facts?.map(\.label) ?? []) == labels }
+        if aligned {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    Color.clear.frame(width: 78, height: 1)
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        Text(item.title ?? "").font(.rowTitle).foregroundStyle(Color.appInk)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(16).frame(width: 238, alignment: .leading).settingsSurface(radius: 16)
+                }
+                .padding(.bottom, 10)
+                ForEach(Array(labels.enumerated()), id: \.offset) { row, label in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(label).font(.rowSecondary).foregroundStyle(Color.appMuted)
+                            .frame(width: 78, alignment: .leading)
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            Text(item.facts?[row].value ?? "").font(.bodyText).foregroundStyle(Color.appInk)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 11)
+                    .overlay(alignment: .top) { Color.appHairline.frame(height: 0.5) }
+                    .accessibilityElement(children: .combine)
+                }
+                if items.contains(where: { $0.ask != nil }) {
+                    HStack(spacing: 12) {
+                        Color.clear.frame(width: 78, height: 1)
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            if let ask = item.ask {
+                                Button { send(ask) } label: {
+                                    Text("Choose").font(.control).foregroundStyle(Color.appOnAction)
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .background(Capsule().fill(Color.appAction))
+                                }
+                                .buttonStyle(.appScale(0.97))
+                                .accessibilityLabel("Choose \(item.title ?? "option")")
+                            } else { Color.clear.frame(maxWidth: .infinity) }
+                        }
+                    }
+                    .padding(.top, 10)
                 }
             }
+            .accessibilityIdentifier("interface-comparison")
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(item.title ?? "").font(.sectionTitle).foregroundStyle(Color.appInk)
+                            ForEach(Array((item.facts ?? []).enumerated()), id: \.offset) { _, fact in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(fact.label).font(.fineprint).foregroundStyle(Color.appMuted)
+                                    Text(fact.value).font(.bodyText).foregroundStyle(Color.appInk)
+                                }
+                            }
+                            if let ask = item.ask { requestButton("Choose \(item.title ?? "option")", request: ask) }
+                        }
+                        .padding(16).frame(width: 238, alignment: .leading).settingsSurface(radius: 16)
+                    }
+                }
+            }
+            .accessibilityIdentifier("interface-comparison")
         }
-        .accessibilityIdentifier("interface-comparison")
     }
 
     private func table(_ block: TaskInterfaceBlock) -> some View {

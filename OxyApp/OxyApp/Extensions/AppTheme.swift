@@ -30,14 +30,15 @@ extension Color {
         light: Color.black.opacity(0.07)
     )
 
+    /// Warm near-black ink (17:1 on the canvas) and a warm grey for secondary text (5.3:1).
     static let appInk = appDynamicColor(
-        dark: Color(red: 0.961, green: 0.961, blue: 0.961),   // #F5F5F5
-        light: Color(red: 0.067, green: 0.067, blue: 0.067)   // #111111
+        dark: Color(red: 0.949, green: 0.945, blue: 0.925),   // #F2F1EC
+        light: Color(red: 0.086, green: 0.086, blue: 0.075)   // #161613
     )
 
     static let appMuted = appDynamicColor(
-        dark: Color(red: 0.68, green: 0.71, blue: 0.69),
-        light: Color(red: 0.420, green: 0.420, blue: 0.420)
+        dark: Color(red: 0.66, green: 0.68, blue: 0.66),      // #A8ADA9
+        light: Color(red: 0.420, green: 0.404, blue: 0.373)   // #6B675F
     )
 
     static let appAccent = appDynamicColor(
@@ -137,11 +138,61 @@ enum AppSpacing {
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
     static let xl: CGFloat = 24
+    static let xxl: CGFloat = 32
+    static let xxxl: CGFloat = 48
     static let chatMargin: CGFloat = 24
     static let margin: CGFloat = 24
 }
 
+/// The type scale: six roles, every one following Dynamic Type.
+enum TypeRole {
+    /// 34: the one sentence that leads a screen.
+    case display
+    /// 22: the question on a receipt, a page section.
+    case title
+    /// 17: reading text and device sentences.
+    case body
+    /// 15: rows, details, controls.
+    case callout
+    /// 13: group labels and secondary facts.
+    case footnote
+    /// 12: fine print.
+    case caption
+
+    var size: CGFloat {
+        switch self {
+        case .display: return 34
+        case .title: return 22
+        case .body: return 17
+        case .callout: return 15
+        case .footnote: return 13
+        case .caption: return 12
+        }
+    }
+
+    var style: Font.TextStyle {
+        switch self {
+        case .display: return .largeTitle
+        case .title: return .title2
+        case .body: return .body
+        case .callout: return .subheadline
+        case .footnote: return .footnote
+        case .caption: return .caption
+        }
+    }
+}
+
 extension Font {
+    static func role(_ role: TypeRole, weight: Font.Weight? = nil) -> Font {
+        let fallback: Font.Weight = role == .display ? .bold : (role == .title ? .semibold : .regular)
+        return .system(role.style, design: .default).weight(weight ?? fallback)
+    }
+
+    /// Times, readings and counts: monospaced like an instrument, so they line up and read as measured.
+    static func reading(_ role: TypeRole, weight: Font.Weight = .regular) -> Font {
+        .system(role.style, design: .monospaced).weight(weight)
+    }
+
     static var screenTitle: Font { .appBody(20, weight: .semibold) }
     /// The Preferences type scale, used by every screen: group label, row title, secondary line, body, control, fine print.
     static var sectionLabel: Font { .appBody(13, weight: .medium) }
@@ -182,6 +233,9 @@ enum AppRadius {
     static let xl: CGFloat = 24
     static let bubble: CGFloat = 18
     static let card: CGFloat = 18
+    /// The small scale new work uses: controls 12, surfaces 20, and the capsule for pills.
+    static let control: CGFloat = 12
+    static let surface: CGFloat = 20
 }
 
 // MARK: - Motion

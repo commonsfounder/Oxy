@@ -105,7 +105,7 @@ struct YourHomeView: View {
             GeometryReader { geometry in
               ScrollViewReader { proxy in
               ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 30) {
+                VStack(alignment: .leading, spacing: AppSpacing.xxl) {
                     if failed {
                         ErrorBanner(message: "Couldn't load your home.", onRetry: { Task { await load() } })
                             .disabled(isRefreshing)
@@ -182,49 +182,33 @@ struct YourHomeView: View {
     // MARK: Not connected
 
     private var notConnected: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            AppIcon("wheel-home", size: 32)
-                .foregroundStyle(Color.appMuted)
-                .frame(width: 76, height: 76)
-                .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 22))
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Your home isn't connected yet")
-                    .font(.sectionTitle)
-                    .foregroundStyle(Color.appInk)
-                Text("Add a device to see its status here.")
-                    .font(.appBody(15))
-                    .foregroundStyle(Color.appMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            Text("Nothing is paired yet.")
+                .font(.role(.title)).foregroundStyle(Color.appInk)
+            Text("Pair a display and its status shows here.")
+                .font(.role(.body)).foregroundStyle(Color.appMuted)
+                .fixedSize(horizontal: false, vertical: true)
             Button {
                 HapticManager.shared.impact(.medium)
-                showsDeviceSetup = true
+                showsDisplaySetup = true
             } label: {
-                Text("Set up Adam")
-                    .font(.appBody(16, weight: .semibold))
+                Text("Add a display")
+                    .font(.role(.callout, weight: .semibold))
                     .foregroundStyle(Color.appOnAction)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, AppSpacing.xl)
                     .frame(minHeight: 48)
                     .background(Capsule().fill(Color.appAction))
             }
             .buttonStyle(.appScale(0.97))
-
-
         }
     }
 
     // MARK: Connected
 
     private var stateHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(failed ? "Status unavailable" : subline)
-                .font(.title2.weight(.bold)).foregroundStyle(Color.appInk)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(failed ? "Last loaded: \(subline)" : headline)
-                .font(.appBody(15)).foregroundStyle(Color.appMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
+        Text(failed ? "Status unavailable. Last loaded: \(subline)." : "\(subline). \(headline).")
+            .font(.role(.body)).foregroundStyle(Color.appMuted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var headline: String {
@@ -236,70 +220,57 @@ struct YourHomeView: View {
     }
 
     private var subline: String {
-        let noun = home.devices.count == 1 ? "device" : "devices"
+        let noun = home.devices.count == 1 ? "display" : "displays"
         return "\(onlineCount) of \(home.devices.count) \(noun) online"
     }
 
     private var devicesSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            layout {
-                Text("Devices").font(.sectionTitle).foregroundStyle(Color.appInk)
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                Text("Devices").font(.role(.title)).foregroundStyle(Color.appInk)
                     .accessibilityAddTraits(.isHeader)
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                Spacer(minLength: 0)
                 Button { showsDisplaySetup = true } label: {
-                    HStack(spacing: 6) {
-                        AppIcon("plus", size: 14).accessibilityHidden(true)
-                        Text("Add display").font(.appBody(14, weight: .medium))
-                    }
-                    .foregroundStyle(Color.appAccent).frame(minHeight: 44)
+                    Text("Add").font(.role(.callout, weight: .semibold))
+                        .foregroundStyle(Color.appAccent).frame(minWidth: 44, minHeight: 44)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Add a display")
             }
-            if typeSize.isAccessibilitySize {
-                VStack(spacing: 14) { ForEach(home.devices) { deviceTile($0).id("home-device-\($0.id)") } }
-            } else {
-                LazyVGrid(columns: home.devices.count == 1
-                          ? [GridItem(.flexible(), alignment: .top)]
-                          : [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)], spacing: 12) {
-                    ForEach(home.devices) { deviceTile($0).id("home-device-\($0.id)") }
+            VStack(spacing: 0) {
+                ForEach(home.devices) { device in
+                    deviceRow(device).id("home-device-\(device.id)")
                 }
             }
         }
     }
 
-    private func deviceTile(_ device: HomeModel.Device) -> some View {
+    /// A device is an object with a name and a state: one row each, the state in words beside a dot.
+    private func deviceRow(_ device: HomeModel.Device) -> some View {
         Button { selectedDevice = device } label: {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    AppIcon(device.kind == "browser" ? "display" : "cube", size: 32)
-                        .foregroundStyle(Color.appInk).accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                    AppIcon("arrow-up-right", size: 15).foregroundStyle(Color.appInk).accessibilityHidden(true)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(device.room ?? "Not assigned to a room")
-                        .font(.appBody(13)).foregroundStyle(Color.appInk)
-                    Text(device.name).font(.appBody(17, weight: .semibold)).foregroundStyle(Color.appInk)
-                    Text(failed ? (device.online ? "Last reported online" : "Last reported offline") : (device.online ? "Online" : "Offline"))
-                        .font(.appBody(14, weight: .medium)).foregroundStyle(Color.appInk)
-                    if !device.online {
-                        Text(lastSeen(device)).font(.appBody(13)).foregroundStyle(Color.appInk)
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                StatusDot(color: device.online && !failed ? Color.appSuccess : Color.appMuted.opacity(0.45))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name).font(.role(.body, weight: .semibold)).foregroundStyle(Color.appInk)
+                    Text(deviceState(device)).font(.role(.callout)).foregroundStyle(Color.appMuted)
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                AppIcon("chevron-right", size: 13).foregroundStyle(Color.appMuted).accessibilityHidden(true)
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 180, alignment: .topLeading)
-            .background(device.online && !failed ? Color.appHomeSurface : Color.appSurface2,
-                        in: RoundedRectangle(cornerRadius: 16))
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.vertical, AppSpacing.md)
+            .frame(minHeight: 60)
+            .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.appScale)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+    }
+
+    private func deviceState(_ device: HomeModel.Device) -> String {
+        let state = failed ? (device.online ? "Last reported online" : "Last reported offline")
+            : (device.online ? "Online" : "Offline · \(lastSeen(device))")
+        return [device.room, state].compactMap { $0 }.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -307,8 +278,7 @@ struct YourHomeView: View {
         if !home.watches.isEmpty {
             section("Watching") {
                 ForEach(Array(home.watches.enumerated()), id: \.element.id) { index, watch in
-                    if index > 0 { divider }
-                    row(title: watch.title, detail: watch.detail ?? nextCheck(watch), dot: .appWorking) {
+                                        row(title: watch.title, detail: watch.detail ?? nextCheck(watch), dot: .appWorking) {
                         AskAdam.draft("What's happening with: \(watch.title)?")
                     }
                 }
@@ -407,23 +377,19 @@ struct YourHomeView: View {
     /// Only what a device sensed or Adam inferred. Empty until hardware reports something.
     @ViewBuilder
     private var noticedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Noticed recently")
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            sectionTitle("Noticed")
             if home.observations.isEmpty {
-                Text("No recent device reports")
-                    .font(.appBody(15)).foregroundStyle(Color.appMuted)
-                    .padding(.horizontal, 4)
+                Text("Nothing reported by your devices yet.")
+                    .font(.role(.body)).foregroundStyle(Color.appMuted)
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(home.observations.enumerated()), id: \.element.id) { index, item in
-                        if index > 0 { divider }
-                        row(title: item.summary, detail: observationDetail(item), dot: nil) {
+                                                row(title: item.summary, detail: observationDetail(item), dot: nil) {
                             AskAdam.draft("Tell me more about: \(item.summary)")
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .settingsSurface()
             }
         }
     }
@@ -443,17 +409,15 @@ struct YourHomeView: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.sectionLabel)
-            .foregroundStyle(Color.appMuted)
-            .padding(.horizontal, 4)
+            .font(.role(.title))
+            .foregroundStyle(Color.appInk)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
             sectionTitle(title)
             VStack(spacing: 0) { content() }
-                .padding(.horizontal, 16)
-                .settingsSurface()
         }
     }
 
@@ -463,16 +427,16 @@ struct YourHomeView: View {
 
     private func row(title: String, detail: String?, dot: Color?, chevron: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                if let dot { Circle().fill(dot).frame(width: 8, height: 8) }
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                if let dot { StatusDot(color: dot, hollow: true) }
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.appBody(15, weight: .medium))
+                        .font(.role(.body, weight: .medium))
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
                     if let detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.appBody(13))
+                            .font(.role(.callout))
                             .foregroundStyle(Color.appMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -481,8 +445,9 @@ struct YourHomeView: View {
                 AppIcon(chevron ? "chevron-right" : "arrow-up-right", size: 12)
                     .foregroundStyle(Color.appMuted)
             }
-            .padding(.vertical, 14)
-            .frame(minHeight: 44)
+            .padding(.vertical, AppSpacing.md)
+            .frame(minHeight: 52)
+            .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.99))
@@ -492,7 +457,7 @@ struct YourHomeView: View {
 
     private func lastSeen(_ device: HomeModel.Device) -> String {
         guard let raw = device.lastSeenAt, let date = Date.oxyParse(raw) else { return "Last seen unknown" }
-        return "Last heard from \(date.formatted(.relative(presentation: .named)))"
+        return "last seen \(date.formatted(.relative(presentation: .named)))"
     }
 
     private func nextCheck(_ watch: HomeModel.Watch) -> String? {
@@ -523,8 +488,8 @@ struct YourHomeView: View {
         }
         #if DEBUG
         let env = ProcessInfo.processInfo.environment
-        if PreviewData.isIsolated, ["connected", "offline", "unknown-seen", "cached-failure", "urgent-failure"].contains(env["OXY_DEBUG_HOME"] ?? "") {
-            home = env["OXY_DEBUG_HOME"] == "offline" ? Self.sampleOffline : Self.sampleConnected
+        if PreviewData.isIsolated, ["connected", "online", "offline", "unknown-seen", "cached-failure", "urgent-failure"].contains(env["OXY_DEBUG_HOME"] ?? "") {
+            home = env["OXY_DEBUG_HOME"] == "offline" ? Self.sampleOffline : (env["OXY_DEBUG_HOME"] == "online" ? Self.sampleOnline : Self.sampleConnected)
             if env["OXY_DEBUG_HOME"] == "unknown-seen" {
                 let device = HomeModel.Device(id: "unknown-seen", name: "Unassigned display", kind: "browser", room: nil, online: false, lastSeenAt: nil)
                 home = HomeModel(presence: .init(state: "unknown", homeConfigured: false), devices: [device], rooms: [], unassignedDevices: [device], watches: [], observations: [])
@@ -552,7 +517,7 @@ struct YourHomeView: View {
     }
 
     #if DEBUG
-    private static let sampleConnected: HomeModel = {
+    static let sampleConnected: HomeModel = {
         let seen = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30))
         let living = HomeModel.Device(id: "d1", name: "Living room display", kind: "browser", room: "Living room", online: true, lastSeenAt: seen)
         let kitchen = HomeModel.Device(id: "d2", name: "Kitchen display", kind: "browser", room: "Kitchen", online: false,
@@ -566,7 +531,17 @@ struct YourHomeView: View {
             observations: []
         )
     }()
-    private static var sampleOffline: HomeModel {
+    static var sampleOnline: HomeModel {
+        let seen = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30))
+        let devices = sampleConnected.devices.map { device in
+            HomeModel.Device(id: device.id, name: device.name, kind: device.kind, room: device.room,
+                online: true, lastSeenAt: seen, capabilities: device.capabilities)
+        }
+        return HomeModel(presence: .init(state: "unknown", homeConfigured: false), devices: devices,
+            rooms: sampleConnected.rooms.map { room in .init(name: room.name, devices: devices.filter { $0.room == room.name }, active: true) },
+            unassignedDevices: [], watches: sampleConnected.watches, observations: [])
+    }
+    static var sampleOffline: HomeModel {
         let seen = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
         let devices = sampleConnected.devices.map { device in
             HomeModel.Device(id: device.id, name: device.name, kind: device.kind, room: device.room,

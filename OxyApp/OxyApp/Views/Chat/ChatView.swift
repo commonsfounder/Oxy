@@ -18,12 +18,18 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var boardModel = ThreadBoardModel()
     @State private var wheelOpen = false
+    /// The app opens on Home; the conversation is a place you go to and come back from.
     @State private var overviewSelected = true
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private var showsOverview: Bool {
-        overviewSelected && !isIncognito && initialSession == nil && !startFresh && !viewModel.isViewingHistorySnapshot
+    private var showsOverview: Bool { overviewSelected }
+    private var overview: some View {
+        HomeNowView(model: boardModel, onSetUp: { onMenuChoice?(.home, hubCenter) })
+            .padding(.horizontal, AppSpacing.chatMargin)
+            .padding(.top, AppSpacing.sm)
+            .padding(.bottom, AppSpacing.xl)
+            .id("overview")
     }
     @State private var expandedExchanges = Set<UUID>()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -236,9 +242,9 @@ struct ChatView: View {
                 .padding(.bottom, 16)
             }
         }
-        .background(isOpen ? Color.appSurface : Color.clear)
         .overlay(alignment: .top) {
             Rectangle().fill(Color.appHairline).frame(height: 0.5)
+                .padding(.horizontal, AppSpacing.chatMargin)
         }
         .id("exchange-\(exchange.id)")
     }
@@ -292,98 +298,19 @@ struct ChatView: View {
         .ignoresSafeArea()
     }
 
-    private var overview: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if horizontalSizeClass == .regular && !typeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: 32) {
-                    ThreadBoardCards(model: boardModel, askedInThread: askedInThread, isOverview: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    overviewContext
-                        .frame(width: 280)
-                }
-            } else {
-                ThreadBoardCards(model: boardModel, askedInThread: askedInThread, isOverview: true)
-                overviewContext
-            }
-        }
-        .padding(.horizontal, AppSpacing.chatMargin)
-        .padding(.top, 0).padding(.bottom, 24)
-        .id("overview")
-    }
-
-    private var overviewContext: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("For today").font(.sectionTitle).foregroundStyle(Color.appInk)
-                    .accessibilityAddTraits(.isHeader)
-                TodaySuggestionsContent(limit: 1, onMore: { onMenuChoice?(.today, hubCenter) })
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                    contextDestination(.memory, icon: "wheel-memory")
-                    contextDestination(.home, icon: "wheel-home")
-            }
-            .id("overview-context")
-        }
-    }
-
-    private func contextDestination(_ choice: ThreadMenuChoice, icon: String) -> some View {
-        Button { onMenuChoice?(choice, hubCenter) } label: {
-            HStack(spacing: 16) {
-                AppIcon(icon, size: 22).foregroundStyle(Color.appAccent)
-                    .accessibilityHidden(true)
-                    Text(choice.title).font(.appBody(17, weight: .semibold))
-                        .foregroundStyle(Color.appInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    AppIcon("chevron-right", size: 14).foregroundStyle(Color.appMuted)
-            }
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .contentShape(Rectangle())
-            .overlay(alignment: .bottom) { Color.appHairline.frame(height: 0.5) }
-        }
-        .buttonStyle(.appScale)
-    }
-
+    /// Nothing is happening: one plain line, no shortcuts (the menu holds every destination).
     private var quietConversation: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        Group {
             if viewModel.isLoadingHistory {
-                ProgressView("Loading conversation")
-                    .font(.appBody(15))
-                    .foregroundStyle(Color.appMuted)
+                ProgressView().tint(Color.appMuted)
             } else if viewModel.networkError == nil {
-                Text("No messages yet")
-                    .font(.appRounded(28, weight: .semibold, relativeTo: .title1))
-                    .foregroundStyle(Color.appInk)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        quietDestination(.today, icon: "wheel-today")
-                        quietDestination(.memory, icon: "wheel-memory")
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        quietDestination(.today, icon: "wheel-today")
-                        quietDestination(.memory, icon: "wheel-memory")
-                    }
-                }
+                Text("No conversation yet.")
+                    .font(.role(.body)).foregroundStyle(Color.appMuted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppSpacing.chatMargin)
-        .padding(.vertical, 32)
-    }
-
-    private func quietDestination(_ choice: ThreadMenuChoice, icon: String) -> some View {
-        Button { onMenuChoice?(choice, hubCenter) } label: {
-            HStack(spacing: 10) {
-                AppIcon(icon, size: 20)
-                Text(choice.title).font(.appBody(16, weight: .medium))
-            }
-            .foregroundStyle(Color.appAccent)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 52)
-            .background(Color.appSurface2, in: RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(.appScale)
+        .padding(.vertical, AppSpacing.xl)
     }
 
     private func loadOlderMessages(_ proxy: ScrollViewProxy) {
@@ -441,6 +368,11 @@ struct ChatView: View {
         return last.role == .assistant && !last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// The first decision stays pinned above the thread, except in incognito and at the largest text sizes.
+    private var pinsDecision: Bool {
+        !isIncognito && !typeSize.isAccessibilitySize && !boardModel.needsYou.isEmpty
+    }
+
     private var isReviewPreview: Bool {
         #if DEBUG
         PreviewData.isIsolated && ProcessInfo.processInfo.environment["OXY_DEBUG_REVIEW"] != nil
@@ -469,21 +401,13 @@ struct ChatView: View {
                                 isDemo: appState.isDemoSession,
                                 isComposing: isInputFocused,
                                 showsStatus: !showsOverview,
+                                onHome: showsOverview ? nil : { withAnimation(.appStandard) { overviewSelected = true } },
                                 wheelOpen: $wheelOpen,
                                 hubCenter: $hubCenter
                             )
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
                             }
-                if !isIncognito && initialSession == nil && !startFresh && !viewModel.isViewingHistorySnapshot {
-                    Picker("Adam workspace", selection: $overviewSelected) {
-                        Text("Now").tag(true)
-                        Text("Conversation").tag(false)
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, AppSpacing.chatMargin)
-                    .padding(.top, 4).padding(.bottom, 4)
-                }
                 // Offline banner
                 if isOffline {
                     HStack(spacing: 8) {
@@ -573,7 +497,7 @@ struct ChatView: View {
                                     exchangeSection(exchange)
                                 }
 
-                                ThreadBoardCards(model: boardModel, askedInThread: askedInThread)
+                                ThreadBoardCards(model: boardModel, askedInThread: askedInThread, sections: [.decisions, .work])
                                     .padding(.horizontal, AppSpacing.chatMargin)
                                     .padding(.top, boardModel.isEmpty ? 0 : 14)
 
@@ -695,7 +619,7 @@ struct ChatView: View {
                             } else if focus == "work-bottom", let last = boardModel.working.last {
                                 proxy.scrollTo("board-work-\(last.id)", anchor: .bottom)
                             } else if focus == "outcomes" {
-                                proxy.scrollTo("board-outcomes", anchor: .top)
+                                proxy.scrollTo("board-noticed", anchor: .top)
                             } else if focus == "outcome-bottom", let last = boardModel.finished.last {
                                 proxy.scrollTo("board-outcome-\(last.id)", anchor: .bottom)
                             }
@@ -1035,6 +959,7 @@ struct ChatView: View {
                 viewModel.prepareUIPreview(messages: messages, flow: flow)
                 overviewSelected = ProcessInfo.processInfo.environment["OXY_DEBUG_OVERVIEW"] == "1"
             }
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_MESSAGES"] == "1" { overviewSelected = false }
             if let draft = ProcessInfo.processInfo.environment["OXY_DEBUG_DRAFT"] {
                 viewModel.inputText = draft
                 isInputFocused = true
